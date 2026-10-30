@@ -54,12 +54,17 @@ jobs:
         run: PHP_BIN="$(command -v php)" node --test tests/php.test.mjs
 
   http-test:
-    name: Test HTTP na jednorazowej bazie
+    name: Test HTTP na jednorazowej bazie (${{ matrix.db }})
     if: ${{ !inputs.rollback && !inputs.server_check }}
     runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        # mariadb:10.6 matches the production server (web9.aftermarket.hosting).
+        db: ['mysql:8.0', 'mariadb:10.6']
     services:
       mysql:
-        image: mysql:8.0
+        image: ${{ matrix.db }}
         env:
           MYSQL_ROOT_PASSWORD: ci-root
           MYSQL_DATABASE: matdraw_test
