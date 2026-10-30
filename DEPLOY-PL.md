@@ -5,16 +5,20 @@ Workflow `.github/workflows/deploy.yml` przy każdym pushu uruchamia testy i bud
 ## Układ na serwerze
 
 ```
-/home/meducase/domains/matdraw.mdcse.com/
-├── public_html  -> matdraw/current/public   (link tworzony przez pierwszy deploy)
-├── private_html -> ./public_html            (HTTPS w DirectAdmin)
-└── matdraw/
-    ├── shared/config.php                    (sekrety; tworzysz raz, deploy go nie nadpisuje)
-    ├── releases/<data>-<commit>/{public,backend}
-    └── current  -> releases/<aktywne wydanie>
+/home/meducase/
+├── matdraw/                                  (poza katalogami domen i poza WWW)
+│   ├── shared/config.php                     (sekrety; tworzysz raz, deploy go nie nadpisuje)
+│   ├── releases/<data>-<commit>/{public,backend}
+│   ├── current  -> releases/<aktywne wydanie>
+│   ├── backups/                              (to, co było w domenie przed pierwszym deployem)
+│   └── bin/deploy-remote.sh                  (kopia skryptu do ręcznego rollbacku)
+└── domains/matdraw.mdcse.com/
+    ├── public_html/                          (prawdziwy katalog: kopia public/ aktywnego wydania)
+    ├── backend/                              (kopia backend/ aktywnego wydania, poza WWW)
+    └── private_html -> ./public_html         (tylko jeśli DirectAdmin go tworzy; HTTPS)
 ```
 
-`backend/` jest poza katalogiem WWW. Każde wydanie dostaje link `backend/config.php -> shared/config.php`. Pierwszy deploy przenosi istniejące `public_html` (i `private_html`, jeśli to osobny katalog) do kopii `*.before-matdraw-<data>`; nic nie jest kasowane. Zostaje 5 ostatnich wydań.
+Deploy kopiuje aktywne wydanie do prawdziwych katalogów `public_html` i `backend` (podmiana dwoma szybkimi zmianami nazw, więc strona nigdy nie jest w połowie skopiowana). `backend/` leży obok `public_html`, poza dostępem WWW, i ma link `config.php -> ~/matdraw/shared/config.php`. Wydania i konfiguracja są w `~/matdraw`, więc nawet usunięcie i ponowne dodanie domeny w DirectAdmin ich nie kasuje. Pierwszy deploy przenosi dotychczasową zawartość domeny do `~/matdraw/backups`; nic nie jest kasowane. Zostaje 5 ostatnich wydań.
 
 ## Konfiguracja jednorazowa
 
@@ -52,14 +56,14 @@ Opcjonalnie w tym samym ekranie włącz **Required reviewers** — wtedy każdy 
 
 ### 3. Baza MySQL
 
-DirectAdmin → **Account Manager → MySQL Management → Create new database**. DirectAdmin doda prefiks konta, np. baza i użytkownik `meducase_matdraw`. Zapisz wygenerowane hasło. W phpMyAdmin sprawdź wersję serwera: wymagany MySQL 8.0+ albo MariaDB 10.11+.
+DirectAdmin → **Account Manager → MySQL Management → Create new database**. DirectAdmin doda prefiks konta, np. baza i użytkownik `meducase_matdraw`. Zapisz wygenerowane hasło. W phpMyAdmin sprawdź wersję serwera: dokumentacja aplikacji wymaga MySQL 8.0+ albo MariaDB 10.11+. Na web9 jest MariaDB 10.6.28; pełny test HTTP aplikacji przechodzi na tej wersji w CI (zadanie „Test HTTP na jednorazowej bazie (mariadb:10.6)”).
 
 ### 4. Plik konfiguracyjny
 
 Przez SSH:
 
 ```bash
-mkdir -p ~/domains/matdraw.mdcse.com/matdraw/shared && chmod 700 ~/domains/matdraw.mdcse.com/matdraw/shared
+mkdir -p ~/matdraw/shared && chmod 700 ~/matdraw/shared
 ```
 
 ```bash
@@ -67,7 +71,7 @@ php -r 'echo bin2hex(random_bytes(32)), PHP_EOL;'
 ```
 
 ```bash
-nano ~/domains/matdraw.mdcse.com/matdraw/shared/config.php
+nano ~/matdraw/shared/config.php
 ```
 
 Wklej i uzupełnij (nazwę bazy, użytkownika, hasło z kroku 3 i `app_key` z polecenia powyżej):
@@ -89,7 +93,7 @@ return [
 ```
 
 ```bash
-chmod 600 ~/domains/matdraw.mdcse.com/matdraw/shared/config.php
+chmod 600 ~/matdraw/shared/config.php
 ```
 
 `app_key` nie zmieniaj między wydaniami. Rób kopię tego pliku poza serwerem w bezpiecznym miejscu.
@@ -103,7 +107,7 @@ W DirectAdmin ustaw dla `matdraw.mdcse.com` PHP 8.3 (wybór wersji PHP domeny) i
 Scal zmiany do `main` lub uruchom **Actions → Test, build i deploy → Run workflow** na `main`. Przy pierwszym wdrożeniu baza jest pusta, więc workflow kończy się ostrzeżeniem „uruchom instalator”. Wtedy przez SSH, jednorazowo:
 
 ```bash
-cd ~/domains/matdraw.mdcse.com/matdraw/current
+cd ~/domains/matdraw.mdcse.com
 read -rsp 'Hasło Administratora (12–72 bajty): ' MATDRAW_ADMIN_PASSWORD; echo
 printf '%s\n' "$MATDRAW_ADMIN_PASSWORD" | /usr/local/php83/bin/php backend/bin/install.php --email=TWOJ@EMAIL --club='Nazwa klubu' --password-stdin
 unset MATDRAW_ADMIN_PASSWORD
@@ -120,15 +124,25 @@ Domyślne `php` w SSH na web9 to 8.1, dlatego instalator uruchamiamy przez `/usr
 ## Powrót do poprzedniego wydania
 
 - Automatycznie: gdy po przełączeniu strona lub API nie odpowiada poprawnie.
-- Ręcznie w GitHub: **Run workflow** na `main` z zaznaczonym „Przywróć poprzednie wydanie” — przełącza `current` na wydanie sprzed ostatniego deployu, bez testów i budowania.
-- Ręcznie przez SSH (wybór dowolnego z zachowanych wydań):
+- Ręcznie w GitHub: **Run workflow** na `main` z zaznaczonym „Przywróć poprzednie wydanie” — przywraca na stronę wydanie sprzed ostatniego deployu, bez testów i budowania.
+- Ręcznie przez SSH, poprzednie wydanie:
 
 ```bash
-ls ~/domains/matdraw.mdcse.com/matdraw/releases
+bash ~/matdraw/bin/deploy-remote.sh rollback ~/matdraw ~/domains/matdraw.mdcse.com/public_html
+```
+
+- Ręcznie przez SSH, dowolne z zachowanych wydań:
+
+```bash
+ls ~/matdraw/releases
 ```
 
 ```bash
-cd ~/domains/matdraw.mdcse.com/matdraw && ln -sfn "$PWD/releases/NAZWA_WYDANIA" current.tmp && mv -Tf current.tmp current
+bash ~/matdraw/bin/deploy-remote.sh activate ~/matdraw ~/domains/matdraw.mdcse.com/public_html NAZWA_WYDANIA
 ```
 
 Rollback zmienia tylko kod. Baza danych pozostaje bez zmian, więc przed aktualizacją, która zmienia schemat, wykonaj kopię bazy (phpMyAdmin → Eksport lub DirectAdmin → MySQL Management → Backup).
+
+## Znany problem: HTTP 429 na nowej domenie (30.10.2026)
+
+Po dodaniu `matdraw.mdcse.com` w DirectAdmin każde żądanie HTTP/HTTPS dostawało `429 Too Many Requests` (Server: LiteSpeed, pusta treść), od pierwszego wpisu w logu i z różnych adresów IP. Dotyczyło to także oryginalnej strony domyślnej DirectAdmin (w logu odpowiedź 183 B zamiast 447 B, czyli bez nagłówków z `.htaccess` MatDraw) oraz świeżo dodanej `test429.mdcse.com`, a nie dotyczyło `mdcse.com`. Blokada jest po stronie serwera AfterMarket, niezależna od plików aplikacji; przez nią DirectAdmin nie mógł też wystawić certyfikatu Let's Encrypt. Wymaga interwencji obsługi AfterMarket; po zdjęciu blokady DirectAdmin sam wystawi certyfikat (ACME jest włączone).

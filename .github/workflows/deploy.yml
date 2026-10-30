@@ -24,7 +24,8 @@ concurrency:
 
 env:
   APP_URL: https://matdraw.mdcse.com
-  DEPLOY_BASE: /home/meducase/domains/matdraw.mdcse.com/matdraw
+  # Releases and config live outside the DirectAdmin domain directory; the active release is copied into DOCROOT.
+  DEPLOY_BASE: /home/meducase/matdraw
   DOCROOT: /home/meducase/domains/matdraw.mdcse.com/public_html
 
 jobs:
@@ -166,7 +167,8 @@ jobs:
         run: |
           RELEASE="$(date -u +%Y%m%d%H%M%S)-${GITHUB_SHA::7}"
           echo "RELEASE=$RELEASE" >> "$GITHUB_ENV"
-          tar -C build/matdraw-php -czf - public backend | ssh deploy "mkdir -p '$DEPLOY_BASE/releases/$RELEASE' && tar -xzf - -C '$DEPLOY_BASE/releases/$RELEASE'"
+          tar -C build/matdraw-php -czf - public backend | ssh deploy "umask 022 && mkdir -p '$DEPLOY_BASE/releases/$RELEASE' && tar -xzf - -C '$DEPLOY_BASE/releases/$RELEASE'"
+          ssh deploy "umask 022 && mkdir -p '$DEPLOY_BASE/bin' && cat > '$DEPLOY_BASE/bin/deploy-remote.sh'" < scripts/deploy-remote.sh
       - name: Przełączenie na nowe wydanie
         run: ssh deploy bash -s -- activate "$DEPLOY_BASE" "$DOCROOT" "$RELEASE" < scripts/deploy-remote.sh
       - name: Weryfikacja HTTPS, strony i API
