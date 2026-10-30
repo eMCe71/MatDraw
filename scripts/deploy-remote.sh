@@ -4,11 +4,13 @@
 # <base>/shared/config.php (created once by the owner), <docroot> -> <base>/current/public.
 set -euo pipefail
 cmd=$1 base=$2 docroot=$3 release=${4:-}
-private_html="$(dirname "$docroot")/private_html"
+# DirectAdmin serves HTTPS from the private_html twin of the docroot (domain or subdomain).
+private_html=${docroot/\/public_html/\/private_html}
 fail(){ echo "::error::$*" >&2; exit 1; }
 # Atomic symlink replacement (rename over the old link).
 switch(){ ln -sfn "$2" "$1.tmp.$$"; mv -Tf "$1.tmp.$$" "$1"; }
-backup(){ local to="$1.before-matdraw-$(date +%Y%m%d%H%M%S)"; mv "$1" "$to"; echo "Poprzedni katalog $1 przeniesiono do $to"; }
+# Previous docroot contents go to <base>/backups, outside web access.
+backup(){ mkdir -p "$base/backups"; local to="$base/backups/$(basename "$(dirname "$1")")-$(basename "$1").before-matdraw-$(date +%Y%m%d%H%M%S)"; mv "$1" "$to"; echo "Poprzedni katalog $1 przeniesiono do $to"; }
 
 mkdir -p "$base/releases" "$base/shared"
 chmod 700 "$base/shared"
@@ -33,8 +35,8 @@ case $cmd in
    [[ -e $docroot ]] && backup "$docroot"
    ln -s "$base/current/public" "$docroot"
   fi
-  # DirectAdmin serves HTTPS from private_html; it must lead to the same files.
-  if [[ -d $private_html && ! -L $private_html ]]; then backup "$private_html"; ln -s ./public_html "$private_html"; fi
+  # The HTTPS docroot must lead to the same files.
+  if [[ $private_html != "$docroot" && -d $private_html && ! -L $private_html ]]; then backup "$private_html"; ln -s "$docroot" "$private_html"; fi
   if [[ -e $private_html && $(readlink -f "$private_html") != "$(readlink -f "$docroot")" ]]; then fail "$private_html nie wskazuje na $docroot."; fi
   echo "Aktywne wydanie: $dir"
   ;;
