@@ -5,18 +5,16 @@ Workflow `.github/workflows/deploy.yml` przy każdym pushu uruchamia testy i bud
 ## Układ na serwerze
 
 ```
-/home/meducase/
-├── matdraw/
-│   ├── shared/config.php                    (sekrety; tworzysz raz, deploy go nie nadpisuje)
-│   ├── releases/<data>-<commit>/{public,backend}
-│   ├── current  -> releases/<aktywne wydanie>
-│   └── backups/                             (poprzednia zawartość katalogu subdomeny)
-└── domains/mdcse.com/
-    ├── public_html/matdraw  -> /home/meducase/matdraw/current/public   (link tworzony przez pierwszy deploy)
-    └── private_html/…                       (HTTPS w DirectAdmin; musi prowadzić do tych samych plików)
+/home/meducase/domains/matdraw.mdcse.com/
+├── public_html  -> matdraw/current/public   (link tworzony przez pierwszy deploy)
+├── private_html -> ./public_html            (HTTPS w DirectAdmin)
+└── matdraw/
+    ├── shared/config.php                    (sekrety; tworzysz raz, deploy go nie nadpisuje)
+    ├── releases/<data>-<commit>/{public,backend}
+    └── current  -> releases/<aktywne wydanie>
 ```
 
-`matdraw.mdcse.com` jest **subdomeną** `mdcse.com` w DirectAdmin (Zarządzanie subdomenami). Dodana jako osobna domena dostawała od serwera AfterMarket błąd 429 na każde żądanie. Wydania i konfiguracja leżą poza katalogami domen, więc zmiany domen w panelu ich nie usuwają. `backend/` jest poza katalogiem WWW. Każde wydanie dostaje link `backend/config.php -> shared/config.php`. Pierwszy deploy przenosi dotychczasową zawartość katalogu subdomeny do `~/matdraw/backups`; nic nie jest kasowane. Zostaje 5 ostatnich wydań.
+`backend/` jest poza katalogiem WWW. Każde wydanie dostaje link `backend/config.php -> shared/config.php`. Pierwszy deploy przenosi istniejące `public_html` (i `private_html`, jeśli to osobny katalog) do kopii `*.before-matdraw-<data>`; nic nie jest kasowane. Zostaje 5 ostatnich wydań.
 
 ## Konfiguracja jednorazowa
 
@@ -61,7 +59,7 @@ DirectAdmin → **Account Manager → MySQL Management → Create new database**
 Przez SSH:
 
 ```bash
-mkdir -p ~/matdraw/shared && chmod 700 ~/matdraw/shared
+mkdir -p ~/domains/matdraw.mdcse.com/matdraw/shared && chmod 700 ~/domains/matdraw.mdcse.com/matdraw/shared
 ```
 
 ```bash
@@ -69,7 +67,7 @@ php -r 'echo bin2hex(random_bytes(32)), PHP_EOL;'
 ```
 
 ```bash
-nano ~/matdraw/shared/config.php
+nano ~/domains/matdraw.mdcse.com/matdraw/shared/config.php
 ```
 
 Wklej i uzupełnij (nazwę bazy, użytkownika, hasło z kroku 3 i `app_key` z polecenia powyżej):
@@ -91,21 +89,21 @@ return [
 ```
 
 ```bash
-chmod 600 ~/matdraw/shared/config.php
+chmod 600 ~/domains/matdraw.mdcse.com/matdraw/shared/config.php
 ```
 
 `app_key` nie zmieniaj między wydaniami. Rób kopię tego pliku poza serwerem w bezpiecznym miejscu.
 
 ### 5. PHP dla domeny
 
-W DirectAdmin ustaw dla subdomeny `matdraw` PHP 8.3 (kolumna „Wersja PHP” w Zarządzaniu subdomenami domeny `mdcse.com`) i upewnij się, że włączone są `pdo_mysql` i `mbstring`. Wymuś HTTPS w ustawieniach SSL domeny.
+W DirectAdmin ustaw dla `matdraw.mdcse.com` PHP 8.3 (wybór wersji PHP domeny) i upewnij się, że włączone są `pdo_mysql` i `mbstring`. Wymuś HTTPS w ustawieniach SSL domeny.
 
 ### 6. Pierwszy deploy i Administrator
 
 Scal zmiany do `main` lub uruchom **Actions → Test, build i deploy → Run workflow** na `main`. Przy pierwszym wdrożeniu baza jest pusta, więc workflow kończy się ostrzeżeniem „uruchom instalator”. Wtedy przez SSH, jednorazowo:
 
 ```bash
-cd ~/matdraw/current
+cd ~/domains/matdraw.mdcse.com/matdraw/current
 read -rsp 'Hasło Administratora (12–72 bajty): ' MATDRAW_ADMIN_PASSWORD; echo
 printf '%s\n' "$MATDRAW_ADMIN_PASSWORD" | /usr/local/php83/bin/php backend/bin/install.php --email=TWOJ@EMAIL --club='Nazwa klubu' --password-stdin
 unset MATDRAW_ADMIN_PASSWORD
@@ -126,11 +124,11 @@ Domyślne `php` w SSH na web9 to 8.1, dlatego instalator uruchamiamy przez `/usr
 - Ręcznie przez SSH (wybór dowolnego z zachowanych wydań):
 
 ```bash
-ls ~/matdraw/releases
+ls ~/domains/matdraw.mdcse.com/matdraw/releases
 ```
 
 ```bash
-cd ~/matdraw && ln -sfn "$PWD/releases/NAZWA_WYDANIA" current.tmp && mv -Tf current.tmp current
+cd ~/domains/matdraw.mdcse.com/matdraw && ln -sfn "$PWD/releases/NAZWA_WYDANIA" current.tmp && mv -Tf current.tmp current
 ```
 
 Rollback zmienia tylko kod. Baza danych pozostaje bez zmian, więc przed aktualizacją, która zmienia schemat, wykonaj kopię bazy (phpMyAdmin → Eksport lub DirectAdmin → MySQL Management → Backup).

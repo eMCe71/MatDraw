@@ -24,9 +24,8 @@ concurrency:
 
 env:
   APP_URL: https://matdraw.mdcse.com
-  # matdraw.mdcse.com is a DirectAdmin subdomain of mdcse.com; releases and config live outside the domains.
-  DEPLOY_BASE: /home/meducase/matdraw
-  DOCROOT: /home/meducase/domains/mdcse.com/public_html/matdraw
+  DEPLOY_BASE: /home/meducase/domains/matdraw.mdcse.com/matdraw
+  DOCROOT: /home/meducase/domains/matdraw.mdcse.com/public_html
 
 jobs:
   test:
