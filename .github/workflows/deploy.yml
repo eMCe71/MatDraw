@@ -5,6 +5,11 @@ on:
     branches: ['**']
   pull_request:
   workflow_dispatch:
+    inputs:
+      rollback:
+        description: 'Przywróć poprzednie wydanie (bez testów i builda)'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -13,9 +18,15 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: false
 
+env:
+  APP_URL: https://matdraw.mdcse.com
+  DEPLOY_BASE: /home/meducase/domains/matdraw.mdcse.com/matdraw
+  DOCROOT: /home/meducase/domains/matdraw.mdcse.com/public_html
+
 jobs:
   test:
     name: Testy JS i PHP
+    if: ${{ !inputs.rollback }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -40,6 +51,7 @@ jobs:
 
   http-test:
     name: Test HTTP na jednorazowej bazie
+    if: ${{ !inputs.rollback }}
     runs-on: ubuntu-24.04
     services:
       mysql:
@@ -114,3 +126,77 @@ jobs:
           path: build/matdraw-php
           include-hidden-files: true
           retention-days: 90
+
+  deploy:
+    name: Deploy na produkcję
+    needs: build
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-24.04
+    environment:
+      name: production
+      url: https://matdraw.mdcse.com
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: matdraw-php-${{ github.sha }}
+          path: build/matdraw-php
+      - name: Połączenie SSH
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+        run: bash scripts/deploy-ssh-setup.sh
+      - name: Sprawdzenie serwera
+        run: |
+          ssh deploy bash -s -- check "$DEPLOY_BASE" "$DOCROOT" < scripts/deploy-remote.sh
+          echo "PREVIOUS=$(ssh deploy "readlink '$DEPLOY_BASE/current' || true")" >> "$GITHUB_ENV"
+      - name: Wysłanie wydania
+        run: |
+          RELEASE="$(date -u +%Y%m%d%H%M%S)-${GITHUB_SHA::7}"
+          echo "RELEASE=$RELEASE" >> "$GITHUB_ENV"
+          tar -C build/matdraw-php -czf - public backend | ssh deploy "mkdir -p '$DEPLOY_BASE/releases/$RELEASE' && tar -xzf - -C '$DEPLOY_BASE/releases/$RELEASE'"
+      - name: Przełączenie na nowe wydanie
+        run: ssh deploy bash -s -- activate "$DEPLOY_BASE" "$DOCROOT" "$RELEASE" < scripts/deploy-remote.sh
+      - name: Weryfikacja HTTPS, strony i API
+        id: verify
+        run: |
+          sleep 5
+          curl -fsS --retry 3 --retry-delay 5 "$APP_URL/" | grep -q '<title>MatDraw'
+          curl -fsS "$APP_URL/runtime-config.js" | grep -q "mode:'api'"
+          code=$(curl -sS -o api.json -w '%{http_code}' "$APP_URL/api/index.php?route=session")
+          if [ "$code" = 200 ] && grep -q '"csrf"' api.json; then echo "API odpowiada poprawnie (200)."; exit 0; fi
+          if [ -z "$PREVIOUS" ]; then
+            echo "::warning::Pierwsze wdrożenie: strona działa, API zwraca $code. Uruchom jednorazowo instalator bazy (DEPLOY-PL.md, krok 6) i uruchom workflow ponownie."
+            exit 0
+          fi
+          echo "::error::API zwraca $code: $(cat api.json)"; exit 1
+      - name: Powrót do poprzedniego wydania po nieudanej weryfikacji
+        if: failure() && steps.verify.outcome == 'failure' && env.PREVIOUS != ''
+        run: ssh deploy bash -s -- rollback "$DEPLOY_BASE" "$DOCROOT" < scripts/deploy-remote.sh
+      - name: Usunięcie starych wydań
+        run: ssh deploy bash -s -- cleanup "$DEPLOY_BASE" "$DOCROOT" < scripts/deploy-remote.sh
+
+  rollback:
+    name: Powrót do poprzedniego wydania
+    if: inputs.rollback && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    environment:
+      name: production
+      url: https://matdraw.mdcse.com
+    steps:
+      - uses: actions/checkout@v4
+      - name: Połączenie SSH
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+        run: bash scripts/deploy-ssh-setup.sh
+      - name: Przywrócenie
+        run: ssh deploy bash -s -- rollback "$DEPLOY_BASE" "$DOCROOT" < scripts/deploy-remote.sh
+      - name: Weryfikacja
+        run: curl -fsS "$APP_URL/api/index.php?route=session" | grep -q '"csrf"'
