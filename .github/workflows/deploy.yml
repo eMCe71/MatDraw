@@ -10,6 +10,10 @@ on:
         description: 'Przywróć poprzednie wydanie (bez testów i builda)'
         type: boolean
         default: false
+      server_check:
+        description: 'Tylko sprawdź połączenie SSH i serwer (bez zmian)'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -26,7 +30,7 @@ env:
 jobs:
   test:
     name: Testy JS i PHP
-    if: ${{ !inputs.rollback }}
+    if: ${{ !inputs.rollback && !inputs.server_check }}
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -51,7 +55,7 @@ jobs:
 
   http-test:
     name: Test HTTP na jednorazowej bazie
-    if: ${{ !inputs.rollback }}
+    if: ${{ !inputs.rollback && !inputs.server_check }}
     runs-on: ubuntu-24.04
     services:
       mysql:
@@ -178,6 +182,35 @@ jobs:
         run: ssh deploy bash -s -- rollback "$DEPLOY_BASE" "$DOCROOT" < scripts/deploy-remote.sh
       - name: Usunięcie starych wydań
         run: ssh deploy bash -s -- cleanup "$DEPLOY_BASE" "$DOCROOT" < scripts/deploy-remote.sh
+
+  server-check:
+    name: Sprawdzenie połączenia z serwerem (tylko odczyt)
+    if: inputs.server_check || contains(github.event.head_commit.message, '[server-check]')
+    runs-on: ubuntu-24.04
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+      - name: Połączenie SSH
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+        run: bash scripts/deploy-ssh-setup.sh
+      - name: Stan serwera
+        run: |
+          ssh deploy "DEPLOY_BASE='$DEPLOY_BASE' DOCROOT='$DOCROOT' bash -s" <<'SH'
+          echo "Użytkownik: $(whoami)"
+          echo "PHP CLI: $(php -r 'echo PHP_VERSION;' 2>&1) ($(command -v php))"
+          for p in /usr/local/php8*/bin/php; do [ -x "$p" ] && echo "  $p: $("$p" -r 'echo PHP_VERSION;')"; done
+          echo "Rozszerzenia PHP CLI: $(php -m 2>/dev/null | grep -ixE 'pdo_mysql|mbstring' | tr '\n' ' ')"
+          echo "tar: $(command -v tar || echo BRAK)"
+          echo "Katalog domeny:"; ls -la "$(dirname "$DOCROOT")"
+          for x in "$DOCROOT" "$(dirname "$DOCROOT")/private_html"; do echo "$x: $(stat -c '%F' "$x" 2>/dev/null || echo brak) $(readlink "$x")"; done
+          [ -f "$DEPLOY_BASE/shared/config.php" ] && echo "config.php: jest" || echo "config.php: BRAK (krok 4)"
+          echo "Aktywne wydanie: $(readlink "$DEPLOY_BASE/current" 2>/dev/null || echo brak)"
+          SH
 
   rollback:
     name: Powrót do poprzedniego wydania
