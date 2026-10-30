@@ -1,0 +1,287 @@
+Tekst pomocniczy wyodrębniony z oryginalnego DOCX. Nie zawiera ilustracji ani pełnego formatowania. W razie rozbieżności korzystaj z DOCX.
+
+Zasady wypełniania drabinek:
+Drabinka 16 osobowa dzieli się na dwie sekcje 8 osobowe „a” i „b”.
+Przy ilości zawodników 2-8 wpisujemy ich kolejno jedynie w sekcji „a” na przemian rozpoczynając od linii będącej na samej górze, a następnie od linii będącej na samym dole. Staramy się, by zawodnicy z tego samego klubu nie walczyli w pierwszej walce, o ile to możliwe, ze sobą.
+Przy ilości zawodników 9-16 wpisujemy ich zaczynając od linii będącej na samej górze sekcji „a”, a w następnej kolejności - w linii będącej na samym dole sekcji „b”. Dalej – na samym dole sekcji „a” i następnie na samej górze sekcji ”b”. I tak na przemian, aż do wpisania parami wszystkich zawodników. Staramy się, by zawodnicy z tego samego klubu, o ile to możliwe, nie walczyli w pierwszej walce ze sobą
+Przy ilości zawodników 17 – 32 stosujemy dwie drabinki 16 osobowe, wpisując zawodników jak w punkcie „3”: zaczynając od linii będącej na samej górze sekcji „a” pierwszej drabinki, a w następnej kolejności - w linii będącej na samym dole sekcji „b” drugiej drabinki. I tak aż do wpisania wszystkich zawodników.
+Przy ilości zawodników 33 i więcej musimy zastosować cztery drabinki 16-osobowe, stosując tę samą zasadę jak powyżej.
+Ten sposób rozstawiania zawodników rozłoży mniej więcej równomiernie ilość walk przypadających na każdego zawodnika i automatycznie wyłoni złotego, srebrnego i brązowego medalistę.
+Minimalna ilość zawodników w jednej kategorii - 3 osoby 
+Mistrzowie Polski, Europy jeśli jest taka możliwość przechodzą wolnym losem
+Przykład kolejności wstawiania do drabinki 9 zawodników
+Dane wejściowe:
+- zgłoszenie zawodników od klubu biorącego udział w zawodach – najlepiej na przykład w pliku Excela, takim, żeby program go zasysał i od razu makrami obrabiał
+Dane wyjściowe:
+- drabinki konkurencji drukowane zbiorowo i/lub pojedynczo
+- dla Technik specjalnych i Testów Siły zamiast drabinek lista według wzoru z regulaminu
+Dotychczas używaliśmy prostego systemy zrobionego w Excelu (Wojtek Dolny może go przesłać) ale wymaga dużej uważności, żeby nie robić pomyłek. 
+Kluczowe informacje, jakie powinny być w pliku zgłoszeniowym:
+- nazwa klubu
+- imię i nazwisko zawodnika
+- płeć
+- wiek
+- waga
+- wzrost
+- stopień w TKD: 
+- Dan
+- Cup
+- w jakich konkurencjach startuje - możliwości: 
+układy formalne, 
+walki kalaki 
+walki hogo
+walki semi contact, 
+walki light contact, 
+techniki specjalne, 
+testy siły
+Do pliku zgłoszeniowego powinna być załączona informacja, że:
+- młodzicy (7-9 lat) startują tylko w układach formalnych, walkach soft i technikach specjalnych
+- kadeci (10-12 lat) startują tylko w układach, walkach Hogo i technikach specjalnych
+Juniorzy młodsi (13-15 lat) startują w układach, walkach semi- kontakt i technikach specjalnych
+Juniorzy (16-18 lat) startują w układach, walkach light contact (warunek: mają stopień co najmniej 6 cup – zielony pas), technikach specjalnych i testach siły
+- Seniorzy (19-35 lat) startują w układach, walkach light contact, technikach specjalnych i testach siły
+- Weterani (36+) startują w układach, walkach light contact, technikach specjalnych i testach siły
+Tolerancja wagowa: 200 gramów.
+Drabinki wynikowe: Na wydruku z drabinkami musi być napisana kategoria (Np. Układy Formalne, juniorzy, II Dan) 
+Chodzi też o to, by zawodnicy z danego klubu nie walczyli ze sobą w pierwszej walce (o ile to możliwe). Drabinek będzie multum, ale chodzi oto, by drukowały się tylko te, gdzie są zgłoszeni jacyś zawodnicy:
+KATEGORIE CZARNE PASY (Dan): 
+- Mężczyźni
+-Juniorzy (16-18 lat)
+- układy formalne
+- I dan
+- II Dan
+- III Dan
+- walki light contact
+- mikro – do 52 kg
+- light- 53-58 kg
+- middle – 59-63 kg
+- heavy- 64-70 kg
+- hiper – więcej niż 70 kg
+- Seniorzy (+18 lat)
+- układy formalne
+- I dan
+- II Dan
+- III Dan
+- IV Dan
+- walki light contact
+- mikro – do 54 kg
+- light – 55-63 kg
+- Middle – 64-71 kg
+- heavy- 72-80 kg
+- hiper- powyżej 80 kg
+- Kobiety:
+Juniorki: (16-18 lat)
+- układy formalne
+- I dan
+- II Dan
+- III Dan
+- walki light contact
+- mikro – do 42 kg
+- light- 43-48 kg
+- middle – 49-53 kg
+- heavy- 54-60 kg
+- hiper – więcej niż 60 kg
+- Seniorki:  (+18 lat)
+- układy formalne
+- I dan
+- II Dan
+- III Dan
+- IV Dan
+- walki light contact
+- mikro – do 52 kg
+- light – 53-58 kg
+- Middle – 59-63 kg
+- heavy- 64-70 kg
+- hiper- powyżej 70 kg
+-Weterani: kategorie jak seniorzy/seniorki ale w grupach wiekowych:
+- 36-45 lat podział na kobiety/mężczyźni
+- 45-55 lat podział na kobiety/mężczyźni
+- powyżej 55 lat podział na kobiety/mężczyźni
+Testy siły i techniki specjalne – podział:
+ Juniorzy: kobiety
+mężczyźni
+Seniorzy: kobiety
+mężczyźni
+Weterani: 
+- 36-45 lat kobiety
+mężczyźni
+- 45-55 lat kobiety
+mężczyźni
+- powyżej 55 lat kobiety
+mężczyźni
+KATEGORIE KOLOROWE PASY (Cup):
+- Chłopcy:
+- Młodzicy (7-9 lat)
+- układy formalne:
+- 10 – 7 cup
+-  6 cup i wyżej
+- walki soft
+- wzrost:
+-115 cm
+-125 cm
+- 135 cm
++135 cm
+- techniki specjalne
+- Kadeci (10-12 lat)
+- układy formalne:
+- 10- 7 cup
+- 6-3 cup
+- 2 cup i wyżej
+- walki Hogo
+Wzrost:
+-135 cm
+- 145 cm
+- 155 cm
++155 cm
+- techniki specjalne
+- Juniorzy młodsi (13-15 lat)
+- układy formalne:
+- 10- 7 cup
+- 6-3 cup
+- 2 cup i wyżej
+- walki semi contact
+- waga do 50 kg
+- waga 51-55 kg
+- waga 56-60 kg
+- waga 61-65 kg
+- waga 66-70 kg
+- waga 71-75 kg
+- waga 76 i wyżej
+- techniki specjalne
+- Juniorzy (16-18 lat)
+- układy formalne:
+- 10- 7 cup
+- 6-3 cup
+- 2 cup i wyżej
+- walki light contact
+- waga do 58 kg
+- waga 59-64 kg
+- waga 65-70 kg
+- waga 71-76 kg
+- waga 77-82 kg
+- waga 83-88 kg
+- waga 89 i wyżej
+- techniki specjalne
+- testy siły
+- Seniorzy (19-35 lat):
+- układy formalne:
+- 10- 7 cup
+- 6-3 cup
+- 2 cup i wyżej
+- walki light contact
+- waga do 58 kg
+- waga 59-64 kg
+- waga 65-70 kg
+- waga 71-76 kg
+- waga 77-82 kg
+- waga 83-88 kg
+- waga 89 i wyżej
+- techniki specjalne
+- testy siły
+- Weterani (36 lat i więcej)
+- układy formalne:
+- 10- 7 cup
+- 6-3 cup
+- 2 cup i wyżej
+- walki light contact
+- waga do 58 kg
+- waga 59-64 kg
+- waga 65-70 kg
+- waga 71-76 kg
+- waga 77-82 kg
+- waga 83-88 kg
+- waga 89 i wyżej
+- techniki specjalne
+- testy siły
+Dziewczyny: 
+- Młodziczki (7-9 lat)
+- układy formalne:
+- 10 – 7 cup
+-  6 cup i wyżej
+- walki soft
+- wzrost:
+-115 cm
+-125 cm
+- 135 cm
++135 cm
+- Kadetki (10-12 lat)
+- układy formalne:
+- 10- 7 cup
+- 6-3 cup
+- 2 cup i wyżej
+- walki Hogo
+Wzrost:
+-135 cm
+- 145 cm
+- 155 cm
++155 cm
+- Juniorki młodsze (13-15 lat)
+- układy formalne:
+- 10- 7 cup
+- 6-3 cup
+- 2 cup i wyżej
+- walki semi contact
+- waga do 45 kg
+- waga 41-50 kg
+- waga 51-55 kg
+- waga 56-60 kg
+- waga 61-65 kg
+- waga 66 kg i wyżej
+- techniki specjalne
+- Juniorki (16-18 lat)
+- układy formalne:
+- 10- 7 cup
+- 6-3 cup
+- 2 cup i wyżej
+- walki light contact
+- waga do 50 kg
+- waga 51-55 kg
+- waga 56-60 kg
+- waga 61-65 kg
+- waga 66-70 kg
+- waga 71-75 kg
+- waga 75 i wyżej
+- techniki specjalne
+- testy siły
+- Seniorki (19-35 lat):
+- układy formalne:
+- 10- 7 cup
+- 6-3 cup
+- 2 cup i wyżej
+- walki light contact
+- waga do 50 kg
+- waga 51-55 kg
+- waga 56-60 kg
+- waga 61-65 kg
+- waga 66-70 kg
+- waga 71-75 kg
+- waga 75 i wyżej
+- techniki specjalne
+- testy siły
+- Weteranki (36 lat i więcej)
+- układy formalne:
+- 10- 7 cup
+- 6-3 cup
+- 2 cup i wyżej
+- walki light contact
+- waga do 50 kg
+- waga 51-55 kg
+- waga 56-60 kg
+- waga 61-65 kg
+- waga 66-70 kg
+- waga 71-75 kg
+- waga 75 i wyżej
+- techniki specjalne
+- testy siły
+Dobrze byłoby, żeby program sygnalizował, że w danej kategorii jest tylko jeden zawodnik
+—---
+Ja: Panie Bogusławie, a możemy pójść bardziej profesjonalnie i pozwolić by klub zakładał sobie konto przez email (bez retencji danych poza emailem) i sam sobie dodawał już zawodników? W sensie żeby ominąć kwestie Excela, podsyłania, wczytywania itd.
+Bogusław: Tak byłoby super. 
+Wówczas każdy wpis mógłby się od razu przyporządkować na odpowiedniej drabince i po zakończeniu rejestracji wszystkich klubów ostrzec, że np. zawodnik jest w danej kategorii sam.
+Kwestia jest jeszcze kontroli wagi - przed zawodami zawodnicy są kontrolnie ważeni - chodziło by o to, by w wypadku korekty wynikającej z nieprawidłowego podania wagi przez klub przy rejestracji, system po korekcie automatycznie przenosił zawodnika do odpowiedniej kategorii.
+Przy kontroli wagi zgłaszani są też zawodnicy, którzy nie przyjechali - chodziło też by o to, by korekty w kategoriach (bo z reguły każdy zawodnik jest wpisywany do kilku kategorii) same się robiły po wprowadzeniu też i tej informacji.
+I najlepiej, by mógł być w każdej chwili możliwy bieżący widok drabinki danej kategorii.
+A już super by było, gdyby drabinkę akurat rozgrywaną  juz podczas zawodów można było wyświetlać np. na telebimie
+Na razie tylko tyle mam pomysłów.
+Miłego dnia!
+Bogusław Wróbel

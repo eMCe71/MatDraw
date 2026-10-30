@@ -1,0 +1,116 @@
+name: Test, build i deploy
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    name: Testy JS i PHP
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: pdo_mysql, mbstring
+          coverage: none
+      - name: Składnia JS
+        run: |
+          node --check dist/app.js
+          node --check dist/client.js
+      - name: Składnia PHP
+        run: find backend tests -name '*.php' -print0 | xargs -0 -n1 php -l
+      - name: Testy reguł i workspace
+        run: node --test tests/engine.test.mjs tests/workspace.test.mjs
+      - name: Testy PHP (zgodność z JS)
+        run: PHP_BIN="$(command -v php)" node --test tests/php.test.mjs
+
+  http-test:
+    name: Test HTTP na jednorazowej bazie
+    runs-on: ubuntu-24.04
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: ci-root
+          MYSQL_DATABASE: matdraw_test
+          MYSQL_USER: matdraw
+          MYSQL_PASSWORD: ci-only-password
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -pci-root"
+          --health-interval=5s --health-timeout=5s --health-retries=20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: pdo_mysql, mbstring
+          coverage: none
+      - name: Build wydania
+        run: node scripts/build-php.mjs ./build/matdraw-php
+      - name: Konfiguracja testowa (tylko CI, poza wydaniem)
+        run: |
+          cat > "$RUNNER_TEMP/matdraw-test-config.php" <<PHP
+          <?php
+          return [
+           'app_url' => 'http://127.0.0.1:8080',
+           'db' => ['dsn' => 'mysql:host=127.0.0.1;port=3306;dbname=matdraw_test;charset=utf8mb4', 'user' => 'matdraw', 'password' => 'ci-only-password'],
+           'app_key' => '$(openssl rand -hex 32)',
+           'allow_insecure_http' => true,
+           'session_idle_seconds' => 1800,
+           'session_max_seconds' => 43200,
+          ];
+          PHP
+          echo "MATDRAW_CONFIG=$RUNNER_TEMP/matdraw-test-config.php" >> "$GITHUB_ENV"
+      - name: Instalacja schematu i konta testowego
+        run: printf '%s\n' 'AdminForTests2026!' | php build/matdraw-php/backend/bin/install.php --email=admin@test.example --club='Test Warszawa' --password-stdin
+      - name: Test HTTP
+        run: |
+          PHP_CLI_SERVER_WORKERS=4 php -S 127.0.0.1:8080 -t build/matdraw-php/public > "$RUNNER_TEMP/php-server.log" 2>&1 &
+          for i in $(seq 1 30); do curl -fsS 'http://127.0.0.1:8080/api/index.php?route=session' >/dev/null && break; sleep 1; done
+          MATDRAW_TEST_URL='http://127.0.0.1:8080/api/index.php' node --test tests/http.test.mjs
+      - name: Log serwera PHP
+        if: failure()
+        run: cat "$RUNNER_TEMP/php-server.log"
+
+  build:
+    name: Build wydania
+    needs: [test, http-test]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Build
+        run: node scripts/build-php.mjs ./build/matdraw-php
+      - name: Kontrola wydania
+        run: |
+          test "$(cat build/matdraw-php/public/runtime-config.js)" = "export const CONFIG={mode:'api',apiBase:'./api/index.php'};"
+          test -f build/matdraw-php/public/.htaccess
+          test -f build/matdraw-php/backend/.htaccess
+          test ! -e build/matdraw-php/backend/config.php
+          test ! -e build/matdraw-php/backend/public
+      - uses: actions/upload-artifact@v4
+        with:
+          name: matdraw-php-${{ github.sha }}
+          path: build/matdraw-php
+          include-hidden-files: true
+          retention-days: 90

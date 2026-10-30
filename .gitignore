@@ -1,0 +1,4 @@
+backend/config.php
+build/
+node_modules/
+*.log

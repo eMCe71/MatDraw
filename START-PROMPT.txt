@@ -1,0 +1,5 @@
+W repozytorium Meducase/MatDraw jest MatDraw-VSCode-Handoff.zip. Rozpakuj go i umieść zawartość MatDraw-VSCode/ w głównym katalogu repozytorium, zachowując pliki ukryte oraz istniejącą historię i konfigurację repozytorium. Jeżeli pliki są już rozpakowane, pracuj na nich.
+
+Zrób deploy istniejącej aplikacji na mój hosting PHP/MySQL przez CI/CD. Przeczytaj HANDOFF.md i INSTALL-PL.md. Zakres to konfiguracja wdrożenia, istniejące testy, build i deploy. Zachowaj funkcje, reguły, wygląd i branding; nie buduj aplikacji od nowa ani nie rozpoczynaj dodatkowego rozwoju lub ogólnego audytu.
+
+Zapytaj zbiorczo o brakujące dane hostingu i wskaż, gdzie ustawić sekrety. Po wdrożeniu sprawdź działanie i podaj adres aplikacji. Pracuj po polsku.
