@@ -105,11 +105,11 @@ Scal zmiany do `main` lub uruchom **Actions → Test, build i deploy → Run wor
 ```bash
 cd ~/domains/matdraw.mdcse.com/matdraw/current
 read -rsp 'Hasło Administratora (12–72 bajty): ' MATDRAW_ADMIN_PASSWORD; echo
-printf '%s\n' "$MATDRAW_ADMIN_PASSWORD" | php backend/bin/install.php --email=TWOJ@EMAIL --club='Nazwa klubu' --password-stdin
+printf '%s\n' "$MATDRAW_ADMIN_PASSWORD" | /usr/local/php83/bin/php backend/bin/install.php --email=TWOJ@EMAIL --club='Nazwa klubu' --password-stdin
 unset MATDRAW_ADMIN_PASSWORD
 ```
 
-Jeżeli `php -v` w SSH pokazuje inną wersję niż 8.3, użyj pełnej ścieżki, np. `/usr/local/php83/bin/php`. Instalator tylko tworzy tabele i pierwsze konto; przy kolejnych wdrożeniach go nie uruchamiaj. Następnie uruchom workflow ponownie — weryfikacja API powinna przejść bez ostrzeżeń. Dalej postępuj według `INSTALL-PL.md`, krok 5–7.
+Domyślne `php` w SSH na web9 to 8.1, dlatego instalator uruchamiamy przez `/usr/local/php83/bin/php`. Instalator tylko tworzy tabele i pierwsze konto; przy kolejnych wdrożeniach go nie uruchamiaj. Następnie uruchom workflow ponownie — weryfikacja API powinna przejść bez ostrzeżeń. Dalej postępuj według `INSTALL-PL.md`, krok 5–7.
 
 ## Ponowny deploy
 
