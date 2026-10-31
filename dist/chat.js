@@ -445,7 +445,7 @@ function paintChips(v){
 }
 function paintConvHead(v,c){
  const muted=c?.id&&mutedChannels().has(c.id),bell=signedIn()&&c?.id&&v.kind==='page';
- const back=v.kind==='page'?(signedIn()?h`<button type="button" class="chat-icon-btn chat-back" data-action="menu" aria-label="${T('Otwórz menu')}">${icon('menu')}</button>`:h`<button type="button" class="chat-icon-btn chat-back" data-chat-act="home" aria-label="${T('Wstecz')}">${icon('left')}</button>`):'';
+ const back=v.kind==='page'?(signedIn()?h`<button type="button" class="chat-icon-btn chat-back" data-action="menu" aria-label="${T('Otwórz menu')}" aria-expanded="${!!doc().querySelector('#app-sidebar.open')}" aria-controls="app-sidebar">${icon('menu')}</button>`:h`<button type="button" class="chat-icon-btn chat-back" data-chat-act="home" aria-label="${T('Wstecz')}">${icon('left')}</button>`):'';
  const chip=c?.kind==='tournament'&&c.date===today()?h`<span class="chat-today">${T('Dziś zawody')}</span>`:'';
  swap(v.convhead,h`${back}${c?chIcon(c):''}<div class="chat-grow"><h2 class="chat-conv-title">${v.kind==='tournament'?T('Czat turnieju'):chFull(c)||T('Czat')}</h2><p><span class="chat-conv-sub">${v.kind==='tournament'?chName(c):chAbout(c)}</span>${chip}</p></div>${live()}${bell?h`<button type="button" class="chat-icon-btn${muted?' is-muted':''}" data-chat-act="mute" aria-pressed="${!!muted}" title="${muted?T('Powiadomienia: wyciszone'):T('Powiadomienia: włączone')}" aria-label="${muted?T('Powiadomienia: wyciszone'):T('Powiadomienia: włączone')}">${icon('bell')}</button>`:''}`);
  v.liveEl=v.convhead.querySelector('[data-chat-part="live"]');if(v.liveEl)v.liveEl.hidden=S.status!=='live';
