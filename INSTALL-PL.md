@@ -6,7 +6,7 @@ Ta paczka zawiera aplikację z rzeczywistymi kontami i wspólną bazą danych. P
 
 - PHP 8.3 lub nowszy (zalecana utrzymywana wersja 8.4+), rozszerzenia PDO, pdo_mysql, mbstring, session, JSON.
 - MySQL 8.0+ lub MariaDB 10.11+, tabele InnoDB, utf8mb4.
-- HTTPS na docelowej domenie, np. `matdraw.mdcse.com`.
+- HTTPS na docelowej domenie, np. `matbravo.com`.
 - Możliwość ustawienia katalogu domeny na `public/` oraz uruchomienia jednorazowego polecenia PHP CLI (SSH lub panel hostingu). Node.js nie jest potrzebny na serwerze.
 
 ## Przygotowanie wydania ze źródeł

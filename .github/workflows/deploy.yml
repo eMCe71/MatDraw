@@ -23,10 +23,10 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  APP_URL: https://matdraw.mdcse.com
+  APP_URL: https://matbravo.com
   # Releases and config live outside the DirectAdmin domain directory; the active release is copied into DOCROOT.
   DEPLOY_BASE: /home/meducase/matdraw
-  DOCROOT: /home/meducase/domains/matdraw.mdcse.com/public_html
+  DOCROOT: /home/meducase/domains/matbravo.com/public_html
 
 jobs:
   test:
@@ -144,7 +144,7 @@ jobs:
     runs-on: ubuntu-24.04
     environment:
       name: production
-      url: https://matdraw.mdcse.com
+      url: https://matbravo.com
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -161,7 +161,7 @@ jobs:
         run: bash scripts/deploy-ssh-setup.sh
       - name: Sprawdzenie serwera
         run: |
-          ssh deploy bash -s -- check "$DEPLOY_BASE" "$DOCROOT" < scripts/deploy-remote.sh
+          ssh deploy bash -s -- check "$DEPLOY_BASE" "$DOCROOT" "$APP_URL" < scripts/deploy-remote.sh
           echo "PREVIOUS=$(ssh deploy "readlink '$DEPLOY_BASE/current' || true")" >> "$GITHUB_ENV"
       - name: Wysłanie wydania
         run: |
@@ -173,17 +173,7 @@ jobs:
         run: ssh deploy bash -s -- activate "$DEPLOY_BASE" "$DOCROOT" "$RELEASE" < scripts/deploy-remote.sh
       - name: Weryfikacja HTTPS, strony i API
         id: verify
-        run: |
-          sleep 5
-          curl -fsS --retry 3 --retry-delay 5 "$APP_URL/" | grep -q '<title>MatDraw'
-          curl -fsS "$APP_URL/runtime-config.js" | grep -q "mode:'api'"
-          code=$(curl -sS -o api.json -w '%{http_code}' "$APP_URL/api/index.php?route=session")
-          if [ "$code" = 200 ] && grep -q '"csrf"' api.json; then echo "API odpowiada poprawnie (200)."; exit 0; fi
-          if [ -z "$PREVIOUS" ]; then
-            echo "::warning::Pierwsze wdrożenie: strona działa, API zwraca $code. Uruchom jednorazowo instalator bazy (DEPLOY-PL.md, krok 6) i uruchom workflow ponownie."
-            exit 0
-          fi
-          echo "::error::API zwraca $code: $(cat api.json)"; exit 1
+        run: sleep 5 && bash scripts/deploy-verify.sh
       - name: Powrót do poprzedniego wydania po nieudanej weryfikacji
         if: failure() && steps.verify.outcome == 'failure' && env.PREVIOUS != ''
         run: ssh deploy bash -s -- rollback "$DEPLOY_BASE" "$DOCROOT" < scripts/deploy-remote.sh
@@ -215,9 +205,15 @@ jobs:
           echo "tar: $(command -v tar || echo BRAK)"
           echo "Katalog domeny:"; ls -la "$(dirname "$DOCROOT")"
           for x in "$DOCROOT" "$(dirname "$DOCROOT")/private_html"; do echo "$x: $(stat -c '%F' "$x" 2>/dev/null || echo brak) $(readlink "$x")"; done
-          [ -f "$DEPLOY_BASE/shared/config.php" ] && echo "config.php: jest" || echo "config.php: BRAK (krok 4)"
+          [ -f "$DEPLOY_BASE/shared/config.php" ] && echo "config.php: jest, app_url: $(php -r 'echo (require $argv[1])["app_url"] ?? "?";' "$DEPLOY_BASE/shared/config.php" 2>&1)" || echo "config.php: BRAK (krok 4)"
           echo "Aktywne wydanie: $(readlink "$DEPLOY_BASE/current" 2>/dev/null || echo brak)"
           SH
+      - name: Odpowiedź domeny widziana z internetu
+        run: |
+          host=${APP_URL#https://}
+          for h in "$host" "www.$host"; do echo "DNS $h: $(getent ahostsv4 "$h" | awk '{print $1}' | sort -u | tr '\n' ' ')"; done
+          for u in "http://$host/" "https://$host/"; do echo "$u -> $(curl -sSk -o /dev/null --max-time 20 -w 'HTTP %{http_code}, %{size_download} B' "$u" 2>&1)"; done
+          curl -sS -o /dev/null --max-time 20 "https://$host/" 2>&1 && echo "Certyfikat HTTPS: ważny" || echo "Certyfikat HTTPS: brak lub nieważny"
 
   rollback:
     name: Powrót do poprzedniego wydania
@@ -225,7 +221,7 @@ jobs:
     runs-on: ubuntu-24.04
     environment:
       name: production
-      url: https://matdraw.mdcse.com
+      url: https://matbravo.com
     steps:
       - uses: actions/checkout@v4
       - name: Połączenie SSH
@@ -239,4 +235,4 @@ jobs:
       - name: Przywrócenie
         run: ssh deploy bash -s -- rollback "$DEPLOY_BASE" "$DOCROOT" < scripts/deploy-remote.sh
       - name: Weryfikacja
-        run: curl -fsS "$APP_URL/api/index.php?route=session" | grep -q '"csrf"'
+        run: PREVIOUS=rollback bash scripts/deploy-verify.sh

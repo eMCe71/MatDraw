@@ -1,6 +1,8 @@
-# MatDraw — wdrożenie przez GitHub Actions (AfterMarket.pl / DirectAdmin)
+# MatBravo — wdrożenie przez GitHub Actions (AfterMarket.pl / DirectAdmin)
 
-Workflow `.github/workflows/deploy.yml` przy każdym pushu uruchamia testy i buduje wydanie. Po scaleniu do `main` (albo przyciskiem „Run workflow” na `main`) wysyła wydanie przez SSH na `matdraw.mdcse.com`, przełącza je i sprawdza stronę oraz API. Jeżeli weryfikacja się nie powiedzie, automatycznie wraca do poprzedniego wydania.
+Aplikacja działa pod marką **MatBravo** na `https://matbravo.com`. Wewnętrzne nazwy techniczne (repozytorium, przestrzeń nazw PHP, ciasteczko, katalog `~/matdraw`) pozostają „matdraw”.
+
+Workflow `.github/workflows/deploy.yml` przy każdym pushu uruchamia testy i buduje wydanie. Po scaleniu do `main` (albo przyciskiem „Run workflow” na `main`) wysyła wydanie przez SSH na `matbravo.com`, przełącza je i sprawdza stronę oraz API. Jeżeli weryfikacja się nie powiedzie, automatycznie wraca do poprzedniego wydania.
 
 ## Układ na serwerze
 
@@ -12,13 +14,13 @@ Workflow `.github/workflows/deploy.yml` przy każdym pushu uruchamia testy i bud
 │   ├── current  -> releases/<aktywne wydanie>
 │   ├── backups/                              (to, co było w domenie przed pierwszym deployem)
 │   └── bin/deploy-remote.sh                  (kopia skryptu do ręcznego rollbacku)
-└── domains/matdraw.mdcse.com/
+└── domains/matbravo.com/
     ├── public_html/                          (prawdziwy katalog: kopia public/ aktywnego wydania)
     ├── backend/                              (kopia backend/ aktywnego wydania, poza WWW)
     └── private_html -> ./public_html         (tylko jeśli DirectAdmin go tworzy; HTTPS)
 ```
 
-Deploy kopiuje aktywne wydanie do prawdziwych katalogów `public_html` i `backend` (podmiana dwoma szybkimi zmianami nazw, więc strona nigdy nie jest w połowie skopiowana). `backend/` leży obok `public_html`, poza dostępem WWW, i ma link `config.php -> ~/matdraw/shared/config.php`. Wydania i konfiguracja są w `~/matdraw`, więc nawet usunięcie i ponowne dodanie domeny w DirectAdmin ich nie kasuje. Pierwszy deploy przenosi dotychczasową zawartość domeny do `~/matdraw/backups`; nic nie jest kasowane. Zostaje 5 ostatnich wydań.
+Deploy kopiuje aktywne wydanie do prawdziwych katalogów `public_html` i `backend` (podmiana dwoma szybkimi zmianami nazw, więc strona nigdy nie jest w połowie skopiowana). `backend/` leży obok `public_html`, poza dostępem WWW, i ma link `config.php -> ~/matdraw/shared/config.php`. Wartość `app_url` w `config.php` deploy ustawia sam na adres z workflow (`APP_URL`), bo aplikacja sprawdza ją przy każdym zapisie (ochrona CSRF). Wydania i konfiguracja są w `~/matdraw`, więc nawet usunięcie i ponowne dodanie domeny w DirectAdmin ich nie kasuje. Pierwszy deploy przenosi dotychczasową zawartość domeny do `~/matdraw/backups`; nic nie jest kasowane. Zostaje 5 ostatnich wydań.
 
 ## Konfiguracja jednorazowa
 
@@ -79,7 +81,7 @@ Wklej i uzupełnij (nazwę bazy, użytkownika, hasło z kroku 3 i `app_key` z po
 ```php
 <?php
 return [
- 'app_url' => 'https://matdraw.mdcse.com',
+ 'app_url' => 'https://matbravo.com',
  'db' => [
   'dsn' => 'mysql:host=localhost;dbname=meducase_matdraw;charset=utf8mb4',
   'user' => 'meducase_matdraw',
@@ -100,14 +102,14 @@ chmod 600 ~/matdraw/shared/config.php
 
 ### 5. PHP dla domeny
 
-W DirectAdmin ustaw dla `matdraw.mdcse.com` PHP 8.3 (wybór wersji PHP domeny) i upewnij się, że włączone są `pdo_mysql` i `mbstring`. Wymuś HTTPS w ustawieniach SSL domeny.
+W DirectAdmin ustaw dla `matbravo.com` PHP 8.3 (wybór wersji PHP domeny) i upewnij się, że włączone są `pdo_mysql` i `mbstring`. Wymuś HTTPS w ustawieniach SSL domeny.
 
 ### 6. Pierwszy deploy i Administrator
 
 Scal zmiany do `main` lub uruchom **Actions → Test, build i deploy → Run workflow** na `main`. Przy pierwszym wdrożeniu baza jest pusta, więc workflow kończy się ostrzeżeniem „uruchom instalator”. Wtedy przez SSH, jednorazowo:
 
 ```bash
-cd ~/domains/matdraw.mdcse.com
+cd ~/domains/matbravo.com
 read -rsp 'Hasło Administratora (12–72 bajty): ' MATDRAW_ADMIN_PASSWORD; echo
 printf '%s\n' "$MATDRAW_ADMIN_PASSWORD" | /usr/local/php83/bin/php backend/bin/install.php --email=TWOJ@EMAIL --club='Nazwa klubu' --password-stdin
 unset MATDRAW_ADMIN_PASSWORD
@@ -128,7 +130,7 @@ Domyślne `php` w SSH na web9 to 8.1, dlatego instalator uruchamiamy przez `/usr
 - Ręcznie przez SSH, poprzednie wydanie:
 
 ```bash
-bash ~/matdraw/bin/deploy-remote.sh rollback ~/matdraw ~/domains/matdraw.mdcse.com/public_html
+bash ~/matdraw/bin/deploy-remote.sh rollback ~/matdraw ~/domains/matbravo.com/public_html
 ```
 
 - Ręcznie przez SSH, dowolne z zachowanych wydań:
@@ -138,11 +140,11 @@ ls ~/matdraw/releases
 ```
 
 ```bash
-bash ~/matdraw/bin/deploy-remote.sh activate ~/matdraw ~/domains/matdraw.mdcse.com/public_html NAZWA_WYDANIA
+bash ~/matdraw/bin/deploy-remote.sh activate ~/matdraw ~/domains/matbravo.com/public_html NAZWA_WYDANIA
 ```
 
 Rollback zmienia tylko kod. Baza danych pozostaje bez zmian, więc przed aktualizacją, która zmienia schemat, wykonaj kopię bazy (phpMyAdmin → Eksport lub DirectAdmin → MySQL Management → Backup).
 
-## Znany problem: HTTP 429 na nowej domenie (30.10.2026)
+## Historia: HTTP 429 na matdraw.mdcse.com (30.10.2026)
 
-Po dodaniu `matdraw.mdcse.com` w DirectAdmin każde żądanie HTTP/HTTPS dostawało `429 Too Many Requests` (Server: LiteSpeed, pusta treść), od pierwszego wpisu w logu i z różnych adresów IP. Dotyczyło to także oryginalnej strony domyślnej DirectAdmin (w logu odpowiedź 183 B zamiast 447 B, czyli bez nagłówków z `.htaccess` MatDraw) oraz świeżo dodanej `test429.mdcse.com`, a nie dotyczyło `mdcse.com`. Blokada jest po stronie serwera AfterMarket, niezależna od plików aplikacji; przez nią DirectAdmin nie mógł też wystawić certyfikatu Let's Encrypt. Wymaga interwencji obsługi AfterMarket; po zdjęciu blokady DirectAdmin sam wystawi certyfikat (ACME jest włączone).
+Po dodaniu `matdraw.mdcse.com` w DirectAdmin każde żądanie HTTP/HTTPS dostawało `429 Too Many Requests` (Server: LiteSpeed, pusta treść), od pierwszego wpisu w logu i z różnych adresów IP. Dotyczyło to także oryginalnej strony domyślnej DirectAdmin (w logu odpowiedź 183 B zamiast 447 B, czyli bez nagłówków z `.htaccess` MatDraw) oraz świeżo dodanej `test429.mdcse.com`, a nie dotyczyło `mdcse.com`. Blokada jest po stronie serwera AfterMarket, niezależna od plików aplikacji; przez nią DirectAdmin nie mógł też wystawić certyfikatu Let's Encrypt. Dlatego aplikację przeniesiono na domenę `matbravo.com` (31.10.2026). Domeny `matdraw.mdcse.com` i `test429.mdcse.com` można usunąć w DirectAdmin.

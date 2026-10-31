@@ -1,6 +1,6 @@
 # MatDraw
 
-Responsive Polish taekwondo tournament app for MEDUCASE. English name: mat + draw; planned domain `matdraw.mdcse.com`.
+Responsive Polish taekwondo tournament app for MEDUCASE. Brand: MatBravo (formerly MatDraw); domain `matbravo.com`. Internal identifiers (PHP namespace, cookie, storage keys) keep the `matdraw` name.
 
 ## Two runtimes
 

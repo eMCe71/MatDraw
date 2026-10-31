@@ -1,7 +1,7 @@
 <?php
 // Copy to config.php, outside the public document root. Never commit real secrets.
 return [
- 'app_url' => 'https://matdraw.mdcse.com',
+ 'app_url' => 'https://matbravo.com',
  'db' => [
   'dsn' => 'mysql:host=localhost;dbname=matdraw;charset=utf8mb4',
   'user' => 'matdraw',

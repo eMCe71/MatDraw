@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Runs on the hosting server: ssh host bash -s -- <command> <base> <docroot> [release] < scripts/deploy-remote.sh
+# Runs on the hosting server: ssh host bash -s -- <command> <base> <docroot> [release|app_url] < scripts/deploy-remote.sh
 # (the workflow also keeps a copy in <base>/bin for manual use over SSH).
 # Layout: <base>/releases/<release>/{public,backend}, <base>/current -> active release,
 # <base>/shared/config.php (created once by the owner). The active release is copied into the real
@@ -39,6 +39,15 @@ case $cmd in
   [[ $(stat -c %a shared/config.php) == 600 ]] || echo "::warning::$base/shared/config.php powinien mieć uprawnienia 600 (chmod 600)."
   [[ -d $site ]] || fail "Brak katalogu $site. Czy domena jest dodana w DirectAdmin?"
   command -v tar >/dev/null || fail 'Brak polecenia tar na serwerze.'
+  # app_url must match the served address (CSRF origin check, secure cookie); the workflow's APP_URL decides.
+  want=${4:-}
+  url_in(){ php -r 'echo (require $argv[1])["app_url"] ?? "";' "$base/shared/config.php"; }
+  if [[ -n $want && $(url_in) != "$want" ]]; then
+   old=$(url_in); cp -p shared/config.php "shared/config.php.tmp.$$"
+   sed -i "s#\('app_url'[[:space:]]*=>[[:space:]]*'\)[^']*'#\1$want'#" shared/config.php
+   if [[ $(url_in) != "$want" ]]; then mv -f "shared/config.php.tmp.$$" shared/config.php; fail "Nie udało się ustawić app_url w $base/shared/config.php. Wpisz ręcznie: 'app_url' => '$want',"; fi
+   rm -f "shared/config.php.tmp.$$"; echo "W config.php zmieniono app_url: $old -> $want"
+  fi
   echo "Aktywne wydanie: $(readlink current 2>/dev/null || echo 'brak (pierwsze wdrożenie)')"
   ;;
  activate)
