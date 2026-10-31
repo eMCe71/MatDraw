@@ -96,7 +96,7 @@ Gdy kod jest nowszy od bazy (zapomniana migracja), aplikacja odpowiada „Trwa p
 
 ### Opcjonalny cron
 
-Wszystko działa bez crona. Wpisy crona (DirectAdmin → Advanced Features → Cron Jobs) tylko przyspieszają porządki i synchronizację; pełna lista jest w `DEPLOY-PL.md`, sekcja „Cron (zalecany)”:
+Wszystko działa bez crona, o ile diagnostyka Administratora (`api/index.php?route=diagnostics`) pokazuje `"afterResponse":true`; przy `false` wpis `stripe-sync.php --events --due` jest obowiązkowy (bez niego odnowienia subskrypcji nie zostaną zapisane). Wpisy crona (DirectAdmin → Advanced Features → Cron Jobs) tylko przyspieszają porządki i synchronizację; pełna lista jest w `DEPLOY-PL.md`, sekcja „Cron (zalecany)”:
 
 - raz na dobę `…/backend/bin/dump.php --auto` (kopia bazy; **zalecane**),
 - co 5 minut `…/backend/bin/cron.php` (zadania porządkowe),

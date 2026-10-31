@@ -352,7 +352,9 @@ test('accounts-cleanup: the avatar sweep resumes where the previous run stopped'
 });
 test('diagnostics: admin only, no secrets; probe=stripe limited to 6 per hour',{skip},async()=>{
  const c=await signIn(...ADMIN);const r=await get('diagnostics',{cookie:c.cookie});assert.equal(r.status,200,JSON.stringify(r.data));
- assert.deepEqual(Object.keys(r.data),['php','gd','exif','curl','openssl','intl','uploadsWritable','avatarMode','schema','sessions','backups','billing','chat','stripe']);
+ assert.deepEqual(Object.keys(r.data),['php','gd','exif','curl','openssl','intl','server','uploadsWritable','avatarMode','schema','sessions','backups','billing','chat','stripe']);
+ // php -S cannot send a response early: the payment sync and jobs after the response would never run there (cron needed).
+ assert.deepEqual(r.data.server,{sapi:'cli-server',afterResponse:false});
  assert.equal(r.data.uploadsWritable,true);assert.equal(r.data.schema.db,r.data.schema.code);assert.deepEqual([r.data.sessions.ownDir,typeof r.data.sessions.files],[true,'number']);
  assert.deepEqual(r.data.billing,{enabled:true,mode:'test'});assert.equal(r.data.stripe,null);assert.equal(r.headers.get('cache-control'),'private, no-store');
  assert.ok(!/rk_test|whsec_|password|app_key/.test(JSON.stringify(r.data)),'no secrets');
