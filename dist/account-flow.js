@@ -14,7 +14,7 @@ import {registry,h,setHtml} from './registry.js';
 import * as Client from './client.js';
 import {getMe,loadMe,saveDemoProfile,purgeSession} from './me.js';
 import {t as T,getLanguage,translateMessage} from './i18n.js';
-import {COUNTRIES,SPORTS,SPORTS_MAX,CLUB_MAX,validateUsername,normalizeUsername,validateName,suggestUsernames,cleanText} from './profile-data.js';
+import {COUNTRIES,SPORTS,SPORTS_MAX,CLUB_MAX,validateUsername,normalizeUsername,validateName,suggestUsernames,slugName,cleanText} from './profile-data.js';
 import {openCrop} from './avatar-crop.js';
 import {flowStart,flowEnd,readReturn,clearReturn,formatPrice,formatDate,publicConfig,takePaymentMessage,avatarSrc,KNOWN_DEVICE,NOTICE_KEY} from './account-boot.js';
 
@@ -73,6 +73,20 @@ export function fieldsError(f){
  const club=cleanText(f.club||'');if(club===null||[...club].length>CLUB_MAX)return new Error('Sprawdź pole: klub lub szkoła.');
  return null;
 }
+/** The username filled in while the sign-up field is untouched (§7.7, privacy by default): the first name and the surname's initial
+ * only (marta.k), never the full surname, whatever the full-name box says; the person may still type any valid name. */
+export const prefillUsername=f=>suggestUsernames(f?.first,f?.last,'',{full:false})[0]||'';
+/**
+ * Server suggestions for a taken name, as shown: without the full surname unless "show my full name" is ticked. Then only our own
+ * initial-only candidates (and the name the person typed + 2) are shown: an allow-list, because a long name cuts the full-surname
+ * forms to 24 characters (katarzyna.szczepanskawis), which no longer contain the whole surname; it also keeps a short surname
+ * (Alicja Li: alicja.l2) from hiding every suggestion.
+ */
+export function shownSuggestions(list,f){
+ const last=slugName(f?.last||''),hide=!f?.full&&last.length>1;
+ const safe=hide?new Set(suggestUsernames(f?.first,f?.last,normalizeUsername(f?.username||'')??'',{full:false})):null;
+ return (Array.isArray(list)?list:[]).filter(x=>typeof x==='string'&&validateUsername(x)==='valid'&&(!hide||safe.has(x))).slice(0,3);
+}
 /** Only an https address on exactly this origin (Checkout or the portal) may be opened (plan §6.2); otherwise null. */
 export function stripeUrl(value,origin){
  try{const u=new URL(String(value));return u.protocol==='https:'&&u.origin===origin&&!u.username&&!u.password?u.href:null;}catch{return null;}
@@ -124,12 +138,20 @@ const languages=()=>{try{return navigator.languages?.length?[...navigator.langua
 const message=error=>translateMessage(String(error?.message||error||''));
 const workspace=()=>{try{return ui()?.getWorkspace?.()||null;}catch{return null;}};
 const newSignup=()=>({step:1,email:'',password:'',website:'',invite:null,begin:null,beginError:'',f:newFields(null,languages()),avatar:null,error:''});
-const S={signup:null,draft:null,draftFor:null,ret:null,payment:'',del:null};
+const S={signup:null,draft:null,draftFor:null,ret:null,payment:'',del:null,portal:''};
 S.signup=newSignup();
 const sportLabel=slug=>SPORTS.find(s=>s[0]===slug)?.[1]||slug;
 const initials=f=>((f?.first||'').trim()[0]||'')+((f?.last||'').trim()[0]||'');
 const goChat=()=>{const role=getMe()?.user?.role||workspace()?.user?.role;ui()?.navigate?.(registry.allows(registry.page('chat'),role)?'chat':registry.defaultPage(role));};
 const planStep=()=>!!publicConfig()?.billing;
+/** After a page change that a person did not trigger by moving focus (account created, forced password change, password changed),
+ * focus goes to what the page is about once it is drawn, instead of staying on <body> (WCAG 2.4.3); never steals focus already placed. */
+function focusWhenDrawn(selector,fallback=null,tries=40){
+ const a=document.activeElement;if(a&&a!==document.body&&a!==document.documentElement)return;
+ const el=document.querySelector(selector)||(tries>0?null:fallback&&document.querySelector(fallback));
+ if(el){if(!el.hasAttribute('tabindex'))el.tabIndex=-1;el.focus();return;}
+ if(tries>0)setTimeout(()=>focusWhenDrawn(selector,fallback,tries-1),50);
+}
 
 // ---- Shared fields (sign-up step 2 and the profile tab) ----
 function statusView(f){
@@ -151,7 +173,7 @@ const countrySelect=value=>h`<option value=""${value?'':h` selected`}>${T('Wybie
 export function fieldsView(f,{id,signup}){
  const at=!signup&&getMe()?.profile?.usernameChangeAt,locked=!!at&&at*1000>Date.now();
  return h`<div class="acct-grid"><label class="field-label">${T('Imię')}<input name="firstName" autocomplete="given-name" maxlength="50" required value="${f.first}"></label><label class="field-label">${T('Nazwisko')}<input name="lastName" autocomplete="family-name" maxlength="50" required value="${f.last}"></label></div>
-<div class="acct-field"><label class="field-label" for="${id}-username">${T('Nazwa użytkownika')}</label><div class="acct-at"><span aria-hidden="true">@</span><input id="${id}-username" name="username" maxlength="24" autocomplete="nickname" autocapitalize="none" spellcheck="false" required value="${f.username}" aria-describedby="${id}-username-status"${locked?h` readonly`:''}></div><div class="acct-status" id="${id}-username-status" aria-live="polite">${statusView(f)}</div>${signup?'':h`<p class="acct-hint">${locked?T('Kolejna zmiana nazwy będzie możliwa {date}.',{date:formatDate(at)}):T('Nazwę użytkownika można zmienić raz na 30 dni.')}</p>`}</div>
+<div class="acct-field"><label class="field-label" for="${id}-username">${T('Nazwa użytkownika')}</label><div class="acct-at"><span aria-hidden="true">@</span><input id="${id}-username" name="username" maxlength="24" autocomplete="nickname" autocapitalize="none" spellcheck="false" required value="${f.username}" aria-describedby="${id}-username-status"${locked?h` readonly`:''}></div><div class="acct-status" id="${id}-username-status" aria-live="polite">${statusView(f)}</div>${signup?h`<p class="acct-hint">${T('Nazwę użytkownika widzą członkowie czatu.')}</p>`:h`<p class="acct-hint">${locked?T('Kolejna zmiana nazwy będzie możliwa {date}.',{date:formatDate(at)}):T('Nazwę użytkownika można zmienić raz na 30 dni.')}</p>`}</div>
 <label class="field-label">${T('Kraj')}<select name="country" required>${countrySelect(f.country)}</select></label>
 <fieldset class="acct-sports" data-acct-sports>${sportsView(f)}</fieldset>
 <label class="field-label">${T('Klub lub szkoła (opcjonalnie)')}<input name="clubText" maxlength="100" autocomplete="organization" value="${f.club}"></label>
@@ -256,6 +278,9 @@ function leaveSignup(){
 function planView(m,{signup=false}={}){
  const b=m.billing||{},a=m.access||{},cur=b.currency,amount=cur?b.amounts?.[cur]:null,back=signup?h`<button type="button" class="acct-link acct-later" data-acct-act="later">${T('Później · wróć do czatu')}</button>`:'';
  if(!b.enabled)return h`<section class="acct-plan panel"><p class="acct-lead">${T('Płatności są wyłączone.')} ${T('Masz pełny dostęp do społeczności MatBravo.')}</p>${back}</section>`;
+ // billing-checkout answered 409 {portal:true}: Stripe still has a subscription for this account (e.g. past_due after the grace
+ // days, or a stale cache). A second Checkout is refused, so the way forward is the Customer Portal (update the card, see the state).
+ if(S.portal&&!a.full)return h`<section class="acct-plan panel"><h2>${S.portal}</h2><p class="acct-lead">${T('Zaktualizuj kartę lub sprawdź stan subskrypcji w panelu Stripe.')}</p><div class="form-error" role="alert"></div><div class="acct-actions"><button type="button" class="btn primary" data-acct-act="portal">${icon('external')} ${T('Zarządzaj subskrypcją')}</button></div><p class="acct-fine">${T('Otworzy się bezpieczna strona Stripe.')}</p>${back}</section>`;
  if(a.full&&['active','ending','past_due'].includes(a.state))return h`<section class="acct-plan panel"><h2>${T('Masz już aktywną subskrypcję.')}</h2><p class="acct-lead">${subscriptionState(m).text}</p><div class="form-error" role="alert"></div><div class="acct-actions"><button type="button" class="btn primary" data-acct-act="portal">${icon('external')} ${T('Zarządzaj subskrypcją')}</button></div><p class="acct-fine">${T('Otworzy się bezpieczna strona Stripe.')}</p>${back}</section>`;
  if(a.full&&(a.state!=='free'||!a.until)&&a.state!=='grace')return h`<section class="acct-plan panel"><h2>${T('Masz pełny dostęp.')}</h2><p class="acct-lead">${subscriptionState(m).text}</p>${back}</section>`;
  if(!cur||!amount)return h`<section class="acct-plan panel"><h2>${T('Wybierz kraj w profilu, aby wybrać plan.')}</h2><p class="acct-lead">${T('Cena i waluta zależą od kraju: Polska płaci w złotych, inne kraje w dolarach.')}</p><div class="acct-actions"><button type="button" class="btn primary" data-acct-act="go-profile">${T('Uzupełnij profil')}</button></div>${back}</section>`;
@@ -324,7 +349,7 @@ async function openStripe(button,route,origin){
   button.disabled=false;button.replaceChildren(...label);
   if(error?.status===401||error?.status===402){ui()?.handleError?.(error);return;}
   if(box)box.textContent=message(error);else ui()?.toast?.(message(error));
-  if(error?.data?.portal){await loadMe({force:true});repaint();}
+  if(error?.data?.portal&&route==='billing-checkout'){S.portal=message(error);await loadMe({force:true});repaint();document.querySelector('.acct-plan [data-acct-act="portal"]')?.focus();}
  }
 }
 
@@ -338,7 +363,7 @@ function profileTab(m){
 function securityView(m){
  const member=m.user?.role==='member',must=!!m.profile?.mustChangePassword,pwa=registry.use('pwa');
  const standalone=!!pwa?.standalone?.(),install=!standalone&&!!pwa?.canInstall?.();
- return h`${must?h`<div class="notice acct-must" role="alert">${icon('alert')}<p><strong>${T('Ustaw nowe hasło.')}</strong> ${T('Logujesz się hasłem tymczasowym. Do czasu zmiany pozostałe strony są niedostępne.')}</p></div>`:''}
+ return h`${must?h`<div class="notice acct-must" role="alert" tabindex="-1">${icon('alert')}<p><strong>${T('Ustaw nowe hasło.')}</strong> ${T('Logujesz się hasłem tymczasowym. Do czasu zmiany pozostałe strony są niedostępne.')}</p></div>`:''}
 <form id="acct-password-form" class="acct-form acct-block" novalidate><h2>${T('Zmień hasło')}</h2><label class="field-label">${must?T('Hasło tymczasowe'):T('Obecne hasło')}<input name="currentPassword" type="password" required autocomplete="current-password"></label>${passwordField({name:'password',id:'acct-new-pw',label:T('Nowe hasło'),autocomplete:'new-password',meter:true})}<p class="acct-hint">${T('Pozostałe sesje zostaną wylogowane.')}</p><div class="form-error" role="alert"></div><div class="acct-actions"><button type="submit" class="btn primary">${T('Zmień hasło')}</button></div></form>
 ${member&&!must?h`<form id="acct-email-form" class="acct-form acct-block" novalidate><h2>${T('Adres e-mail')}</h2><p class="acct-lead">${T('Obecny adres:')} <strong>${m.user?.email||''}</strong></p><label class="field-label">${T('Nowy adres e-mail')}<input name="email" type="email" inputmode="email" autocomplete="email" autocapitalize="none" spellcheck="false" required maxlength="254"></label><label class="field-label">${T('Obecne hasło')}<input name="currentPassword" type="password" required autocomplete="current-password"></label><p class="acct-hint">${T('Po zmianie adresu inne urządzenia zostaną wylogowane.')}</p><div class="form-error" role="alert"></div><div class="acct-actions"><button type="submit" class="btn secondary">${T('Zapisz adres e-mail')}</button></div></form>`:''}
 ${standalone||install?h`<section class="acct-block acct-install"><h2>${T('Aplikacja MatBravo')}</h2>${standalone?h`<p class="acct-lead">${icon('check')} ${T('MatBravo działa na tym urządzeniu jako aplikacja.')}</p>`:h`<p class="acct-lead">${T('Drabinki i czat jednym stuknięciem, z ekranu głównego.')}</p><div class="acct-actions"><button type="button" class="btn secondary" data-acct-act="install">${icon('download')} ${T('Zainstaluj aplikację')}</button></div>`}</section>`:''}
@@ -361,9 +386,18 @@ async function savePassword(form){
  const el=form.elements,current=el.currentPassword.value,password=el.password.value,m=getMe(),must=!!m?.profile?.mustChangePassword;
  Client.validatePassword(password);
  if(m?.user?.role==='member'){await Client.request('member-password',{method:'POST',body:{currentPassword:current,password}});await loadMe({force:true});}
- else{try{await ui().commit('account.password',{id:workspace().user.id,currentPassword:current,password});}catch(error){error.app=true;throw error;}}
+ else{
+  // account.password reads no workspace data, so a revision conflict (anyone saved anything since this page was drawn, constant on a
+  // tournament day) is retried once with the fresh revision instead of failing.
+  const body={id:workspace().user.id,currentPassword:current,password};
+  try{await ui().commit('account.password',body);}
+  catch(error){
+   if(error?.status!==409||error.code==='client_outdated'){error.app=true;throw error;}
+   try{const fresh=await Client.bootstrap();await ui().commit('account.password',body,Number(fresh?.revision));}catch(again){again.app=true;throw again;}
+  }
+ }
  form.reset();form.removeAttribute('data-dirty');ui()?.toast?.(T('Hasło zostało zmienione. Pozostałe sesje zostały wylogowane.'));
- if(must)goChat();else repaint();
+ if(must){goChat();focusWhenDrawn('[data-chat-mount] .chat-log','#main h1');}else repaint();
 }
 async function saveEmail(form){
  const el=form.elements,email=el.email.value.trim();
@@ -398,7 +432,7 @@ function render(page,el){
  if(!m){setHtml(el,h`<section class="panel empty-state">${ui()?.emptyMascot?.()??''}<h3>${T('Funkcje konta są chwilowo niedostępne.')}</h3><p>${T('Spróbuj ponownie później.')}</p></section>`);el.removeAttribute('aria-busy');return;}
  if(page==='profile'){ensureDraft(m);setHtml(el,profileView(m));}
  else if(page==='billing')setHtml(el,h`<div class="acct-wrap acct-narrow">${S.payment&&!S.ret?h`<div class="notice">${icon('alert')}<p>${S.payment}</p></div>`:''}${S.ret?.view?returnView(S.ret):planView(m)}</div>`);
- else if(page==='signup')setHtml(el,h`<div class="acct-wrap acct-narrow">${stepsView(3,3)}<div class="notice info-notice acct-created">${icon('check')}<p>${T('Konto utworzone. Możesz czytać czaty; pisanie włączy aktywacja konta.')}</p></div>${planView(m,{signup:true})}</div>`);
+ else if(page==='signup')setHtml(el,h`<div class="acct-wrap acct-narrow">${stepsView(3,3)}<div class="notice info-notice acct-created" tabindex="-1">${icon('check')}<p>${T('Konto utworzone. Możesz czytać czaty; pisanie włączy aktywacja konta.')}</p></div>${planView(m,{signup:true})}</div>`);
  el.removeAttribute('aria-busy');
 }
 /** Signed-in pages profile, billing and signup (step 3); el is the [data-acct-page] placeholder of the shell. */
@@ -413,6 +447,8 @@ export async function mount(page,el){
  }
  if(page==='billing'){const p=takePaymentMessage();if(p)S.payment=p;const ret=readReturn();if(ret&&!S.ret?.running){startReturn(ret);return;}}
  render(page,el);
+ if(page==='signup')focusWhenDrawn('.acct-created');
+ else if(page==='profile'&&m?.profile?.mustChangePassword)focusWhenDrawn('.acct-must');
 }
 
 // ---- Events (installed once) ----
@@ -436,7 +472,7 @@ function scheduleCheck(f,form){
    const r=await Client.request('username-check',{method:'POST',body:{u,firstName:String(f.first||''),lastName:String(f.last||'')},signal:abort?.signal});
    if(abort?.signal.aborted||normalizeUsername(f.username)!==u)return;
    const state=['available','taken','invalid','reserved'].includes(r?.status)?r.status:'idle';
-   setStatus(document.getElementById(form.id),f,{state,suggestions:state==='taken'&&Array.isArray(r.suggestions)?r.suggestions.filter(x=>typeof x==='string'&&validateUsername(x)==='valid').slice(0,3):[]});
+   setStatus(document.getElementById(form.id),f,{state,suggestions:state==='taken'?shownSuggestions(r.suggestions,f):[]});
   }catch(error){if(abort?.signal.aborted)return;setStatus(document.getElementById(form.id),f,{state:'error',message:message(error)});}
  },CHECK_DELAY);
 }
@@ -462,8 +498,17 @@ async function removePhoto(form){
  if(Client.isDemo)saveDemoProfile({avatar:null});else{await Client.request('avatar-delete',{method:'POST',body:{}});await loadMe({force:true});}
  repaint();ui()?.toast?.(T('Usunięto zdjęcie.'));
 }
-function failed(error,form){
- if(error?.app||error?.status===401||error?.status===402){ui()?.handleError?.(error,form);return;}
+async function failed(error,form){
+ if(error?.app||error?.status===401||error?.status===402){
+  // handleError may re-render the page (409: fresh workspace): the message and what was typed then go to the new form of the same id.
+  const id=form?.id,typed=id&&form.elements?[...form.elements].filter(el=>el.name&&el.type!=='file'&&el.type!=='checkbox'&&el.type!=='radio'&&el.value).map(el=>[el.name,el.value]):[];
+  await ui()?.handleError?.(error,form);
+  if(!id||form.isConnected||error?.status===401)return;
+  const live=document.getElementById(id);if(!live)return;
+  for(const [name,value] of typed){const el=live.elements?.[name];if(el&&!el.value)el.value=value;}
+  const box=live.querySelector('.form-error');if(box)box.textContent=message(error);
+  return;
+ }
  const box=form?.querySelector('.form-error'),text=message(error);if(box)box.textContent=text;else ui()?.toast?.(text);
 }
 async function onSubmit(event){
@@ -479,10 +524,11 @@ async function onSubmit(event){
   else if(form.id==='acct-delete-form')await deleteAccount(form);
  }catch(error){
   if(form.id==='acct-signup-2'||form.id==='acct-signup-1')S.signup.error=message(error);
-  failed(error,document.getElementById(form.id)||form);
+  await failed(error,document.getElementById(form.id)||form);
  }finally{
   // A disabled button drops the focus to <body>; when the form stays (an error, the deletion's second step) it goes back to the button.
   if(submit?.isConnected){submit.disabled=false;const a=document.activeElement;if(!a||a===document.body)submit.focus();}
+  else{const a=document.activeElement;if(!a||a===document.body)document.getElementById(form.id)?.querySelector('[type="submit"]')?.focus();}// the page was re-rendered
  }
 }
 function onInput(event){
@@ -492,7 +538,7 @@ function onInput(event){
  const f=modelFor(form);if(!f)return;readForm(form,f);
  if(t.name==='username'){f.touched=true;scheduleCheck(f,form);}
  else if((t.name==='firstName'||t.name==='lastName')&&form.id==='acct-signup-2'&&!f.touched&&f.first.trim()&&f.last.trim()){
-  const c=suggestUsernames(f.first,f.last)[0];if(c&&c!==f.username){f.username=c;form.elements.username.value=c;scheduleCheck(f,form);}
+  const c=prefillUsername(f);if(c&&c!==f.username){f.username=c;form.elements.username.value=c;scheduleCheck(f,form);}
  }
 }
 function onChange(event){
@@ -523,7 +569,7 @@ async function onClick(event){
   else if(act==='photo-remove'){el.disabled=true;await removePhoto(form);}
   else if(act==='install'){await registry.use('pwa')?.install?.();repaint();}
   else if(act==='delete-open')openDelete();
- }catch(error){if(el.isConnected)el.disabled=false;failed(error,form||el.closest('section'));}
+ }catch(error){if(el.isConnected)el.disabled=false;await failed(error,form||el.closest('section'));}
 }
 function onKey(event){
  const tab=event.target.closest?.('.acct-tab');if(!tab||event.altKey||event.ctrlKey||event.metaKey||!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;
@@ -538,13 +584,13 @@ function wire(){
  document.addEventListener('click',onClick);document.addEventListener('keydown',onKey);
  // A finished return screen stays while the plan page is re-rendered (language) and is dropped once another page is shown.
  registry.on('painted',({view,page}={})=>{
-  if(view==='app'&&page!=='billing'){S.payment='';if(S.ret&&!S.ret.running)S.ret=null;}
+  if(view==='app'&&page!=='billing'){S.payment='';if(S.ret&&!S.ret.running)S.ret=null;if(page!=='signup')S.portal='';}
   // Shared devices (plan §8.3 point 8): the typed e-mail, password and profile of a sign-up that was left (Back, logo, another hash)
   // are forgotten, and so is an unsaved profile draft once another page is shown (a language re-render keeps the same page).
   if(!(view==='public'&&page==='signup'))S.signup=newSignup();
   if(!(view==='app'&&page==='profile')){S.draft=null;S.draftFor=null;}
  });
- registry.on('logout',()=>{S.signup=newSignup();S.draft=null;S.draftFor=null;S.ret=null;S.del=null;S.payment='';});
+ registry.on('logout',()=>{S.signup=newSignup();S.draft=null;S.draftFor=null;S.ret=null;S.del=null;S.payment='';S.portal='';});
  // Back/forward cache: a page left for another site keeps its DOM and no 'painted' follows its return, so the typed sign-up
  // and the passwords are dropped before it is stored, and a sign-up shown again starts over (§8.3 point 8).
  addEventListener('pagehide',forget);

@@ -241,6 +241,26 @@ test('background counters for guests: the known last id from the lists, so the s
  }finally{S.views.delete(view);localStorage.removeItem(SEEN);chat.purgeIdentity();}
 });
 
+test('a change to a message below the loaded window is not inserted: history keeps asking before the first loaded id (no gap)',()=>{
+ const S=chat._state(),msg=(id,r=id,extra={})=>({id,r,t:Date.now(),a:'PidMarta0001',c:0,b:'m'+id,...extra});
+ try{
+  chat._internals.applyLists({cv:1,lobby:[{id:1,slug:'taekwondo',scope:'world',last:149,count:150,st:'open'}],tournaments:[]});
+  const page=[];for(let id=100;id<150;id++)page.push(msg(id));
+  chat._internals.apply({cv:1,ch:{'1':{rev:149,st:'open',more:false,older:true,m:page}}},{});
+  const c=S.channels.get('1'),first=()=>[...c.msgs.keys()].sort((a,b)=>a-b)[0];
+  assert.equal(first(),100);assert.equal(c.older,true);
+  // A moderator deletes message 20 and restores message 30 (both far back), and someone edits 120 and posts 150.
+  chat._internals.apply({cv:1,ch:{'1':{rev:153,st:'open',more:false,m:[msg(20,150,{x:'mod',b:''}),msg(30,151),msg(120,152,{x:'mod',b:''}),msg(150,153)]}}},{'1':149});
+  assert.equal(first(),100,'the old ids stay out: older() asks for history before 100');
+  assert.ok(!c.msgs.has(20)&&!c.msgs.has(30));assert.equal(c.msgs.get(120).x,'mod','a change inside the window applies');assert.ok(c.msgs.has(150),'a new message is added');
+  assert.equal(c.cursor,153,'the cursor still moves past the skipped rows');
+  // The whole channel loaded (older false): nothing lies below the window, so every change applies.
+  chat._internals.apply({cv:1,ch:{'1':{rev:160,st:'open',more:false,older:false,m:[msg(150,153)]}}},{});
+  chat._internals.apply({cv:1,ch:{'1':{rev:161,st:'open',more:false,m:[msg(140,161)]}}},{'1':160});
+  assert.ok(c.msgs.has(140),'without older history an earlier id is inserted');
+ }finally{chat.purgeIdentity();}
+});
+
 // ——— purgeIdentity ———
 function populate(){
  const S=chat._state();

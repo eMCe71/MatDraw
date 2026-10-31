@@ -77,6 +77,7 @@ export default {
  'Aktywuj':'Activate',
  'Zarządzaj subskrypcją':'Manage subscription',
  'Otworzy się bezpieczna strona Stripe.':'A secure Stripe page will open.',
+ 'Zaktualizuj kartę lub sprawdź stan subskrypcji w panelu Stripe.':'Update your card or check your subscription in the Stripe panel.',
  'Zaktualizowano informacje o subskrypcji.':'Subscription details updated.',
  // Staff banners (plan §3.2, §6.6).
  'Od {date} konto wymaga płatności.':'From {date} the account requires payment.',

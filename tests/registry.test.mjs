@@ -27,6 +27,14 @@ test('h escapes every interpolation, keeps nested SafeHtml, joins arrays; setHtm
  assert.equal(String(h`${null}${undefined}${false}${0}${''}`),'0','null, undefined and false give nothing');
  assert.equal(String(h`${t('Czat')}`),'Czat','T() results are plain strings and are escaped like any other');
  assert.equal(String(h`${{toString:()=>'<i>'}}`),'&lt;i&gt;','objects are not trusted because of toString');
+ // ARIA states (WCAG 4.1.2): a boolean as the quoted value of an aria-* attribute is "true"/"false", never the empty "undefined".
+ const on=true,off=false;
+ assert.equal(String(h`<button aria-pressed="${off}" aria-selected='${on}' aria-expanded="${!on}" aria-checked="${off}">`),
+  `<button aria-pressed="false" aria-selected='true' aria-expanded="false" aria-checked="false">`);
+ assert.equal(String(h`<b aria-label="${off}">${off}</b><i title="${off}" data-x="${off}"></i>`),'<b aria-label="false"></b><i title="" data-x=""></i>','only aria-* values, not text or other attributes');
+ assert.equal(String(h`<b aria-pressed="x ${off}" class="${off&&'on'}">${off&&h`<i></i>`}</b>`),'<b aria-pressed="x " class=""></b>','false inside a longer value or a condition still gives nothing');
+ assert.equal(String(h`<button${off?h` disabled`:''}${on?h` hidden`:''}>`),'<button hidden>','real boolean attributes keep the attribute-or-nothing form');
+ assert.equal(String(h`<b aria-pressed="${'true" onclick="x'}" aria-label="${null}">`),'<b aria-pressed="true&quot; onclick=&quot;x" aria-label="">','strings in aria values are escaped as before');
  assert.equal(escapeHtml(`<&>"'`),'&lt;&amp;&gt;&quot;&#39;');
  assert.throws(()=>new SafeHtml('<b>forged</b>'),TypeError,'SafeHtml cannot be constructed outside the registry');
  const el={innerHTML:''};

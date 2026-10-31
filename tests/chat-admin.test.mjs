@@ -294,10 +294,16 @@ test('panel in a browser: hostile texts stay text, the dialogs send the right bo
   await page.click('#mod-test-root [data-mod="mute"]');await page.waitForSelector('#mod-mute-form');
   assert.match(await page.locator('[data-mod-preview]').innerText(),/^Moderator wstrzymał Twoje pisanie do /);
   await page.check('#mod-mute-form input[value="perm"]');assert.equal(await page.locator('[data-mod-preview]').innerText(),'Moderator wstrzymał Twoje pisanie bezterminowo.');
-  await page.fill('#mod-mute-form [name=reason]','spam w czacie');await page.click('button[form="mod-mute-form"]');
+  await page.fill('#mod-mute-form [name=reason]','spam w czacie');
+  // keyboard (WCAG 2.4.3): Tab from the reason textarea goes on to Anuluj and the submit button, then wraps to the first control
+  const tabs=async(from,n)=>{await page.focus(from);const out=[];for(let i=0;i<n;i++){await page.keyboard.press('Tab');out.push(await page.evaluate(()=>{const a=document.activeElement;return (a.getAttribute('form')?'submit:':'')+(a.getAttribute('aria-label')||a.textContent.trim()||a.tagName);}));}return out;};
+  const muteTabs=await tabs('#mod-mute-form [name=reason]',3);
+  assert.deepEqual([muteTabs[0],muteTabs[1].startsWith('submit:'),muteTabs[2]],['Anuluj',true,'Zamknij okno'],muteTabs.join(' | '));
+  await page.click('button[form="mod-mute-form"]');
   await page.waitForFunction(()=>!document.querySelector('#mod-mute-form'));
   // delete dialog with a note; dismiss dialog empties the queue
-  await page.click('#mod-test-root [data-mod="delete"]');await page.fill('#mod-delete-form [name=note]','powód');await page.click('button[form="mod-delete-form"]');await page.waitForFunction(()=>!document.querySelector('#mod-delete-form'));
+  await page.click('#mod-test-root [data-mod="delete"]');await page.fill('#mod-delete-form [name=note]','powód');
+  const delTabs=await tabs('#mod-delete-form [name=note]',2);assert.deepEqual([delTabs[0],delTabs[1].startsWith('submit:')],['Anuluj',true],delTabs.join(' | '));await page.click('button[form="mod-delete-form"]');await page.waitForFunction(()=>!document.querySelector('#mod-delete-form'));
   await page.click('#mod-test-root [data-mod="channel"]');await page.check('#mod-channel-form input[value="readonly"]');await page.click('button[form="mod-channel-form"]');await page.waitForFunction(()=>!document.querySelector('#mod-channel-form'));
   await page.click('#mod-test-root [data-mod="dismiss"]');await page.click('button[form="mod-dismiss-form"]');await page.waitForSelector('#mod-test-root .mod-empty');
   const posts=await page.evaluate(()=>window.__calls.filter(c=>c.method==='POST').map(c=>[c.params.route||c.params,c.body]));

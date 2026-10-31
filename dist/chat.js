@@ -219,7 +219,10 @@ function apply(data,from={},sent=null){
    c.loaded=true;c.cursor=Math.max(c.cursor,e.rev||0);
   }else{
    if(e.more||c.cursor<(from[id]??0)){c.cursor=0;c.reload=true;continue;}
-   for(const m of list){if(!c.msgs.has(m.id)&&!m.x&&m.a!==me)others.set(id,(others.get(id)||0)+1);upsert(c,m);}
+   // A change to a message below the loaded window (a deletion, hide or restore far back) is not inserted: it would sit above the
+   // window without a gap and 'older' would ask for history before it, skipping everything between. History brings it in its state.
+   const floor=c.older&&c.msgs.size?sorted(c)[0].id:-Infinity;
+   for(const m of list){if(!c.msgs.has(m?.id)&&m?.id<floor)continue;if(!c.msgs.has(m.id)&&!m.x&&m.a!==me)others.set(id,(others.get(id)||0)+1);upsert(c,m);}
    if(Number.isFinite(e.rev))c.cursor=Math.max(c.cursor,e.rev);
   }
   c.known=Math.max(c.known||0,lastId(c));
@@ -394,8 +397,15 @@ function paint(v,{open:opening=false,others=0}={}){
  const c=S.channels.get(v.key);
  if(v.liveEl)v.liveEl.hidden=S.status!=='live';
  if(v.expand&&c)v.expand.href=registry.routeHash('chat',routeOf(c));
+ labels(v,c);
  if(v.tabs)paintTabs(v);if(v.rail)paintRail(v);if(v.chips)paintChips(v);if(v.convhead)paintConvHead(v,c);
  paintBanners(v,c);paintLog(v,c,opening,others);paintFoot(v,c);
+}
+/** The feed and the conversation are named after the channel shown (it is not known yet when the frame is drawn). */
+function labels(v,c){
+ const name=chFull(c),feed=T('Wiadomości: {channel}',{channel:name||T('Czat')}),conv=name||T('Czat');
+ if(v.log&&v.log.getAttribute('aria-label')!==feed)v.log.setAttribute('aria-label',feed);
+ const section=v.log?.closest('.chat-conv');if(section&&section.getAttribute('aria-label')!==conv)section.setAttribute('aria-label',conv);
 }
 /** Writes a navigation part only when its markup changed and keeps keyboard focus on the same control: polling repaints the
  * tabs, rail, chips, header and banners every few seconds, and a plain rewrite would drop the focus to <body>, re-announce
@@ -435,7 +445,7 @@ function paintChips(v){
 }
 function paintConvHead(v,c){
  const muted=c?.id&&mutedChannels().has(c.id),bell=signedIn()&&c?.id&&v.kind==='page';
- const back=v.kind==='page'?(signedIn()?h`<button type="button" class="chat-icon-btn chat-back" data-action="menu" aria-label="${T('Otwórz menu')}">${icon('menu')}</button>`:h`<button type="button" class="chat-icon-btn chat-back" data-chat-act="home" aria-label="${T('Wstecz')}">${icon('left')}</button>`):'';
+ const back=v.kind==='page'?(signedIn()?h`<button type="button" class="chat-icon-btn chat-back" data-action="menu" aria-label="${T('Otwórz menu')}" aria-expanded="${!!doc().querySelector('#app-sidebar.open')}" aria-controls="app-sidebar">${icon('menu')}</button>`:h`<button type="button" class="chat-icon-btn chat-back" data-chat-act="home" aria-label="${T('Wstecz')}">${icon('left')}</button>`):'';
  const chip=c?.kind==='tournament'&&c.date===today()?h`<span class="chat-today">${T('Dziś zawody')}</span>`:'';
  swap(v.convhead,h`${back}${c?chIcon(c):''}<div class="chat-grow"><h2 class="chat-conv-title">${v.kind==='tournament'?T('Czat turnieju'):chFull(c)||T('Czat')}</h2><p><span class="chat-conv-sub">${v.kind==='tournament'?chName(c):chAbout(c)}</span>${chip}</p></div>${live()}${bell?h`<button type="button" class="chat-icon-btn${muted?' is-muted':''}" data-chat-act="mute" aria-pressed="${!!muted}" title="${muted?T('Powiadomienia: wyciszone'):T('Powiadomienia: włączone')}" aria-label="${muted?T('Powiadomienia: wyciszone'):T('Powiadomienia: włączone')}">${icon('bell')}</button>`:''}`);
  v.liveEl=v.convhead.querySelector('[data-chat-part="live"]');if(v.liveEl)v.liveEl.hidden=S.status!=='live';
@@ -760,15 +770,33 @@ function ghostCard(trigger){
  const cfg=S.config;setHtml(pop,h`<p>${T('Kto pisze? Zobaczysz po założeniu konta.')}</p><div class="chat-pop-acts">${cfg?.signup?h`<a class="btn primary" href="#signup">${T('Załóż konto')}</a>`:''}${signedIn()?h`<button type="button" class="btn primary" data-chat-act="nav" data-chat-page="billing">${T('Aktywuj')}</button>`:h`<button type="button" class="btn secondary" data-action="${doc().querySelector('#login-form')?'login-jump':'guest-login'}">${T('Zaloguj się')}</button>`}<button type="button" class="btn secondary" data-chat-act="pop-close">${T('Zamknij')}</button></div>`);
  showPop(trigger,pop);
 }
-let popState=null;
+let popState=null,held=null,modalWatch=null;
+// The message toolbar is shown only on hover or focus inside the message, so while a popover or dialog opened from it is open the
+// message keeps .is-active (the toolbar stays visible) and focus can return to the trigger; when the trigger is gone or hidden
+// (a repaint), focus goes to the message itself (WCAG 2.4.3).
+function hold(trigger){
+ release();const msg=trigger?.closest?.('.chat-msg[data-id]');if(!msg)return;
+ msg.classList.add('is-active');held={msg,id:msg.dataset.id,trigger};
+ const root=doc().getElementById?.('modal-root');
+ if(root&&!modalWatch&&typeof MutationObserver==='function'){modalWatch=new MutationObserver(()=>{if(root.childElementCount||!held)return;const h0=held;setTimeout(()=>{if(held!==h0)return;const a=doc().activeElement;if(!a||a===doc().body)focusBack(h0);release();},0);});modalWatch.observe(root,{childList:true});}
+}
+function release(){held?.msg.classList.remove('is-active');held=null;}
+const shown=node=>!!node?.isConnected&&node.getClientRects().length>0;
+function focusBack(at){
+ if(shown(at?.trigger)){at.trigger.focus();return;}
+ const msg=at?.msg?.isConnected?at.msg:at?.id?doc().querySelector('.chat-msg[data-id="'+String(at.id).replace(/[^0-9]/g,'')+'"]'):null;
+ if(msg){msg.tabIndex=-1;msg.focus({preventScroll:false});}
+}
 function showPop(trigger,pop){
  const host=trigger.closest('.chat-card,.chat-full')||doc().body;host.appendChild(pop);
  const hr=host.getBoundingClientRect(),tr=trigger.getBoundingClientRect();
  pop.style.left=Math.max(8,Math.min(tr.left-hr.left,hr.width-pop.offsetWidth-8))+'px';
  const below=tr.bottom-hr.top+8;pop.style.top=(below+pop.offsetHeight>hr.height-8?Math.max(8,tr.top-hr.top-pop.offsetHeight-8):below)+'px';
- popState={pop,trigger};(pop.querySelector('button,a')||pop).focus();
+ popState={pop,trigger};hold(trigger);(pop.querySelector('button,a')||pop).focus();
 }
-function closePop(focus=false){if(!popState)return;const {pop,trigger}=popState;popState=null;pop.remove();if(focus&&trigger?.isConnected)trigger.focus();}
+function closePop(focus=false){if(!popState)return;const {pop,trigger}=popState,at=held&&held.trigger===trigger?held:{trigger,msg:trigger?.closest?.('.chat-msg[data-id]')};popState=null;pop.remove();if(focus)focusBack(at);}
+/** Before a dialog opened from a message (or from its "more" menu): focus back on the visible trigger, so the dialog returns there. */
+function beforeDialog(){if(popState)closePop(true);const a=doc().activeElement;if(a?.closest?.('.chat-msg[data-id]'))hold(a);}
 function moreMenu(trigger,id){
  closePop();const [,m]=findMessage(id);if(!m)return;
  const own=m.a===myPid(),pop=el('div','chat-pop chat-menu');pop.setAttribute('role','menu');pop.setAttribute('aria-label',T('Więcej działań'));
@@ -777,12 +805,12 @@ function moreMenu(trigger,id){
  showPop(trigger,pop);
 }
 function openReport(id){
- closePop();const reasons=[['spam',T('Spam lub reklama')],['abuse',T('Obraźliwe lub nienawistne treści')],['harassment',T('Nękanie')],['child_data',T('Dane osobowe lub wizerunek dziecka')],['other',T('Inne')]];
+ beforeDialog();const reasons=[['spam',T('Spam lub reklama')],['abuse',T('Obraźliwe lub nienawistne treści')],['harassment',T('Nękanie')],['child_data',T('Dane osobowe lub wizerunek dziecka')],['other',T('Inne')]];
  ui().modal?.(T('Zgłoś wiadomość'),h`<form id="chat-report-form" data-id="${id}"><fieldset><legend>${T('Powód zgłoszenia')}</legend>${reasons.map(([k,label],i)=>h`<label class="radio-card chat-reason"><input type="radio" name="reason" value="${k}"${i===0?h` checked`:''}><strong>${label}</strong></label>`)}</fieldset><label class="field-label chat-report-comment">${T('Komentarz (opcjonalnie)')}<input name="comment" maxlength="300" autocomplete="off"></label><div class="form-error" role="alert"></div></form>`,
   h`<button type="button" class="btn secondary" data-action="close-modal">${T('Anuluj')}</button><button type="submit" class="btn primary" form="chat-report-form">${T('Wyślij zgłoszenie')}</button>`);
 }
 function confirmDelete(id){
- closePop();ui().modal?.(T('Usuń wiadomość'),h`<p>${T('Usunąć tę wiadomość? Tej operacji nie można cofnąć.')}</p><div class="form-error" role="alert"></div>`,h`<button type="button" class="btn secondary" data-action="close-modal">${T('Anuluj')}</button><button type="button" class="btn primary chat-danger" data-chat-act="delete-confirm" data-id="${id}">${T('Usuń')}</button>`);
+ beforeDialog();ui().modal?.(T('Usuń wiadomość'),h`<p>${T('Usunąć tę wiadomość? Tej operacji nie można cofnąć.')}</p><div class="form-error" role="alert"></div>`,h`<button type="button" class="btn secondary" data-action="close-modal">${T('Anuluj')}</button><button type="button" class="btn primary chat-danger" data-chat-act="delete-confirm" data-id="${id}">${T('Usuń')}</button>`);
 }
 const viewOf=node=>node?.closest?.('[data-chat-mount]')?.chatView||null;
 async function act(name,node,event){
@@ -828,7 +856,7 @@ function ensureGlobal(){
  if(ready)return;ready=true;const d=doc();
  d.addEventListener('click',event=>{
   const node=event.target.closest?.('[data-chat-act]');
-  if(popState&&!event.target.closest?.('.chat-pop')&&node!==popState.trigger)closePop();
+  if(popState&&!event.target.closest?.('.chat-pop')&&node!==popState.trigger){closePop();if(!node)release();}
   if(node)act(node.dataset.chatAct,node,event).catch(()=>{});
  });
  d.addEventListener('submit',event=>{
@@ -842,6 +870,7 @@ function ensureGlobal(){
   const t=event.target;if(!t.matches?.('textarea[data-chat-input]'))return;const v=viewOf(t);if(!v)return;
   grow(t);count(v,t);clearTimeout(t.saveTimer);t.saveTimer=setTimeout(()=>session.set(draftKey(t.dataset.chatKey||v.key),t.value),300);S.touchedAt=Date.now();S.transport?.interact();
  });
+ d.addEventListener('focusin',event=>{if(held&&!event.target.closest?.('#modal-root,.chat-pop'))release();});
  d.addEventListener('focusout',event=>{const t=event.target;if(t.matches?.('textarea[data-chat-key]')){clearTimeout(t.saveTimer);session.set(draftKey(t.dataset.chatKey),t.value);}});
  d.addEventListener('keydown',event=>{
   const t=event.target;

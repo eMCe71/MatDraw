@@ -119,7 +119,8 @@
  .login-foot{padding:0 40px 16px}
 }
 @media(max-width:1000px){
- .login-page{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}
+ /* The chat gets its own full-width row: in a half column it would be 260–400 px wide (05 §2.4: a readable chat card). */
+ .login-page{grid-template-columns:minmax(0,1fr) minmax(0,1fr);grid-template-areas:"story auth" "chat chat" "upcoming foot"}
  .login-story{padding:35px 35px 0}
  .home-centre{padding:24px 35px 8px}
  .login-page .login-upcoming{padding:20px 35px 35px}

@@ -107,6 +107,7 @@ export default {
  'Klub lub szkoła (opcjonalnie)':'Club or school (optional)',
  'Pokaż klub w profilu':'Show the club on my profile',
  'Pokazuj członkom moje pełne nazwisko':'Show members my full last name',
+ 'Nazwę użytkownika widzą członkowie czatu.':'Chat members see your username.',
  'Bez zaznaczenia inni członkowie widzą imię i inicjał nazwiska, np. Marta K.':'Unticked, other members see your first name and last initial, e.g. Marta K.',
  'Uzupełnij imię, nazwisko, nazwę użytkownika, kraj i sport, aby pisać na czacie.':'Add your first and last name, username, country and sport to post in the chat.',
  'Zapisano profil.':'Profile saved.',

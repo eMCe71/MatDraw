@@ -143,6 +143,53 @@ test('profile fields: "show my full name" is unticked by default and the names t
  assert.match(src,/request\('username-check',\{method:'POST',body:\{u,firstName:/,'username-check is a POST with the names in the body');
  assert.doesNotMatch(src+source('account-boot.js'),/route=username-check|username-check\?|apiUrl\(\{route:'username-check'/);
 });
+test('username prefill and suggestions never show the full surname by default (plan §7.7, §10: minors, "initial" default)',async()=>{
+ const {suggestUsernames,slugName}=await import('../dist/profile-data.js');
+ const PEOPLE=[['Marta','Kowalska'],['Łukasz','Żółć'],['Zoë','Brontë-Smith'],['Jan','Nowak'],['Aleksandra','Wiśniewska-Kowalczyk'],['Li','Wu']];
+ for(const [first,last] of PEOPLE){
+  const l=slugName(last),list=suggestUsernames(first,last,'',{full:false});
+  assert.ok(list.length>0,first);
+  for(const c of list)assert.ok(!c.includes(l)||l.length<2,c+' contains the surname '+l);
+  assert.equal(flow.prefillUsername({first,last,full:false}),list[0]);
+  assert.equal(flow.prefillUsername({first,last,full:true}),list[0],'the box does not turn the prefill into the full surname');
+ }
+ assert.equal(flow.prefillUsername({first:'Marta',last:'Kowalska'}),'marta.k');
+ assert.equal(flow.prefillUsername({first:'Łukasz',last:'Żółć'}),'lukasz.z','ASCII-folded');
+ assert.deepEqual(suggestUsernames('Marta','Kowalska','marta.k',{full:false}).slice(0,3),['marta_k','marta.k2','martak']);
+ assert.deepEqual(suggestUsernames('Marta','Kowalska').slice(0,2),['marta.kowalska','marta_kowalska'],'the default order (server parity) is unchanged');
+ // Server suggestions for a taken name: the full-surname ones are hidden unless the person chose to show the full name.
+ const server=['marta.kowalska','marta_kowalska','marta.k2','bad name'];
+ assert.deepEqual(flow.shownSuggestions(server,{first:'Marta',last:'Kowalska',full:false}),['marta.k2']);
+ assert.deepEqual(flow.shownSuggestions(server,{last:'Kowalska',full:true}),['marta.kowalska','marta_kowalska','marta.k2']);
+ assert.deepEqual(flow.shownSuggestions(null,{last:'K'}),[]);
+ // A short surname is also a substring of the initial-only candidates: those stay, only the full-surname ones are hidden.
+ for(const [first,last,want] of [['Alicja','Li',['alicja.l2','alicja.l3']],['Ewa','Wa',['ewa.w2','ewa.w3']],['Marta','Kowalska',['marta.k2','marta.k3']]]){
+  const username=suggestUsernames(first,last,'',{full:false})[0],sent=suggestUsernames(first,last,username);
+  assert.deepEqual(flow.shownSuggestions(sent,{first,last,username,full:false}),want,first+' '+last);
+  for(const x of flow.shownSuggestions(sent,{first,last,username,full:false}))assert.ok(!x.includes(slugName(first)+'.'+slugName(last))&&!x.includes(slugName(first)+'_'+slugName(last))&&x!==slugName(first)+slugName(last),x);
+ }
+ assert.deepEqual(flow.shownSuggestions(['alicja.li','alicja_li','alicja.l2','alicjali'],{first:'Alicja',last:'Li',username:'alicja.l',full:false}),['alicja.l2']);
+ // A long name: the server cuts the full-surname forms to 24 characters, so they no longer contain the whole surname; still hidden.
+ for(const [first,last,want] of [['Katarzyna','Szczepańska-Wiśniewska',['katarzyna.s2','katarzyna.s3']],['Małgorzata','Kowalczykowska',['malgorzata.k2','malgorzata.k3']],['Bartłomiej','Brzęczyszczykiewicz',['bartlomiej.b2','bartlomiej.b3']]]){
+  const username=flow.prefillUsername({first,last}),sent=suggestUsernames(first,last,username);
+  assert.ok(sent.some(x=>x.length===24&&!x.includes(slugName(last))),'the server list has a cut full-surname form: '+sent);
+  assert.deepEqual(flow.shownSuggestions(sent,{first,last,username,full:false}),want,first+' '+last);
+  assert.deepEqual(flow.shownSuggestions(sent,{first,last,username,full:true}).slice(0,2),sent.slice(0,2),'shown when the full name is');
+ }
+ assert.deepEqual(flow.shownSuggestions(['marta.kowalskawisniewsk2','marta.k2'],{first:'Marta',last:'Kowalska-Wiśniewska',username:'marta.k',full:false}),['marta.k2']);
+ assert.deepEqual(flow.shownSuggestions(['marta.kowalska2'],{first:'Marta',last:'Kowalska',username:'marta.kowalska',full:false}),['marta.kowalska2'],'what the person typed is theirs to extend');
+ const html=String(flow.fieldsView(flow.newFields(null,['pl-PL']),{id:'t',signup:true}));
+ assert.match(html,/Nazwę użytkownika widzą członkowie czatu\./,'the sign-up says who sees the username');
+});
+test('member shell: own name, @username and initials from the profile; nothing borrowed from a club (F13)',()=>{
+ const me=(profile,role='member')=>({user:{role},profile});
+ assert.deepEqual(boot.selfName(me({firstName:' Marta ',lastName:'Kowalska',username:'marta.k'})),{name:'Marta Kowalska',sub:'@marta.k'});
+ assert.equal(boot.selfName(me(null)),null,'no profile: the role stays');assert.equal(boot.selfName(me({firstName:'A'},'club')),null,'staff keep role and club');
+ assert.equal(boot.selfInitials(me(null)),'');
+ const app=source('app.js');
+ assert.match(app,/data-self-avatar>\$\{member\?'':initials\(club\?\.name\|\|T\('Klub'\)\)\}/,'no club initials for a member');
+ assert.match(app,/member\?T\('Społeczność MatBravo'\):T\('Wspólna baza zawodników i turniejów\.'\)/,'no athlete-database note for members');
+});
 test('flow mark (plan §9.4): set and removed through the contract key, stale after 30 minutes',()=>{
  const s=new Store();assert.equal(boot.FLOW_MARK,'matdraw.flow.active');
  boot.flowStart(s,1000);assert.equal(s.getItem('matdraw.flow.active'),'1000');assert.ok(boot.flowActive(s,1000+29*60e3));assert.ok(!boot.flowActive(s,1000+31*60e3));
@@ -327,12 +374,12 @@ test('PHP build in a browser: sign-up, Checkout and return, portal, cancel, prof
   await page.click('#acct-signup-1 button[type="submit"]');await page.waitForSelector('#acct-signup-2');
   // Step 2: suggestion from the names, live check, language switch keeps everything (QA §11 point 1).
   await page.fill('#acct-signup-2 [name="firstName"]','Marta');await page.fill('#acct-signup-2 [name="lastName"]','Kowalska');
-  await page.waitForSelector('#acct-signup-2 .acct-st.ok');assert.equal(await page.inputValue('#acct-signup-2 [name="username"]'),'marta.kowalska');
+  await page.waitForSelector('#acct-signup-2 .acct-st.ok');assert.equal(await page.inputValue('#acct-signup-2 [name="username"]'),'marta.k','the prefill uses the surname initial only (§7.7)');
   assert.equal(await page.inputValue('#acct-signup-2 [name="country"]'),'PL');assert.equal(await page.isChecked('#acct-signup-2 [name="fullName"]'),false);
   await page.click('[data-sport="karate"]');await page.click('[data-sport="taekwondo"]');
   await page.fill('#acct-signup-2 [name="clubText"]','KS Tygrys');
   await page.click('[data-set-lang="en"]');await page.waitForFunction(()=>document.querySelector('#acct-step-title')?.textContent==='Your profile');
-  for(const [name,value] of [['firstName','Marta'],['lastName','Kowalska'],['username','marta.kowalska'],['clubText','KS Tygrys'],['country','PL']])assert.equal(await page.inputValue(`#acct-signup-2 [name="${name}"]`),value,name);
+  for(const [name,value] of [['firstName','Marta'],['lastName','Kowalska'],['username','marta.k'],['clubText','KS Tygrys'],['country','PL']])assert.equal(await page.inputValue(`#acct-signup-2 [name="${name}"]`),value,name);
   assert.equal(await page.getAttribute('[data-sport="karate"]','aria-pressed'),'true');
   await page.click('[data-set-lang="pl"]');await page.waitForFunction(()=>document.querySelector('#acct-step-title')?.textContent==='Twój profil');
   await shot(page,'php-signup2-1440');
@@ -342,6 +389,7 @@ test('PHP build in a browser: sign-up, Checkout and return, portal, cancel, prof
   // Step 3 after the reload: plan in PLN, the mark still set.
   await page.waitForSelector('.acct-plan .acct-pay',{timeout:20000});assert.ok(await mark(page),'mark kept in step 3');
   assert.match(spaces(await page.textContent('.acct-plan')),/8,99 zł/);assert.match(await page.textContent('.acct-steps-label'),/Krok 3 z 3/);
+  await page.waitForFunction(()=>document.activeElement?.classList.contains('acct-created'),null,{timeout:5000});// focus on "Konto utworzone", not <body>
   await shot(page,'php-signup3-1440');
   const checkout=page.waitForRequest(r=>r.url().includes('route=billing-checkout'));
   await page.click('[data-acct-act="checkout"]');
@@ -394,10 +442,13 @@ test('PHP build in a browser: sign-up, Checkout and return, portal, cancel, prof
   await page.goto(app);await page.fill('#login-form [name="email"]',m.email);await page.fill('#login-form [name="password"]',reset.data.temporaryPassword);
   await page.click('#login-form button[type="submit"]');await page.waitForSelector('.acct-must',{timeout:20000});
   assert.equal(await page.evaluate(()=>location.hash),'#profile?tab=security');
+  await page.waitForFunction(()=>document.activeElement?.classList.contains('acct-must'),null,{timeout:5000});// focus on the notice, not <body>
   await page.evaluate(()=>{location.hash='#chat';});await page.waitForFunction(()=>location.hash==='#profile?tab=security');
   assert.ok(await page.isDisabled('#acct-tab-profile'));await noOverflow(page,'temporary password 390');await shot(page,'php-temporary-390');
   await page.fill('#acct-password-form [name="currentPassword"]',reset.data.temporaryPassword);await page.fill('#acct-password-form [name="password"]','Pomaranczowy-Rower-2028');
   await page.click('#acct-password-form button[type="submit"]');await page.waitForFunction(()=>location.hash!=='#profile?tab=security',null,{timeout:20000});
+  await page.waitForFunction(()=>document.activeElement&&document.activeElement!==document.body,null,{timeout:5000});
+  assert.match(await page.evaluate(()=>document.activeElement.className+' '+document.activeElement.tagName),/chat-log|H1/,'focus on the chat after the change');
   await ctx.close();
 
   // Staff banner: free until a date within 14 days (requireFrom), then grace.
@@ -410,6 +461,51 @@ test('PHP build in a browser: sign-up, Checkout and return, portal, cancel, prof
   await shot(page,'php-staff-banner-1440');
   fixture('billing',{userId:created.id,exempt_until:now-2*86400});await page.reload();await page.waitForSelector('.acct-banner');assert.match(await page.textContent('.acct-banner'),/Karencja do/);
   await page.click('.acct-banner [data-acct-act="plan"]');await page.waitForSelector('.acct-plan');assert.equal(await page.locator('.acct-banner').count(),0,'no banner on the plan page');
+  await ctx.close();
+
+  // billing-checkout 409 {portal:true} (Stripe still holds a subscription, e.g. past_due after the grace days): the plan page offers
+  // the Customer Portal instead of painting the same checkout button again.
+  const payer=fixture('member',{email:'e2e.payer.'+Date.now()+'@example.test',profile:true});
+  ({ctx,page}=await context(1440,900));
+  await page.goto(app);await page.fill('#login-form [name="email"]',payer.email);await page.fill('#login-form [name="password"]','TestPassword2026!');
+  await page.click('#login-form button[type="submit"]');await page.waitForSelector('.app-shell');
+  // A member's shell (F13): the own name and @username instead of the role "Członek", initials from the profile.
+  await page.waitForFunction(()=>document.querySelector('.sidebar [data-self-name]')?.textContent==='Test Członek');
+  assert.match(await page.textContent('.sidebar [data-self-sub]'),/^@e2epayer/);assert.equal(await page.textContent('.sidebar [data-self-avatar]'),'TC');
+  await page.goto(app+'#billing');await page.waitForSelector('.acct-plan [data-acct-act="checkout"]');
+  const isCheckout=u=>new URL(u).searchParams.get('route')==='billing-checkout';
+  await page.route(isCheckout,route=>route.fulfill({status:409,contentType:'application/json',body:JSON.stringify({error:'Masz już aktywną subskrypcję.',portal:true})}));
+  await page.click('.acct-plan [data-acct-act="checkout"]');await page.waitForSelector('.acct-plan [data-acct-act="portal"]');
+  assert.match(await page.textContent('.acct-plan h2'),/Masz już aktywną subskrypcję/);assert.equal(await page.locator('.acct-plan [data-acct-act="checkout"]').count(),0,'no second checkout button');
+  assert.equal(await page.evaluate(()=>document.activeElement?.dataset?.acctAct),'portal','focus on the portal button');
+  const portalAsked=page.waitForRequest(r=>new URL(r.url()).searchParams.get('route')==='billing-portal');await page.click('.acct-plan [data-acct-act="portal"]');await portalAsked;
+  await page.unroute(isCheckout);
+  await ctx.close();
+
+  // Staff password on #profile while someone else saves (final review F3): account.password reads no workspace data, so a revision
+  // conflict is retried once with the fresh revision; a conflict that persists is shown in the form, with what was typed kept.
+  const pwEmail='e2e.pw.'+Date.now()+'@example.test';
+  const pwUser=await admin.cmd('account.save',{email:pwEmail,clubId,role:'editor',active:true,password:'EditorForTests2026!'});
+  fixture('billing',{userId:pwUser.id,billing_exempt:1,exempt_reason:'e2e'});
+  ({ctx,page}=await context(1440,900));
+  await page.goto(app);await page.fill('#login-form [name="email"]',pwEmail);await page.fill('#login-form [name="password"]','EditorForTests2026!');
+  await page.click('#login-form button[type="submit"]');await page.waitForSelector('.app-shell');
+  await page.goto(app+'#profile?tab=security');await page.waitForSelector('#acct-password-form');
+  await admin.load();await admin.cmd('account.save',{email:'e2e.bump.'+Date.now()+'@example.test',clubId,role:'editor',active:true,password:'EditorForTests2026!'});
+  const statuses=[];const onCommand=r=>{if(r.url().includes('route=command'))statuses.push(r.status());};page.on('response',onCommand);
+  await page.fill('#acct-password-form [name="currentPassword"]','EditorForTests2026!');await page.fill('#acct-password-form [name="password"]','Zielona-Herbata-2029');
+  await page.click('#acct-password-form button[type="submit"]');await page.waitForFunction(()=>document.querySelector('#toast')?.textContent.includes('Hasło zostało zmienione'),null,{timeout:20000});
+  assert.deepEqual(statuses,[409,200],'the stale revision is retried once');page.off('response',onCommand);
+  const old=new Client();await old.req('session');assert.notEqual((await old.req('login',{email:pwEmail,password:'EditorForTests2026!'})).status,200,'the old password no longer works');
+  // Every command answers 409: the message is visible in the (re-rendered) form and the typed values stay.
+  const isCommand=u=>new URL(u).searchParams.get('route')==='command';
+  await page.route(isCommand,route=>route.fulfill({status:409,contentType:'application/json',body:JSON.stringify({error:'Dane zmieniły się w innej sesji. Odśwież widok i ponów zapis.'})}));
+  await page.fill('#acct-password-form [name="currentPassword"]','Zielona-Herbata-2029');await page.fill('#acct-password-form [name="password"]','Czerwona-Herbata-2030');
+  await page.click('#acct-password-form button[type="submit"]');
+  await page.waitForFunction(()=>document.querySelector('#acct-password-form .form-error')?.textContent.trim().length>0,null,{timeout:20000});
+  assert.match(await page.textContent('#acct-password-form .form-error'),/Dane zmieniły się/);
+  assert.equal(await page.inputValue('#acct-password-form [name="password"]'),'Czerwona-Herbata-2030','typed values kept');
+  await page.unroute(isCommand);
   await ctx.close();
   assert.deepEqual(errors,[]);
  }finally{await browser.close();}

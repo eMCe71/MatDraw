@@ -44,6 +44,16 @@ test('no HTML sinks, script elements or on* attributes in the community modules'
  assert.deepEqual(found,[]);
 });
 
+test('ARIA booleans: the template writes only the words true/false into aria-* values and escapes everything else',async()=>{
+ const {h}=await import('../dist/registry.js');
+ for(const evil of ['"><img src=x onerror=1>',"' onfocus='x",'`',{toString:()=>'"><svg onload=1>'},['"><b>'],0,NaN])
+  assert.match(String(h`<button aria-pressed="${evil}" aria-label='${evil}'>`),/^<button aria-pressed="[^"'<>`]*" aria-label='[^"'<>`]*'>$/,String(evil));
+ assert.equal(String(h`<button aria-pressed="${false}">`),'<button aria-pressed="false">');
+ // No template in the modules spells an empty ARIA state literally either.
+ const found=[];for(const file of MODULES)if(/aria-(?:pressed|selected|checked|expanded)=(?:""|'')/.test(read(file)))found.push(file);
+ assert.deepEqual(found,[]);
+});
+
 test('the scanner catches deliberate violations (and ignores comments and safe code)',()=>{
  const bad={
   'el.innerHTML=message.text;':'innerHTML','el.innerHTML += x':'innerHTML','node.outerHTML=x':'outerHTML','list.insertAdjacentHTML("beforeend",row)':'insertAdjacentHTML',

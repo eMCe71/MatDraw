@@ -155,5 +155,7 @@ export default {
  'Waluta planu':'Plan currency',
  'Z kraju w profilu':'From the country in the profile',
  'Waluty nie zmienisz przy trwającej subskrypcji.':'The currency cannot be changed during an ongoing subscription.',
- 'Zapisano ustawienia płatności.':'Payment settings saved.'
+ 'Zapisano ustawienia płatności.':'Payment settings saved.',
+ 'Pełny dostęp (płatności wyłączone)':'Full access (payments off)',
+ 'Płatności są wyłączone: konto ma pełny dostęp. Te ustawienia zaczną działać po włączeniu płatności.':'Payments are switched off: the account has full access. These settings apply once payments are switched on.'
 };

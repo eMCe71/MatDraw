@@ -135,8 +135,16 @@ export function selfInitials(me){
  const p=me?.profile;if(me?.user?.role!=='member'||!p)return '';
  return ((String(p.firstName||'').trim()[0]||'')+(String(p.lastName||'').trim()[0]||'')).toLocaleUpperCase();
 }
+/** Name line of a member's own shell block: the name from the profile and @username (the shell only knows the role); null otherwise. */
+export function selfName(me){
+ const p=me?.profile;if(me?.user?.role!=='member'||!p)return null;
+ const name=[p.firstName,p.lastName].map(x=>String(x||'').trim()).filter(Boolean).join(' ');
+ return name?{name,sub:p.username?'@'+p.username:''}:null;
+}
 function paintSelf(){
- const me=getMe(),src=avatarSrc(me?.profile,64),own=selfInitials(me);
+ const me=getMe(),src=avatarSrc(me?.profile,64),own=selfInitials(me),named=selfName(me);
+ for(const el of document.querySelectorAll('[data-self-name]')){if(el.dataset.acctRole===undefined)el.dataset.acctRole=el.textContent;const v=named?named.name:el.dataset.acctRole;if(el.textContent!==v)el.textContent=v;}
+ for(const el of document.querySelectorAll('[data-self-sub]')){if(el.dataset.acctSub===undefined)el.dataset.acctSub=el.textContent;const v=named?named.sub:el.dataset.acctSub;if(el.textContent!==v)el.textContent=v;}
  for(const el of document.querySelectorAll('[data-self-avatar]')){
   if(el.dataset.acctInitials===undefined)el.dataset.acctInitials=el.textContent;
   const img=el.querySelector('img.acct-self-img'),fallback=own||el.dataset.acctInitials||'';
