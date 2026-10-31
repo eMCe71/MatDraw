@@ -6,7 +6,7 @@ Workflow `.github/workflows/deploy.yml` przy każdym pushu uruchamia testy i bud
 
 Kolejność kroków każdego wdrożenia:
 
-1. **Testy** (JavaScript, PHP, testy HTTP na MySQL 8.0 i MariaDB 10.6, zgodność starego kodu z nowym schematem, test skryptów wdrożenia).
+1. **Testy** (JavaScript, PHP, testy HTTP na MySQL 8.0 i MariaDB 10.6, zgodność starego kodu z nowym schematem, test skryptów wdrożenia). Testy przeglądarkowe PWA (Playwright) biegną jako osobne zadanie informacyjne: ich błąd nie wstrzymuje wdrożenia.
 2. **Sprawdzenie serwera** — zakłada brakujące katalogi i sprawdza `config.php`.
 3. **Wysłanie wydania** do `~/matdraw/releases/<data>-<commit>`.
 4. **Migracje bazy** — kopia bazy, potem zmiany schematu. Strona przez cały czas działa na poprzednim wydaniu. Błąd zatrzymuje wdrożenie w tym miejscu.
@@ -145,7 +145,7 @@ printf '%s\n' "$MATDRAW_ADMIN_PASSWORD" | /usr/local/php83/bin/php backend/bin/i
 unset MATDRAW_ADMIN_PASSWORD
 ```
 
-Domyślne `php` w SSH na web9 to 8.1, dlatego instalator i wszystkie skrypty uruchamiamy przez `/usr/local/php83/bin/php`. Instalator tworzy tabele bazowe, **także wszystkie tabele z migracji** (konta członków, czat, płatności), i pierwsze konto. Przy kolejnych wdrożeniach go nie uruchamiaj: nowe tabele dodaje samo wdrożenie. Następnie uruchom workflow ponownie — weryfikacja powinna przejść bez ostrzeżeń. Dalej postępuj według `INSTALL-PL.md`, krok 5–7.
+Domyślne `php` w SSH na web9 to 8.1, dlatego instalator i wszystkie skrypty uruchamiamy przez `/usr/local/php83/bin/php`. Instalator tworzy tabele bazowe, **także wszystkie tabele z migracji** (konta członków, czat, płatności), i pierwsze konto. Przy kolejnych wdrożeniach go nie uruchamiaj: nowe tabele dodaje samo wdrożenie. Następnie uruchom workflow ponownie — weryfikacja powinna przejść bez ostrzeżeń. Dalej postępuj według `INSTALL-PL.md`, kroki 6–8 („Pierwsza instalacja”).
 
 ## Ponowny deploy
 
@@ -285,11 +285,11 @@ Wszystkie poniższe klucze są **opcjonalne**: bez nich aplikacja używa bezpiec
 
 **Dozwolone kombinacje przełączników** (kolejność włączania bez ryzyka dla klubów):
 
-| Etap | `signup_enabled` | `signup_invite_token` | `billing_enabled` | `billing_enforce` | Co widzi gość |
+| Krok | `signup_enabled` | `signup_invite_token` | `billing_enabled` | `billing_enforce` | Co widzi gość |
 |---|---|---|---|---|---|
-| 1. po wdrożeniu | `false` | brak | `false` | `false` | „Zaloguj się, aby pisać”; bez rejestracji |
-| 3. okno testów właściciela | `false` | ustawiony | `true` (`billing_mode='test'`) | `true` | jak wyżej; rejestracja tylko z linku z tokenem |
-| 5. start | `true` | usunięty | `true` | `true` | „Załóż konto · 8,99 zł / mies.” |
+| po wdrożeniu (domyślnie) | `false` | brak | `false` | `false` | „Zaloguj się, aby pisać”; bez rejestracji |
+| okno testów właściciela (kroki ręczne, punkt 8) | `false` | ustawiony | `true` (`billing_mode='test'`) | `true` | jak wyżej; rejestracja tylko z linku z tokenem |
+| start (kroki ręczne, punkt 9) | `true` | usunięty | `true` | `true` | „Załóż konto · 8,99 zł / mies.” |
 | darmowa beta (tylko świadomie) | `true` z `signup_free_beta=true` | brak | `false` | `false` | „Załóż konto” bez ceny |
 
 Inne kombinacje aplikacja odrzuca: `billing_enforce` wymaga `billing_enabled`; rejestracja (także z tokenem) wymaga `support_email`; otwarta rejestracja wymaga `billing_enforce=true` (albo jawnej darmowej bety). Istniejące konta personelu po pierwszym wdrożeniu są oznaczone jako darmowe, więc włączenie płatności nie odbierze klubom dostępu.
@@ -303,7 +303,7 @@ Inne kombinacje aplikacja odrzuca: `billing_enforce` wymaga `billing_enabled`; r
 5. **Kopie zapasowe (przed startem płatności):** cron z `dump.php --auto` (sekcja „Migracje bazy i kopie zapasowe”), pytanie do AfterMarket o ich własne kopie, comiesięczne pobieranie `~/matdraw/backups` na własny dysk.
 6. **Stripe w trybie testowym** — sekcja „Stripe — konfiguracja krok po kroku”, punkty 1–4.
 7. **Ustawienia w panelu Stripe** — tamże, punkt 5 (osobno dla trybu testowego i na żywo).
-8. **Okno testów:** w `config.php` `billing_enabled=true`, `billing_mode='test'`, `billing_enforce=true`, `signup_enabled=false`, `signup_invite_token` (losowe 32 znaki, np. z `/usr/local/php83/bin/php -r 'echo bin2hex(random_bytes(16)), PHP_EOL;'`) i `support_email`. W panelu Admina **Diagnostyka → Sprawdź połączenie ze Stripe** musi pokazać „osiągalny”. Testy z linku `https://matbravo.com/#signup?invite=TOKEN`: karta testowa 4242 4242 4242 4242, płatność z 3DS, portal klienta, anulowanie, usunięcie konta. Nowe konta personelu zakładane w tym oknie oznaczaj jako darmowe.
+8. **Okno testów:** w `config.php` `billing_enabled=true`, `billing_mode='test'`, `billing_enforce=true`, `signup_enabled=false`, `signup_invite_token` (losowe 32 znaki, np. z `/usr/local/php83/bin/php -r 'echo bin2hex(random_bytes(16)), PHP_EOL;'`) i `support_email`. Zalogowany jako Administrator otwórz w przeglądarce `https://matbravo.com/api/index.php?route=diagnostics&probe=stripe` (dla tej diagnostyki nie ma ekranu w panelu): w odpowiedzi musi być `"stripe":{"reachable":true,…}` (limit 6 sprawdzeń na godzinę). Testy z linku `https://matbravo.com/#signup?invite=TOKEN`: karta testowa 4242 4242 4242 4242, płatność z 3DS, portal klienta, anulowanie, usunięcie konta. Nowe konta personelu zakładane w tym oknie oznaczaj jako darmowe.
 9. **Tryb na żywo:** `stripe-setup.php --mode=live` (ukryte pole, potem Roll key klucza `sk_live_…`), klucz `rk_live_…` w config i `billing_mode='live'`, jedna własna płatność, zwrot w panelu Stripe, usunięcie kont testowych w panelu **Członkowie**. Następnie `signup_enabled=true` i usunięcie `signup_invite_token` — to jest start.
 10. **(Opcjonalnie) zgłoszenie do AfterMarket** w sprawie webhooków Stripe (treść w sekcji Stripe, punkt 6). W tym samym zgłoszeniu zapytaj o limity żądań na IP i o LSCache.
 11. **(Opcjonalnie) dodatkowe wpisy crona** — sekcja „Cron (zalecany)”.
@@ -359,14 +359,14 @@ Jeśli w dniu zawodów ludzie zgłaszają „Zbyt wiele prób…”, dopisz w `c
   ```
 
   Włączenie z powrotem: `rm ~/matdraw/shared/chat-off`. To samo robi klucz `'chat_force_off' => true,` w `config.php`.
-- **Na co dzień, w panelu Admina** (ustawienia czatu): włączenie i wyłączenie czatu, tempo odświeżania (presety „Normalne”, „Oszczędne”, „Awaryjne”) i komunikat dla wszystkich. Zmiany docierają do ludzi przy następnym odświeżeniu, bez wdrożenia.
+- **Na co dzień, w panelu Admina** (**Moderacja → Ustawienia czatu**): włączenie i wyłączenie czatu, tempo odświeżania (presety „Normalne”, „Oszczędne”, „Awaryjne”) i komunikat dla wszystkich. Zmiany docierają do ludzi przy następnym odświeżeniu, bez wdrożenia.
 - Weryfikacja po wdrożeniu przy wyłączonym czacie akceptuje odpowiedź „czat wyłączony” i nie cofa wydania.
 
 ## Odpowiedzi hostingu 429/503
 
 Hosting (LiteSpeed/CloudLinux) może odrzucać żądania, zanim dotrą do PHP: **429** (za dużo żądań), **503** lub **508** (wyczerpane limity konta). Aplikacja tego nie widzi bezpośrednio, dlatego zgłaszają to przeglądarki.
 
-- **Gdzie to widać:** panel Admina → ustawienia czatu → „Odpowiedzi hostingu w ostatniej godzinie”; DirectAdmin → **Resource Usage** (limity LVE: EP, NPROC, CPU).
+- **Gdzie to widać:** panel Admina → **Moderacja → Ustawienia czatu** → „Odpowiedzi hostingu w ostatniej godzinie”; DirectAdmin → **Resource Usage** (limity LVE: EP, NPROC, CPU).
 - **Kiedy przełączyć preset:** gdy w ciągu godziny jest ponad 50 zgłoszeń 429 (albo kilka 503/508), przełącz tempo czatu na „Oszczędne”; gdy to nie pomaga — „Awaryjne”. Po zawodach wróć do „Normalne”. Preset nie zmienia się sam.
 - **Test obciążenia z zewnątrz** (po pierwszym wdrożeniu i przed startem). Najpierw z dowolnego komputera:
 
@@ -390,6 +390,7 @@ Hosting (LiteSpeed/CloudLinux) może odrzucać żądania, zanim dotrą do PHP: *
 - Po wdrożeniu, które zmienia wygląd lub działanie aplikacji, otwarta aplikacja pokazuje pasek **„Dostępna jest nowa wersja MatBravo. [Odśwież]”**. Nic nie przeładowuje się samo, a ekran hali (`#screen`) nigdy nie jest przeładowywany przy zwykłej aktualizacji.
 - **Wdrożenie, które zmienia tylko kod serwera, nie pokazuje paska** (numer wersji aplikacji w `version.json` się nie zmienia).
 - Bez internetu aplikacja pokazuje stronę „Brak połączenia z internetem” (`offline.html`).
+- Zrzuty ekranu z manifestu (`screenshots/*.webp`: czat, drabinka, lista turniejów; fikcyjne dane demo) służą tylko do karty instalacji w przeglądarce. Leżą na stronie, ale nie trafiają do pamięci offline i nie zmieniają numeru wersji aplikacji.
 - Weryfikacja po wdrożeniu sprawdza `version.json`, `sw.js` (numer wydania i nagłówek `no-cache`), oba manifesty z ikonami i `offline.html`.
 - Sprawdzenie w przeglądarce na komputerze: Chrome → DevTools (F12) → **Application → Manifest** (brak błędów) i **Service workers** (aktywny `sw.js`).
 - Nagłówki cache dla plików aplikacji ustawia `.htaccess` (pliki HTML/JS/CSS/JSON zawsze sprawdzane na nowo, `sw.js` bez cache, czcionki na rok, obrazy na 7 dni). Nie usuwaj tych bloków.
