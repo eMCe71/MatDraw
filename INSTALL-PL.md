@@ -39,6 +39,28 @@ Zastąp adres i nazwę klubu własnymi wartościami. Nie ma domyślnego konta pr
 6. Utwórz turniej i ustaw „Zapisy otwarte”. Klub wybiera osoby ze swojej bazy lub tworzy zawodnika wraz ze zgłoszeniem. „Zapisy zamknięte” blokują edycję klubom; organizator nadal prowadzi kontrolę i wyniki. „Zakończony” blokuje dane startowe i wyniki do czasu świadomego ponownego otwarcia przez uprawnionego organizatora.
 7. Przed pierwszym turniejem sprawdź logowanie z dwóch urządzeń, prawa reprezentanta, zapis wyniku, A4/A3, ekran hali i przełącznik języka PL | EN. Zatwierdź z trenerem kwestie wymienione w „Zasady turnieju”, w tym sposób obliczania wieku. Drabinka powyżej 64 osób i sporne kategorie pozostają zablokowane.
 
+## Przykładowi zawodnicy (dane testowe)
+
+`backend/bin/seed-athletes.php` dodaje 90 fikcyjnych zawodników w sześciu klubach z dopiskiem „(demo)”. Rozkład: 18 kategorii po 5 osób (wszystkie grupy wieku, obie płcie, Cup i Dan, układy, soft, Hogo, semi i light contact) oraz 3 listy startowe z drugiej konkurencji, razem 21 kategorii. Nikt nie trafia do kategorii zablokowanych, żadna kategoria nie ma mniej niż 3 osób, a w każdej drabince każdy zawodnik jest z innego klubu. Zapis przechodzi przez tę samą walidację co aplikacja i jest wykonywany jako Administrator. Skrypt działa tylko z wiersza poleceń. Na serwerze z CI/CD uruchamiaj go z aktywnego wydania, np. `cd /home/meducase/matdraw/current`.
+
+```bash
+php backend/bin/seed-athletes.php --dry-run --date=2026-11-14
+```
+
+```bash
+php backend/bin/seed-athletes.php --list
+```
+
+```bash
+php backend/bin/seed-athletes.php --tournament="Puchar Jesieni 2026"
+```
+
+```bash
+php backend/bin/seed-athletes.php --remove
+```
+
+`--dry-run` pokazuje kategorie bez łączenia z bazą. `--list` wypisuje turnieje (id, data, status). Z `--tournament=ID` albo dokładną nazwą zawodnicy trafiają do kartoteki i od razu zostają zgłoszeni; wiek liczony jest na dzień turnieju (turniej nie może być zakończony). Bez tej opcji powstaje tylko kartoteka, a wiek jest dokładny na dzisiaj. Opcje: `--count=90`, `--seed=2026` (ten sam seed daje tych samych zawodników), `--admin=e-mail`. Drugie uruchomienie jest blokowane, dopóki dane demo istnieją. `--remove` usuwa kluby „(demo)” (tylko bez kont użytkowników), ich zawodników, zgłoszenia i losowania, w których występują. Wpisy w historii zmian turnieju zostają.
+
 ## Języki interfejsu
 
 Interfejs działa po polsku i po angielsku. Przy pierwszej wizycie język wynika z ustawień przeglądarki: polski → PL, każdy inny → EN. Przełącznik PL | EN w nagłówku i na ekranie logowania zapamiętuje wybór w tej przeglądarce. API i baza pozostają po polsku; angielska wersja tłumaczy komunikaty serwera i nazwy kategorii dopiero przy wyświetlaniu. Wdrożenie nie wymaga żadnej dodatkowej konfiguracji. Teksty angielskie są w `dist/i18n-en.js` (szczegóły w README).

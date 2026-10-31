@@ -8,6 +8,9 @@ if($input['job']==='classify'){
  $db=$input['db'];$out=[];
  foreach($input['commands'] as $c){$next=$db;try{$r=Domain::execute($next,$c['actor'],$c['type'],$c['payload'],$c['revision']??$db['revision']);$db=$next;$out[]=['status'=>200,'result'=>$r];}catch(AppError $e){$out[]=['status'=>$e->status,'error'=>$e->getMessage()];}}
  $out=['db'=>$db,'results'=>$out];
+}elseif($input['job']==='samples'){
+ require_once dirname(__DIR__).'/backend/src/SampleAthletes.php';
+ $out=['clubs'=>\MatDraw\SampleAthletes::clubNames(),'athletes'=>\MatDraw\SampleAthletes::generate($input['count'],$input['date'],$input['seed'])];
 }elseif($input['job']==='guest'){
  // Public projection: upcoming list, one preview per requested id (null when not public) and initials.
  $out=['upcoming'=>GuestView::upcoming($input['tournaments'],$input['today'],$input['limit']??GuestView::LIMIT),'tournaments'=>[],'initials'=>array_map([GuestView::class,'initials'],$input['names']??[])];
