@@ -8,6 +8,7 @@ import {setLanguage} from '../dist/i18n.js';
 import {apiUrl} from '../dist/client.js';
 import '../dist/members-boot.js';
 import * as members from '../dist/admin-members.js';
+import {warsawToday} from '../dist/guest-view.js';
 const {validateRequireFrom,planBilling,freeToggle,loadedExemption,planBadge,createBody,profileFields,listBody,listCall,memberCall,billingCall,staffListParams,billingDetailParams,memberRow,resultsView,pageView,secretView,factsView,stripeDashboardUrl,cancelable,hasLiveSubscription,dayAdd,validDate,FILTERS,PAGE_SIZE}=members;
 
 setLanguage('pl',{persist:false});
@@ -185,4 +186,187 @@ test('Stripe links: only the dashboard origin; subscription stop only for an ong
  assert.equal(cancelable({subStatus:'canceled',cancelAtPeriodEnd:false,subscriptionId:'sub_1'}),false);
  assert.equal(cancelable({subStatus:'active',cancelAtPeriodEnd:false,subscriptionId:null}),false);assert.equal(cancelable(null),false);
  assert.equal(hasLiveSubscription({state:'active'}),true);assert.equal(hasLiveSubscription({state:'past_due'}),true);assert.equal(hasLiveSubscription({state:'ending'}),false);assert.equal(hasLiveSubscription({state:'free'}),false);assert.equal(hasLiveSubscription(null),false);
+});
+
+// ---- Review round 1: member plan dialog, validation before the commit, paging, country, blocking, currency, bulk count ----
+test('the reason is required whenever a plan change would need it, so the browser refuses the form before the account is saved',()=>{
+ const {reasonRequired}=members,loaded={reason:'',until:''};
+ assert.equal(reasonRequired({free:true,isNew:true,wasExempt:false,loaded,until:''}),true,'new free account');
+ assert.equal(reasonRequired({free:true,isNew:false,wasExempt:false,loaded,until:''}),true,'a paying account made free');
+ assert.equal(reasonRequired({free:false,isNew:false,wasExempt:true,loaded,until:''}),false,'switch off needs a date, not a reason');
+ assert.equal(reasonRequired({free:true,isNew:false,wasExempt:true,loaded,until:''}),false,'grandfathered, nothing edited');
+ assert.equal(reasonRequired({free:true,isNew:false,wasExempt:true,loaded,until:'2027-05-01'}),true,'grandfathered, end date edited: the internal reason cannot be reused');
+ assert.equal(reasonRequired({free:true,isNew:false,wasExempt:true,loaded:{reason:'Trener',until:'2027-03-01'},until:'2027-05-01'}),false,'a real reason is kept');
+ assert.equal(reasonRequired({free:true,isNew:false,wasExempt:true,loaded:{reason:'',until:'2027-03-01'},until:''}),true,'clearing the date of a staff-default account');
+});
+
+test('currency override: sent only when it changes and no subscription runs; "" gives back the country rule',()=>{
+ const {currencyChange}=members,d=(o={})=>({subStatus:'none',currencyOverride:null,...o});
+ assert.deepEqual(currencyChange(d(),'usd'),{action:'currency',currency:'usd'});
+ assert.deepEqual(currencyChange(d({currencyOverride:'usd'}),''),{action:'currency',currency:null});
+ assert.equal(currencyChange(d({currencyOverride:'usd'}),'usd'),null);assert.equal(currencyChange(d(),''),null);
+ assert.equal(currencyChange(d({currencyOverride:'usd'}),'eur').currency,null,'an unknown value never goes to the server as a currency');
+ for(const subStatus of ['active','trialing','past_due'])assert.equal(currencyChange(d({subStatus}),'usd'),null,subStatus);
+ assert.equal(currencyChange(null,'usd'),null);assert.equal(currencyChange(d(),null),null,'select disabled: nothing to send');
+});
+
+test('a page past the end is clamped to the last page; the bulk summary counts what the server changes',()=>{
+ const {clampPage,grandfathered}=members;
+ assert.equal(clampPage({items:[],total:50},2),1,'51 members, the only one of page 2 deleted');
+ assert.equal(clampPage({items:[],total:120},9),3);
+ assert.equal(clampPage({items:[{id:'a'}],total:51},2),null);assert.equal(clampPage({items:[],total:0},3),null,'an empty list is just empty');
+ assert.equal(clampPage({items:[],total:10},1),null);assert.equal(clampPage(null,2),null);
+ assert.equal(grandfathered({a:{reason:'grandfathered',exempt:true},b:{reason:'grandfathered',exempt:false},c:{reason:'staff-default',exempt:true},d:{reason:'Sędzia',exempt:true},e:null}),2,
+  'the server updates every grandfathered row, also one whose end date has passed (exempt false in the list)');
+ assert.equal(grandfathered(null),0);
+});
+
+test('a member row offers the Plan dialog; the dialog facts use the member wording',()=>{
+ const row=memberRow({id:'u1',email:'a@b.pl',active:true,billing:{state:'none'}}).html;
+ assert.match(row,/data-mem-act="plan"[^>]*data-mem-id="u1"|data-mem-id="u1"[^>]*data-mem-act="plan"/);assert.match(row,/>Plan</);
+ assert.match(factsView({role:'member',state:'none',subStatus:'none'}).html,/Bez planu/);
+ assert.match(factsView({role:'club',state:'none',subStatus:'none'}).html,/Wymaga płatności/);
+});
+
+test('the profile-fix country select starts empty for a member without a country, so a save never sets one nobody chose',()=>{
+ const {countryOptions}=members,text=list=>list.map(o=>o.html).join('');
+ const none=text(countryOptions(null,true));assert.match(none,/^<option value="" selected>—<\/option>/);assert.ok(!/ selected>(?!—)/.test(none),'no country is preselected');
+ const pl=text(countryOptions('PL',true));assert.match(pl,/^<option value="">—<\/option>/);assert.match(pl,/<option value="PL" selected>/);
+ assert.ok(!text(countryOptions('PL')).includes('value=""'),'the create dialog keeps its default without a blank');
+ assert.deepEqual(profileFields({firstName:'',lastName:'',username:'',country:'',clearClub:true},{country:null}),{clubText:''},'an empty choice sends no country');
+});
+
+// DOM glue without a browser: fake elements answer the selectors the module uses; the transport is replaced (io), so nothing leaves the process.
+function fakeForm({id='',role='club',active='yes',memRole}={}){
+ const el=(extra={})=>({value:'',checked:false,disabled:false,required:false,hidden:false,querySelectorAll:()=>[],...extra});
+ const n={free:el(),reason:el(),until:el(),from:el({value:warsawToday()}),stop:el(),blockStop:el({checked:true}),currency:el({value:''}),on:el(),off:el(),stopRow:el(),blockRow:el(),fieldset:el(),facts:el(),acts:el()};
+ const roleNode=el({value:role}),activeNode=el({value:active}),errorBox=el({textContent:''});
+ const by={'[data-mem-bill]':n.fieldset,'[data-mem-free]':n.free,'[name="mem-free"]':n.free,'[data-mem-on]':n.on,'[data-mem-off]':n.off,'[name=mem-reason]':n.reason,'[name="mem-reason"]':n.reason,
+  '[name=mem-until]':n.until,'[name="mem-until"]':n.until,'[name=mem-from]':n.from,'[name="mem-from"]':n.from,'[data-mem-stop-row]':n.stopRow,'[name="mem-stop"]':n.stop,'[data-mem-block-row]':n.blockRow,
+  '[name="mem-block-stop"]':n.blockStop,'[name="mem-currency"]':n.currency,'[data-mem-facts]':n.facts,'[data-mem-bill-actions]':n.acts};
+ const mount={isConnected:true,innerHTML:'',dataset:{accountBilling:id,...(memRole?{memRole}:{})},closest:()=>form,querySelector:s=>by[s]??null};
+ const form={dataset:{memId:id},closest:()=>form,querySelector:s=>s==='[name=role]'?(memRole?null:roleNode):s==='[name=active]'?activeNode:s==='[data-account-billing]'?mount:s==='.form-error'?errorBox:null};
+ return {mount,form,n,activeNode,errorBox};
+}
+
+/** Mounts the plan fields and copies the initial control states from the HTML the module rendered (a real browser would do it). */
+async function mounted(f){
+ await members.mountAccountBilling(f.mount);
+ const tag=name=>f.mount.innerHTML.match(new RegExp('<input[^>]*name="'+name+'"[^>]*>'))?.[0]||'',val=name=>(tag(name).match(/ value="([^"]*)"/)||[])[1]||'';
+ f.n.free.checked=/ checked/.test(tag('mem-free'));f.n.reason.value=val('mem-reason');f.n.until.value=val('mem-until');members.syncBilling(f.mount);return f;
+}
+/** Runs fn with io.request recording every call; respond(route,body,params) gives the answer (default {ok:true}). Toasts are collected. */
+async function withServer(respond,fn){
+ const calls=[],toasts=[],oldRequest=members.io.request,oldDemo=members.io.demo,hadDocument='document' in globalThis;
+ members.io.demo=false;
+ members.io.request=async(route,options)=>{const params=typeof route==='string'?{route}:route,body=options?.body;calls.push({route:params.route,params,body});return respond(params.route,body,params)??{ok:true};};
+ registry.provide('ui',{toast:m=>toasts.push(m),closeModal:()=>toasts.push('(closed)'),modal:(title)=>toasts.push('(modal: '+title+')')});
+ if(!hadDocument)globalThis.document={querySelector:()=>null,querySelectorAll:()=>[]};
+ members.forget();
+ try{await fn({calls,toasts});}
+ finally{members.io.request=oldRequest;members.io.demo=oldDemo;if(!hadDocument)delete globalThis.document;members.forget();}
+}
+const actions=calls=>calls.filter(c=>c.route==='admin-billing-action').map(c=>c.body);
+const detail=(o={})=>({userId:'u7',role:'club',active:true,state:'free',exempt:true,exemptReason:'grandfathered',exemptUntil:null,currency:null,currencyOverride:null,subStatus:'none',subscriptionId:null,cancelAtPeriodEnd:false,customerId:null,dashboardUrl:null,...o});
+const billingRoutes=(account,extra={})=>(route,body)=>route==='admin-billing'?(extra.list?{users:{}}:{account,audit:[]}):route==='admin-billing-action'?{ok:true,account,...(extra[body.action]||{})}:null;
+
+test('glue: a new staff account sends require when the switch is off and exempt with the reason when it is on',async()=>{
+ await withServer(billingRoutes(detail()),async({calls})=>{
+  const off=fakeForm();await members.mountAccountBilling(off.mount);
+  await members.onAccountSaved({payload:{role:'club',active:true},result:{id:'u9'},element:off.form});
+  assert.deepEqual(actions(calls),[{action:'require',userId:'u9'}],'new / off');
+  assert.equal(off.n.reason.required,false);
+  calls.length=0;
+  const on=fakeForm();await members.mountAccountBilling(on.mount);
+  on.n.free.checked=true;on.n.reason.value='  Sędzia klubu ';on.n.until.value='2027-05-01';members.syncBilling(on.mount);
+  assert.equal(on.n.reason.required,true,'a new free account needs its reason before the account is saved');
+  await members.onAccountSaved({payload:{role:'club',active:true},result:{id:'u10'},element:on.form});
+  assert.deepEqual(actions(calls),[{action:'exempt',reason:'Sędzia klubu',until:'2027-05-01',userId:'u10'}],'new / on');
+  calls.length=0;
+  const admin=fakeForm({role:'admin'});await members.mountAccountBilling(admin.mount);
+  await members.onAccountSaved({payload:{role:'admin'},result:{id:'u11'},element:admin.form});
+  assert.deepEqual(calls,[],'the Admin role never pays: nothing is sent');
+ });
+});
+
+test('glue: an existing free staff account switched off sends requireFrom today; unchanged sends nothing; a grandfathered account whose date changes needs a reason first',async()=>{
+ await withServer(billingRoutes(detail()),async({calls,toasts})=>{
+  const f=await mounted(fakeForm({id:'u7'}));
+  assert.deepEqual(calls.map(c=>[c.route,c.params.userId]),[['admin-billing','u7']],'the detail is read once');
+  assert.equal(f.n.free.checked,true,'an existing free account shows the switch on');
+  assert.equal(f.n.reason.required,false,'still free and nothing edited: no reason needed');
+  calls.length=0;
+  await members.onAccountSaved({payload:{role:'club',active:true},result:{id:'u7'},element:f.form});
+  assert.deepEqual(calls,[],'existing / unchanged -> nothing');
+  f.n.until.value='2027-05-01';members.syncBilling(f.mount);
+  assert.equal(f.n.reason.required,true,'changing the date of a grandfathered account requires a reason, checked by the browser before the commit');
+  await members.onAccountSaved({payload:{role:'club',active:true},result:{id:'u7'},element:f.form});
+  assert.deepEqual(calls,[],'a rejected plan sends nothing');assert.ok(toasts.includes('Podaj powód darmowego konta.'));
+  calls.length=0;f.n.free.checked=false;members.syncBilling(f.mount);
+  await members.onAccountSaved({payload:{role:'club',active:true},result:{id:'u7'},element:f.form});
+  assert.deepEqual(actions(calls),[{action:'requireFrom',date:warsawToday(),scope:'user',userId:'u7'}],'existing free / off');
+ });
+});
+
+test('glue: blocking a staff account with a live subscription offers (and by default sends) the subscription stop',async()=>{
+ const live=detail({exempt:false,exemptReason:null,state:'active',subStatus:'active',subscriptionId:'sub_1'});
+ await withServer(billingRoutes(live),async({calls})=>{
+  const f=await mounted(fakeForm({id:'u7',active:'no'}));
+  assert.equal(f.n.blockRow.hidden,false,'the warning is shown when Status becomes Zablokowane');
+  await members.onAccountSaved({payload:{role:'club',active:false},result:{id:'u7'},element:f.form});
+  assert.deepEqual(actions(calls),[{action:'cancelAtPeriodEnd',userId:'u7'}]);
+  calls.length=0;f.n.blockStop.checked=false;
+  await members.onAccountSaved({payload:{role:'club',active:false},result:{id:'u7'},element:f.form});
+  assert.deepEqual(actions(calls),[],'the Admin left the box unticked');
+  f.activeNode.value='yes';members.syncBilling(f.mount);assert.equal(f.n.blockRow.hidden,true,'hidden again for an active account');
+  f.n.blockStop.checked=true;
+  await members.onAccountSaved({payload:{role:'club',active:true},result:{id:'u7'},element:f.form});
+  assert.deepEqual(actions(calls),[],'an active account is never stopped');
+ });
+ await withServer(billingRoutes(detail()),async({calls})=>{
+  const f=await mounted(fakeForm({id:'u7',active:'no'}));
+  assert.equal(f.n.blockRow.hidden,true,'no live subscription, no warning');
+  await members.onAccountSaved({payload:{role:'club',active:false},result:{id:'u7'},element:f.form});
+  assert.deepEqual(actions(calls),[]);
+ });
+});
+
+test('glue: the member Plan dialog makes a paying member free (warnLive -> stop), changes the currency and reports a missing reason before sending',async()=>{
+ const paying=detail({role:'member',exempt:false,exemptReason:null,state:'active',subStatus:'active',subscriptionId:'sub_1'});
+ await withServer(billingRoutes(paying,{exempt:{warnLive:true}}),async({calls,toasts})=>{
+  const f=await mounted(fakeForm({id:'u7',memRole:'member'}));
+  assert.equal(f.n.stopRow.hidden,true);f.n.free.checked=true;members.syncBilling(f.mount);
+  assert.equal(f.n.stopRow.hidden,false,'a paying member made free: the stop is offered');assert.equal(f.n.reason.required,true);
+  calls.length=0;
+  await members.FORMS.plan(f.form);
+  assert.equal(f.errorBox.textContent,'Podaj powód darmowego konta.');assert.deepEqual(calls,[],'validated before anything is sent');
+  f.n.reason.value='Stypendium';f.n.stop.checked=true;
+  await members.FORMS.plan(f.form);
+  assert.deepEqual(actions(calls),[{action:'exempt',reason:'Stypendium',userId:'u7'},{action:'cancelAtPeriodEnd',userId:'u7'}]);
+  assert.ok(calls.some(c=>c.route==='admin-members'),'the list is reloaded');assert.ok(toasts.includes('Zapisano ustawienia płatności.'));
+ });
+ await withServer(billingRoutes(detail({role:'member',exempt:true,exemptReason:'Stypendium',exemptUntil:Date.parse('2027-03-01T12:00:00Z')/1000})),async({calls})=>{
+  const f=await mounted(fakeForm({id:'u7',memRole:'member'}));
+  assert.equal(f.n.until.value,'2027-03-01');f.n.free.checked=true;members.syncBilling(f.mount);
+  f.n.until.value='';f.n.currency.value='usd';calls.length=0;
+  await members.FORMS.plan(f.form);
+  assert.deepEqual(actions(calls),[{action:'exempt',reason:'Stypendium',userId:'u7'},{action:'currency',currency:'usd',userId:'u7'}],'the end date removed and the currency set');
+  calls.length=0;f.n.free.checked=false;members.syncBilling(f.mount);f.n.currency.value='';
+  await members.FORMS.plan(f.form);
+  assert.deepEqual(actions(calls),[{action:'requireFrom',date:warsawToday(),scope:'user',userId:'u7'}],'a free member revoked');
+ });
+});
+
+test('glue: the currency select is locked while a subscription runs and never sends then',async()=>{
+ const live=detail({exempt:false,exemptReason:null,state:'active',subStatus:'active',subscriptionId:'sub_1'});
+ await withServer(billingRoutes(live),async({calls})=>{
+  const f=await mounted(fakeForm({id:'u7'}));
+  f.n.currency.value='usd';calls.length=0;
+  await members.onAccountSaved({payload:{role:'club',active:true},result:{id:'u7'},element:f.form});
+  assert.deepEqual(actions(calls),[]);assert.match(f.mount.innerHTML,/name="mem-currency"[^>]* disabled/);
+ });
+});
+
+test('sign-out leaves no billing detail behind: forget() is safe to call while a dialog request is pending',async()=>{
+ await withServer(billingRoutes(detail()),async()=>{members.forget();members.forget();});
 });

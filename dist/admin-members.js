@@ -2,8 +2,9 @@
  * Loaded lazily by members-boot.js. Three parts:
  *  - the #members page: list (POST admin-members: filter, search, 50 per page) and actions (POST admin-member): new free account,
  *    block, temporary password with the §3.10 checklist, e-mail change, profile fix, deletion; mute badge with a link to moderation;
+ *    the "Plan" dialog of a member (the same plan fields and billing facts as the staff form, admin-billing + admin-billing-action);
  *  - the staff accounts panel: [data-billing-badge] (GET admin-billing?list=staff) and [data-account-billing] inside the account form
- *    (switch "Darmowe konto", reason, end date, require-from date, sync state), saved by POST admin-billing-action after 'saved';
+ *    (switch "Darmowe konto", reason, end date, require-from date, currency, sync state), saved by POST admin-billing-action after 'saved';
  *  - the bulk action "require payment from" for the grandfathered staff accounts.
  * Personal data (e-mails, names, search phrases) travels only in POST bodies, never in a URL. Every value from the API reaches the DOM
  * through h`…` (escaping) or textContent. Dialogs use ui.modal; their buttons carry data-mem-act (not data-action), handled here.
@@ -86,6 +87,19 @@ export function planBilling({isNew,wasExempt,free,reason='',until='',from='',tod
  return check.ok?{ok:true,call:{action:'requireFrom',date:check.date,scope:'user'}}:check;
 }
 
+/** Whether the reason field must be filled before the form is submitted (so a rejected plan change never follows a committed account save):
+ * switch on for a new or not yet free account; for a free account whose loaded reason is internal (grandfathered, staff-default) when the end date changes. */
+export const reasonRequired=({free,isNew,wasExempt,loaded={reason:'',until:''},until=''})=>!!free&&(!!isNew||!wasExempt||(!loaded.reason&&until!==loaded.until));
+/** The 'currency' action (P20) for the select value, or null: nothing to send while a subscription runs (the server refuses it), without a loaded
+ * account, or when the Admin override is unchanged ('' = the country rule). */
+export function currencyChange(detail,value){
+ if(!detail||ONGOING.includes(detail.subStatus)||value==null)return null;
+ const next=value==='pln'||value==='usd'?value:null;
+ return next===(detail.currencyOverride||null)?null:{action:'currency',currency:next};
+}
+/** Page to load again when the requested one is past the end (the last member of the last page was deleted or filtered out); null when fine. */
+export const clampPage=(data,page)=>data&&!(data.items?.length)&&data.total>0&&page>1?Math.max(1,Math.ceil(data.total/PAGE_SIZE)):null;
+
 // ---- Requests: only names, ids and bodies; personal data stays in the body ----
 export const call=(route,body)=>({route,options:{method:'POST',body}});
 export const listBody=({q='',filter='all',page=1}={})=>({q:String(q??'').trim().slice(0,100),filter:FILTERS.some(([key])=>key===filter)?filter:'all',page:Number.isInteger(page)&&page>=1?page:1});
@@ -94,7 +108,9 @@ export const memberCall=(action,fields={})=>call('admin-member',{action,...field
 export const billingCall=fields=>call('admin-billing-action',fields);
 export const staffListParams=()=>({route:'admin-billing',list:'staff'});
 export const billingDetailParams=userId=>({route:'admin-billing',userId});
-export const send=spec=>Client.request(spec.route,spec.options);
+/** Transport and demo switch behind one object so that tests can run the DOM glue without a server (the demo build has no API). */
+export const io={request:(route,options)=>Client.request(route,options),demo:Client.isDemo};
+export const send=spec=>io.request(spec.route,spec.options);
 /** Body of admin-member create (§4.3): a free account with a reason; no password, so the server generates a temporary one. */
 export function createBody(v){
  const sports=Array.isArray(v.sports)?v.sports:[];
@@ -127,7 +143,7 @@ export function memberRow(m){
   <div class="mem-who"><strong class="mem-name">${m.name||T('Profil nieuzupełniony')}</strong>${m.username?h`<span class="mem-user">@${m.username}</span>`:''}<span class="mem-email">${m.email}</span></div>
   <div class="mem-plan">${badgeHtml(b)}${m.active?'':h`<span class="badge warning">${T('Zablokowane')}</span>`}${muted?h`<a class="badge warning mem-muted" href="#moderation" data-page="moderation">${m.mutedUntil?T('Wyciszony do {date}',{date:fmtSec(m.mutedUntil)}):T('Wyciszony')} · ${T('Moderacja')}</a>`:''}</div>
   <div class="mem-meta">${meta}</div>
-  <div class="mem-actions">${btn(T('Hasło'),'password','small-btn',{'data-mem-id':m.id})}${btn(T('E-mail'),'email','small-btn',{'data-mem-id':m.id})}${btn(T('Profil'),'profile','small-btn',{'data-mem-id':m.id})}${btn(m.active?T('Zablokuj'):T('Odblokuj'),'active','small-btn',{'data-mem-id':m.id})}${btn(T('Usuń'),'delete','small-btn danger-text',{'data-mem-id':m.id})}</div>
+  <div class="mem-actions">${btn(T('Plan'),'plan','small-btn',{'data-mem-id':m.id})}${btn(T('Hasło'),'password','small-btn',{'data-mem-id':m.id})}${btn(T('E-mail'),'email','small-btn',{'data-mem-id':m.id})}${btn(T('Profil'),'profile','small-btn',{'data-mem-id':m.id})}${btn(m.active?T('Zablokuj'):T('Odblokuj'),'active','small-btn',{'data-mem-id':m.id})}${btn(T('Usuń'),'delete','small-btn danger-text',{'data-mem-id':m.id})}</div>
  </li>`;
 }
 /** The list with count and paging, or the loading / error / empty state. */
@@ -161,7 +177,7 @@ export function pageView(st){
 export function factsView(d){
  const subs={active:T('Aktywna'),trialing:T('Okres próbny'),past_due:T('Zaległa płatność'),canceled:T('Anulowana'),incomplete:T('Niedokończona'),incomplete_expired:T('Wygasła'),unpaid:T('Niezapłacona'),paused:T('Wstrzymana'),none:T('Brak subskrypcji')};
  const sub=(subs[d.subStatus]||d.subStatus||subs.none)+(d.periodEnd?' · '+(d.cancelAtPeriodEnd?T('kończy się {date}',{date:fmtSec(d.periodEnd)}):T('do {date}',{date:fmtSec(d.periodEnd)})):'');
- const plan=planBadge({state:d.state,until:d.until,reason:d.exemptReason},'staff');
+ const plan=planBadge({state:d.state,until:d.until,reason:d.exemptReason},d.role==='member'?'member':'staff');
  return h`<dl class="mem-facts">
   <div><dt>${T('Stan planu')}</dt><dd>${badgeHtml(plan)}</dd></div>
   <div><dt>${T('Subskrypcja')}</dt><dd>${sub}${d.mode?h` <span class="badge neutral">${d.mode}</span>`:''}</dd></div>
@@ -192,19 +208,20 @@ const memberById=id=>st.data?.items?.find(i=>i.id===id)||null;
 
 /** Staff plans {userId:{state,exempt,until,reason}} (cached for 30 s, one request in flight); null when unavailable. */
 export function staffPlans(force=false){
- if(Client.isDemo)return Promise.resolve(null);
+ if(io.demo)return Promise.resolve(null);
  if(!force&&st.staff&&Date.now()-st.staffAt<STAFF_MS)return Promise.resolve(st.staff);
  if(st.staffPending&&!force)return st.staffPending;
- const pending=Client.request(staffListParams()).then(data=>{st.staff=data?.users&&typeof data.users==='object'?data.users:{};st.staffAt=Date.now();return st.staff;},()=>null).finally(()=>{if(st.staffPending===pending)st.staffPending=null;});
+ const pending=io.request(staffListParams()).then(data=>{st.staff=data?.users&&typeof data.users==='object'?data.users:{};st.staffAt=Date.now();return st.staff;},()=>null).finally(()=>{if(st.staffPending===pending)st.staffPending=null;});
  return st.staffPending=pending;
 }
 /** Fills [data-billing-badge] in the staff accounts panel. */
 export async function fillStaffBadges({force=false}={}){
- if(Client.isDemo||!document.querySelector('[data-billing-badge]'))return;
+ if(io.demo||!document.querySelector('[data-billing-badge]'))return;
  const users=await staffPlans(force);if(!users)return;
  for(const el of document.querySelectorAll('[data-billing-badge]')){const entry=users[el.dataset.billingBadge];setHtml(el,entry?badgeHtml(planBadge(entry,'staff')):h``);}
 }
-const grandfathered=users=>Object.values(users||{}).filter(e=>e&&e.exempt&&e.reason==='grandfathered').length;
+/** Accounts the bulk action changes: the server updates every row with reason 'grandfathered', also one whose end date has passed. */
+export const grandfathered=users=>Object.values(users||{}).filter(e=>e&&e.reason==='grandfathered').length;
 async function paintBulk(){
  const users=await staffPlans();const el=document.querySelector('[data-mem-bulk-count]');
  if(el)el.textContent=users?T('Konta personelu objęte zmianą: {n}',{n:grandfathered(users)}):'';
@@ -213,7 +230,11 @@ function paintResults(){const box=root()?.querySelector('[data-mem-results]');if
 async function load(force=false){
  if(!force&&st.data&&Date.now()-st.at<FRESH_MS){paintResults();return;}
  const seq=++st.seq;st.error='';if(!st.data)paintResults();
- try{const data=await send(listCall(st));if(seq!==st.seq)return;st.data=data;st.at=Date.now();}
+ try{
+  const data=await send(listCall(st));if(seq!==st.seq)return;
+  const back=clampPage(data,st.page);if(back){st.page=back;return load(true);}
+  st.data=data;st.at=Date.now();
+ }
  catch(error){if(seq!==st.seq)return;st.error=translateMessage(error.message);}
  paintResults();
 }
@@ -221,7 +242,7 @@ export const reload=()=>load(true);
 /** Draws the #members page into [data-members-root] (called after 'painted'; the page keeps its filter and results across re-renders). */
 export function mountMembersPage(el=root()){
  if(!el||el.dataset.memMounted)return;el.dataset.memMounted='1';
- if(Client.isDemo){setHtml(el,h`<section class="panel mem-demo"><h3>${T('Konta członków działają z serwerem')}</h3><p class="muted">${T('Ta funkcja jest niedostępna w wersji demonstracyjnej.')}</p></section>`);return;}
+ if(io.demo){setHtml(el,h`<section class="panel mem-demo"><h3>${T('Konta członków działają z serwerem')}</h3><p class="muted">${T('Ta funkcja jest niedostępna w wersji demonstracyjnej.')}</p></section>`);return;}
  setHtml(el,pageView(st));load();paintBulk();
 }
 
@@ -236,9 +257,11 @@ export function secretView({email,password,created=false}){
 }
 const showSecret=data=>openModal(data.created?T('Nowe konto'):T('Hasło tymczasowe'),secretView(data),btn(T('Zamknij'),'close','primary'));
 
-function countryOptions(selected){
+/** Country <option>s sorted by name; blank adds a first empty choice (selected without a country) so that a save never sets a country nobody chose. */
+export function countryOptions(selected,blank=false){
  const key=getLanguage()==='pl'?1:2,collator=new Intl.Collator(locale());
- return [...COUNTRIES].sort((a,b)=>collator.compare(a[key],b[key])).map(c=>h`<option value="${c[0]}"${c[0]===selected?' selected':''}>${c[key]}</option>`);
+ const list=[...COUNTRIES].sort((a,b)=>collator.compare(a[key],b[key])).map(c=>h`<option value="${c[0]}"${c[0]===selected?' selected':''}>${c[key]}</option>`);
+ return blank?[h`<option value=""${selected?'':' selected'}>—</option>`,...list]:list;
 }
 function createDialog(){
  const today=warsawToday();
@@ -253,6 +276,13 @@ function createDialog(){
    <label class="span-two">${T('Darmowe do (opcjonalnie)')}<input name="until" type="date" min="${dayAdd(today,1)}"></label>
   </div><p class="muted small form-note">${T('Hasło tymczasowe zostanie wygenerowane i pokazane jeden raz.')}</p><div class="form-error" role="alert"></div></form>`,
   all(btn(T('Anuluj'),'close'),h`<button class="btn primary" type="submit" form="mem-create-form">${T('Utwórz konto')}</button>`),true);
+}
+/** The "Plan" dialog of a member: the plan fields and billing facts of the staff form (mountAccountBilling), saved by FORMS.plan. */
+async function planDialog(m){
+ openModal(T('Plan członka'),h`<form id="mem-plan-form" data-mem-form="plan" data-mem-id="${m.id}"><p class="modal-lead">${T('Konto: {email}',{email:m.email})}</p>
+  <div data-account-billing="${m.id}" data-mem-role="member"></div><div class="form-error" role="alert"></div></form>`,
+  all(btn(T('Anuluj'),'close'),h`<button class="btn primary" type="submit" form="mem-plan-form">${T('Zapisz plan')}</button>`),true);
+ const mount=document.querySelector('#modal-root [data-account-billing]');if(mount)await mountAccountBilling(mount);
 }
 const CHECKLIST=[()=>T('Prośba przyszła z adresu zapisanego w koncie.'),()=>T('Nie resetuję hasła na prośbę telefoniczną ani z innego adresu.'),()=>T('Hasło wyślę na adres skopiowany z tego panelu, a nie z nagłówka „Od” wiadomości.')];
 function passwordDialog(m){
@@ -275,7 +305,7 @@ function profileDialog(m){
   <p class="muted small">${T('Zostaw puste pola, których nie zmieniasz.')}</p>
   <div class="form-grid"><label>${T('Imię')}<input name="firstName" maxlength="50" autocomplete="off"></label><label>${T('Nazwisko')}<input name="lastName" maxlength="50" autocomplete="off"></label>
    <label class="span-two">${T('Nazwa użytkownika')}<input name="username" maxlength="24" autocomplete="off" spellcheck="false" value="${m.username||''}"></label>
-   <label class="span-two">${T('Kraj')}<select name="country">${countryOptions(m.country)}</select></label>
+   <label class="span-two">${T('Kraj')}<select name="country">${countryOptions(m.country,true)}</select></label>
    <label class="checkbox-label span-two"><input type="checkbox" name="dropUsername"> ${T('Usuń nazwę użytkownika (osoba wybierze nową)')}</label>
    <label class="checkbox-label span-two"><input type="checkbox" name="clearClub"> ${T('Wyczyść tekst klubu')}</label></div>
   <div class="form-error" role="alert"></div></form>`,all(btn(T('Anuluj'),'close'),h`<button class="btn primary" type="submit" form="mem-profile-form">${T('Zapisz profil')}</button>`));
@@ -308,6 +338,7 @@ const ACTS={
  prev:()=>{if(st.page>1){st.page--;reload();}},
  next:()=>{st.page++;reload();},
  create:()=>createDialog(),
+ plan:(el)=>{const m=memberById(el.dataset.memId);if(m)return planDialog(m);},
  password:(el)=>{const m=memberById(el.dataset.memId);if(m)passwordDialog(m);},
  email:(el)=>{const m=memberById(el.dataset.memId);if(m)emailDialog(m);},
  profile:(el)=>{const m=memberById(el.dataset.memId);if(m)profileDialog(m);},
@@ -344,17 +375,17 @@ const ACTS={
  'bill-resync':(el)=>run(el,async()=>{
   const mount=el.closest('[data-account-billing]'),s=mounts.get(mount);if(!s?.id)return;
   const r=await send(billingCall({action:'resync',userId:s.id}));
-  if(r?.account)s.detail=r.account;paintFacts(mount);toast(r?.busy?T('Synchronizacja już trwa.'):T('Zsynchronizowano.'));staffPlans(true).then(()=>fillStaffBadges());
+  if(r?.account)s.detail=r.account;paintFacts(mount);toast(r?.busy?T('Synchronizacja już trwa.'):T('Zsynchronizowano.'));staffPlans(true).then(()=>fillStaffBadges());if(s.member)reload();
  }),
  'bill-stop':(el)=>run(el,async()=>{
   const mount=el.closest('[data-account-billing]'),s=mounts.get(mount);if(!s?.id)return;
   if(el.dataset.memArmed!=='1'){el.dataset.memArmed='1';el.textContent=T('Potwierdź zatrzymanie');setTimeout(()=>{if(el.isConnected){el.dataset.memArmed='';el.textContent=T('Zatrzymaj subskrypcję na koniec okresu');}},5000);return;}
   const r=await send(billingCall({action:'cancelAtPeriodEnd',userId:s.id}));
-  if(r?.account)s.detail=r.account;paintFacts(mount);toast(T('Subskrypcja zakończy się z końcem okresu.'));staffPlans(true).then(()=>fillStaffBadges());
+  if(r?.account)s.detail=r.account;paintFacts(mount);toast(T('Subskrypcja zakończy się z końcem okresu.'));staffPlans(true).then(()=>fillStaffBadges());if(s.member)reload();
  }),
- 'stop-later':(el)=>run(el,async()=>{await send(billingCall({action:'cancelAtPeriodEnd',userId:el.dataset.memId}));closeModal();toast(T('Subskrypcja zakończy się z końcem okresu.'));staffPlans(true).then(()=>fillStaffBadges());})
+ 'stop-later':(el)=>run(el,async()=>{await send(billingCall({action:'cancelAtPeriodEnd',userId:el.dataset.memId}));closeModal();toast(T('Subskrypcja zakończy się z końcem okresu.'));staffPlans(true).then(()=>fillStaffBadges());if(root())reload();})
 };
-const FORMS={
+export const FORMS={
  search:(form)=>{const f=new FormData(form);st.q=String(f.get('q')||'');st.filter=String(f.get('filter')||'all');st.page=1;return reload();},
  bulk:(form)=>{
   const date=String(new FormData(form).get('date')||''),check=validateRequireFrom(date,{scope:'grandfathered'});
@@ -376,6 +407,14 @@ const FORMS={
   catch(error){if(error?.status===409){const box=form.querySelector('[data-mem-conflict]');if(box){box.hidden=false;box.querySelector('[data-mem-copy]').dataset.memCopy=email;}}throw error;}
   closeModal();toast(T('Adres e-mail zmieniony. Osoba została wylogowana.'));reload();
  }),
+ plan:(form)=>run(submitOf(form),async()=>{
+  const mount=form.querySelector('[data-account-billing]'),s=mount&&mounts.get(mount);
+  if(!s?.detail){say(form,s?.error||T('Stan płatności nie został wczytany.'));return;}
+  const r=await applyPlan({s,userId:s.id,v:readPlanValues(mount)});
+  if(!r.ok){say(form,r.error);return;}
+  if(r.offerStop)offerStopDialog(s.id);else closeModal();
+  toast(r.changed?T('Zapisano ustawienia płatności.'):T('Nic nie zmieniono.'));staffPlans(true);reload();
+ }),
  profile:(form)=>run(submitOf(form),async()=>{
   const f=new FormData(form),m=memberById(form.dataset.memId)||{},fields=profileFields({firstName:f.get('firstName'),lastName:f.get('lastName'),username:f.get('username'),country:f.get('country'),dropUsername:f.has('dropUsername'),clearClub:f.has('clearClub')},m);
   if(!Object.keys(fields).length){say(form,T('Nic nie zmieniono.'));return;}
@@ -396,25 +435,31 @@ function onSubmit(event){
 }
 function onChange(event){
  const el=event.target;
+ if(event.type==='input'&&el.name!=='mem-until')return;
  if(el.matches?.('[data-mem-check]')){const box=el.closest('.modal');const go=box?.querySelector('[data-mem-needs-check]');if(go)go.disabled=![...box.querySelectorAll('[data-mem-check]')].every(c=>c.checked);}
  const mount=el.closest?.('form')?.querySelector('[data-account-billing]');
- if(mount&&(el.matches('[data-mem-free]')||el.name==='role'))syncBilling(mount);
+ if(mount&&(el.matches?.('[data-mem-free]')||['role','active','mem-until'].includes(el.name)))syncBilling(mount);
 }
-if(typeof document!=='undefined'){document.addEventListener('click',onClick);document.addEventListener('submit',onSubmit);document.addEventListener('change',onChange);}
+if(typeof document!=='undefined'){document.addEventListener('click',onClick);document.addEventListener('submit',onSubmit);document.addEventListener('change',onChange);document.addEventListener('input',onChange);}
 
-// ---- Plan fields in the staff account form ([data-account-billing], §3.2, §6.7) ----
+// ---- Plan fields: the staff account form and the "Plan" dialog of a member ([data-account-billing], §3.2, §6.7) ----
 const mounts=new WeakMap();
-const NOTE=()=>T('Bez darmowego konta osoba po włączeniu płatności ma tylko podgląd, dopóki nie wykupi planu.');
+const NOTE=s=>s.member?T('Darmowe konto daje pełny dostęp bez subskrypcji.'):T('Bez darmowego konta osoba po włączeniu płatności ma tylko podgląd, dopóki nie wykupi planu.');
+const CURRENCIES=[['',()=>T('Z kraju w profilu')],['pln','PLN'],['usd','USD']];
 function billingShell(s){
+ const cur=s.detail?.currencyOverride||'',locked=!s.detail||ONGOING.includes(s.detail.subStatus);
  return h`<fieldset class="mem-bill" data-mem-bill><legend>${T('Płatności')}</legend>
   <label class="checkbox-label mem-free"><input type="checkbox" name="mem-free" data-mem-free${s.checked?' checked':''}> ${T('Darmowe konto (bez płatności)')}</label>
-  <p class="muted small mem-note">${NOTE()}</p>
+  <p class="muted small mem-note">${NOTE(s)}</p>
   <div class="mem-on" data-mem-on hidden><div class="form-grid">
    <label class="span-two">${T('Powód darmowego konta')}<input name="mem-reason" maxlength="200" autocomplete="off" value="${s.loaded.reason}"></label>
    <label class="span-two">${T('Darmowe do (opcjonalnie)')}<input name="mem-until" type="date" min="${dayAdd(warsawToday(),1)}" value="${s.loaded.until}"></label></div>
    <label class="checkbox-label mem-stop" data-mem-stop-row hidden><input type="checkbox" name="mem-stop"> ${T('Zatrzymaj też subskrypcję na koniec okresu')}</label></div>
   <div class="mem-off" data-mem-off hidden><label class="field-label">${T('Płatność wymagana od')}<input name="mem-from" type="date" min="${warsawToday()}" value="${warsawToday()}"></label>
    <p class="muted small">${T('Od tej daty konto wymaga płatności. Potem jest 7 dni karencji, a dopiero potem tylko podgląd.')}</p></div>
+  <label class="checkbox-label mem-stop" data-mem-block-row hidden><input type="checkbox" name="mem-block-stop" checked> ${T('Konto jest blokowane, ale ma trwającą subskrypcję. Zatrzymaj ją na koniec okresu.')}</label>
+  ${s.isNew?'':h`<div class="mem-currency" data-mem-currency-row><label class="field-label">${T('Waluta planu')}<select name="mem-currency" data-mem-currency${locked?' disabled':''}>${CURRENCIES.map(([key,label])=>h`<option value="${key}"${key===cur?' selected':''}>${typeof label==='function'?label():label}</option>`)}</select></label>
+   ${s.detail&&locked?h`<p class="muted small">${T('Waluty nie zmienisz przy trwającej subskrypcji.')}</p>`:''}</div>`}
   <div class="mem-facts-box" data-mem-facts>${s.isNew?'':h`<p class="muted small" role="status">${T('Wczytuję stan płatności…')}</p>`}</div>
   <div class="mem-bill-actions" data-mem-bill-actions></div></fieldset>`;
 }
@@ -427,8 +472,9 @@ function paintFacts(mount){
  setHtml(acts,h`${d.customerId?btn(T('Synchronizuj teraz'),'bill-resync','small-btn'):''}${url?h`<a class="btn small-btn secondary" href="${url}" target="_blank" rel="noopener noreferrer">${T('Otwórz w Stripe')}</a>`:''}${cancelable(d)?btn(T('Zatrzymaj subskrypcję na koniec okresu'),'bill-stop','small-btn danger-text'):''}`);
  syncBilling(mount);
 }
-/** Shows reason/end date or the require-from date for the switch position, and the Admin role hides the section. */
-function syncBilling(mount){
+/** Shows reason/end date or the require-from date for the switch position, and the Admin role hides the section. The reason becomes required
+ * while a plan change would need it, so the browser refuses the form before the account is saved. */
+export function syncBilling(mount){
  const s=mounts.get(mount);if(!s||!mount.isConnected)return;
  const form=mount.closest('form'),role=form?.querySelector('[name=role]')?.value||s.role,hide=role==='admin';
  const fieldset=mount.querySelector('[data-mem-bill]'),free=mount.querySelector('[data-mem-free]').checked;
@@ -437,42 +483,60 @@ function syncBilling(mount){
  on.hidden=!showOn;off.hidden=!showOff;
  for(const input of on.querySelectorAll('input'))input.disabled=!showOn;
  for(const input of off.querySelectorAll('input'))input.disabled=!showOff;
- mount.querySelector('[name=mem-reason]').required=showOn&&(s.isNew||!s.wasExempt);
+ mount.querySelector('[name=mem-reason]').required=reasonRequired({free:showOn,isNew:s.isNew,wasExempt:s.wasExempt,loaded:s.loaded,until:mount.querySelector('[name=mem-until]').value});
  mount.querySelector('[name=mem-from]').required=showOff;
  const stopRow=mount.querySelector('[data-mem-stop-row]');stopRow.hidden=!(showOn&&!s.wasExempt&&cancelable(s.detail));
+ const blocking=!hide&&form?.querySelector('[name=active]')?.value==='no'&&s.detail?.active!==false;
+ mount.querySelector('[data-mem-block-row]').hidden=!(blocking&&cancelable(s.detail));
 }
-/** Mounts the plan fields into [data-account-billing] of an opened account form (called by members-boot when the form appears). */
+/** Mounts the plan fields into [data-account-billing] of an opened account form or member dialog (members-boot calls it when the form appears). */
 export async function mountAccountBilling(mount){
- if(Client.isDemo||!mount?.isConnected||mount.dataset.memMounted)return;mount.dataset.memMounted='1';
- const id=mount.dataset.accountBilling||'',form=mount.closest('form'),role=form?.querySelector('[name=role]')?.value||'club';
- const s={id,isNew:!id,role,wasExempt:false,checked:false,detail:null,loaded:{reason:'',until:''},error:''};
+ if(io.demo||!mount?.isConnected||mount.dataset.memMounted)return;mount.dataset.memMounted='1';
+ const id=mount.dataset.accountBilling||'',form=mount.closest('form'),member=mount.dataset.memRole==='member',role=form?.querySelector('[name=role]')?.value||(member?'member':'club');
+ const s={id,isNew:!id,role,member,wasExempt:false,checked:false,detail:null,loaded:{reason:'',until:''},error:''};
  mounts.set(mount,s);
  setHtml(mount,billingShell(s));syncBilling(mount);
  if(s.isNew)return;
  try{
-  const data=await Client.request(billingDetailParams(id));if(!mount.isConnected)return;
+  const data=await io.request(billingDetailParams(id));if(!mount.isConnected)return;
   s.detail=data.account;s.wasExempt=!!s.detail.exempt;s.loaded=loadedExemption(s.detail);
   const sw=freeToggle({isNew:false,role:s.detail.role,exempt:s.detail.exempt});s.checked=sw.checked;
   setHtml(mount,billingShell(s));syncBilling(mount);paintFacts(mount);
  }catch(error){s.error=translateMessage(error.message);s.failed=true;paintFacts(mount);}
 }
-/** After a successful account.save (event 'saved' with result.id): sends the plan change decided by planBilling. The form may already be
+/** What the Admin entered in the plan fields, read from the elements (the form may already be closing). */
+export function readPlanValues(mount){
+ const q=n=>mount.querySelector('[name="'+n+'"]'),cur=q('mem-currency');
+ return {free:!!q('mem-free')?.checked,reason:q('mem-reason')?.value||'',until:q('mem-until')?.value||'',from:q('mem-from')?.value||'',stop:!!q('mem-stop')?.checked,blockStop:!!q('mem-block-stop')?.checked,currency:cur&&!cur.disabled?cur.value:null};
+}
+/** Sends the plan change the fields ask for (§3.2): the exempt / require / requireFrom call of planBilling, the currency override, and, when the
+ * account is being blocked, the subscription stop. Returns {ok:false,error} before anything is sent when the plan is invalid, else
+ * {ok:true,changed,offerStop}: offerStop is set when a paying person was made free and the Admin did not tick the stop (§3.2, 03 §10.2). */
+export async function applyPlan({s,userId,v,blocked=false}){
+ const plan=planBilling({isNew:s.isNew,wasExempt:s.wasExempt,free:v.free,reason:v.reason,until:v.until,from:v.from,loaded:s.loaded});
+ if(!plan.ok)return plan;
+ let changed=false,stopped=false,offerStop=false;
+ if(plan.call){
+  const r=await send(billingCall({...plan.call,userId}));changed=true;
+  if(plan.call.action==='exempt'&&r?.warnLive){if(v.stop){await stopSubscription(userId);stopped=true;}else offerStop=true;}
+ }
+ const cur=s.isNew?null:currencyChange(s.detail,v.currency);
+ if(cur){await send(billingCall({...cur,userId}));changed=true;}
+ if(blocked&&!stopped&&v.blockStop&&cancelable(s.detail)){await stopSubscription(userId);changed=true;}
+ return {ok:true,changed,offerStop};
+}
+const offerStopDialog=userId=>openModal(T('Trwająca subskrypcja'),h`<p>${T('Ta osoba ma trwającą subskrypcję w Stripe. Nadal będzie z niej obciążana, dopóki jej nie zatrzymasz.')}</p>`,all(btn(T('Zostaw'),'close'),btn(T('Zatrzymaj subskrypcję na koniec okresu'),'stop-later','primary',{'data-mem-id':userId})));
+/** After a successful account.save (event 'saved' with result.id): sends the plan change decided by applyPlan. The form may already be
  * closing, so the values are read from its elements at once. */
 export async function onAccountSaved({payload,result,element}){
  const mount=element?.querySelector?.('[data-account-billing]'),s=mount&&mounts.get(mount);
  if(!s||s.failed||!result?.id||payload?.role==='admin'||(!s.isNew&&!s.detail))return;
- const q=n=>mount.querySelector('[name="'+n+'"]'),free=!!q('mem-free')?.checked;
- const values={reason:q('mem-reason')?.value||'',until:q('mem-until')?.value||'',from:q('mem-from')?.value||'',stop:!!q('mem-stop')?.checked};
- const plan=planBilling({isNew:s.isNew,wasExempt:s.wasExempt,free,reason:values.reason,until:values.until,from:values.from,loaded:s.loaded});
- if(!plan.ok){toast(plan.error);return;}
- if(!plan.call)return;
+ const v=readPlanValues(mount);
  try{
-  const r=await send(billingCall({...plan.call,userId:result.id}));
-  if(plan.call.action==='exempt'&&r?.warnLive){
-   if(values.stop)await stopSubscription(result.id);
-   else openModal(T('Trwająca subskrypcja'),h`<p>${T('Ta osoba ma trwającą subskrypcję w Stripe. Nadal będzie z niej obciążana, dopóki jej nie zatrzymasz.')}</p>`,all(btn(T('Zostaw'),'close'),btn(T('Zatrzymaj subskrypcję na koniec okresu'),'stop-later','primary',{'data-mem-id':result.id})));
-  }
-  toast(T('Zapisano ustawienia płatności.'));
+  const r=await applyPlan({s,userId:result.id,v,blocked:payload?.active===false});
+  if(!r.ok){toast(r.error);return;}
+  if(r.offerStop)offerStopDialog(result.id);
+  if(r.changed)toast(T('Zapisano ustawienia płatności.'));
  }catch(error){fail(error);}
  finally{fillStaffBadges({force:true});}
 }

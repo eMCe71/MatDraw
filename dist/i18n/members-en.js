@@ -10,7 +10,7 @@ export default {
  'Darmowi':'Free',
  'Bez planu':'No plan',
  'Problem z płatnością':'Payment problem',
- 'Wyciszeni':'Muted',
+ 'Wyciszeni':'Muted users',
  'Szukaj członka':'Search members',
  'E-mail, nazwa użytkownika lub nazwisko':'Email, username or last name',
  'Filtr':'Filter',
@@ -147,5 +147,14 @@ export default {
  'Trwająca subskrypcja':'Ongoing subscription',
  'Ta osoba ma trwającą subskrypcję w Stripe. Nadal będzie z niej obciążana, dopóki jej nie zatrzymasz.':'This person has an ongoing subscription in Stripe. They will keep being charged until you stop it.',
  'Zostaw':'Leave it',
+ 'Plan':'Plan',
+ 'Plan członka':'Member plan',
+ 'Zapisz plan':'Save plan',
+ 'Stan płatności nie został wczytany.':'The payment state has not been loaded.',
+ 'Darmowe konto daje pełny dostęp bez subskrypcji.':'A free account gives full access without a subscription.',
+ 'Konto jest blokowane, ale ma trwającą subskrypcję. Zatrzymaj ją na koniec okresu.':'The account is being blocked but has an ongoing subscription. Stop it at the end of the period.',
+ 'Waluta planu':'Plan currency',
+ 'Z kraju w profilu':'From the country in the profile',
+ 'Waluty nie zmienisz przy trwającej subskrypcji.':'The currency cannot be changed during an ongoing subscription.',
  'Zapisano ustawienia płatności.':'Payment settings saved.'
 };
