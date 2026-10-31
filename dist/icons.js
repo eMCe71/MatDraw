@@ -37,6 +37,23 @@ const paths={
  dobok:'<path d="M9 3 4.6 5.2a1.5 1.5 0 0 0-.8 1.1L3 11.5l3 .8V21h12v-8.7l3-.8-.8-5.2a1.5 1.5 0 0 0-.8-1.1L15 3l-3 5.5L9 3Z"/><path d="M12 8.5V21M6 15.5h12M11 15.5 9.5 19M13 15.5l1.5 3.5"/>',
  glove:'<path d="M8 12V7.5A3.5 3.5 0 0 1 11.5 4h2A3.5 3.5 0 0 1 17 7.5V13a6 6 0 0 1-6 6h-.5A3.5 3.5 0 0 1 7 15.5"/><path d="M8 12H6.5a1.5 1.5 0 0 0 0 3H10a2 2 0 0 0 0-4H8.5M9 19v2h7v-3"/>',
  foot:'<path d="M8 3h5v8.5l5.6 2.4A2.3 2.3 0 0 1 20 16v2H9.5A4.5 4.5 0 0 1 5 13.5V6a3 3 0 0 1 3-3Z"/><path d="M5 21h15M13 7h-3"/>',
- helmet:'<path d="M4 13a8 8 0 0 1 16 0v3.5a2.5 2.5 0 0 1-2.5 2.5H15v-6H9v6H6.5A2.5 2.5 0 0 1 4 16.5V13Z"/><path d="M8 9h8"/>'
+ helmet:'<path d="M4 13a8 8 0 0 1 16 0v3.5a2.5 2.5 0 0 1-2.5 2.5H15v-6H9v6H6.5A2.5 2.5 0 0 1 4 16.5V13Z"/><path d="M8 9h8"/>',
+ // Community, accounts and PWA (plan §12.2): same 24-unit grid and stroke.
+ chat:'<path d="M5 4h14a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-7l-5 4v-4H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z"/><path d="M8 9h8M8 12.5h5"/>',
+ globe:'<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3Z"/>',
+ send:'<path d="M21 3 10 14M21 3l-7 18-4-7-7-4 18-7Z"/>',
+ flag:'<path d="M5 21V4M5 4h11l-2 4 2 4H5"/>',
+ more:'<circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/>',
+ bell:'<path d="M6 16V11a6 6 0 0 1 12 0v5l2 2H4l2-2ZM10 21h4"/>',
+ 'bell-off':'<path d="M8.5 5.1A6 6 0 0 1 18 11v4M6 11v5l-2 2h13M10 21h4M3 3l18 18"/>',
+ share:'<circle cx="18" cy="5" r="2.5"/><circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="19" r="2.5"/><path d="m8.2 10.8 7.6-4.6M8.2 13.2l7.6 4.6"/>',
+ 'plus-square':'<rect x="3" y="3" width="18" height="18" rx="4"/><path d="M12 8v8M8 12h8"/>',
+ archive:'<rect x="3" y="4" width="18" height="5" rx="1.5"/><path d="M5 9v10a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9M10 13h4"/>',
+ 'wifi-off':'<path d="M3 3l18 18M8.5 16.5a5 5 0 0 1 7 0M5 13a10 10 0 0 1 4.4-2.5M15 10.6A10 10 0 0 1 19 13M2 9.5a15 15 0 0 1 4.3-2.8M11 5a15 15 0 0 1 11 4.5M12 20h.01"/>',
+ camera:'<path d="M4 7h3l2-3h6l2 3h3a1 1 0 0 1 1 1v11a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1Z"/><circle cx="12" cy="13" r="3.5"/>',
+ 'zoom-in':'<circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5.5 5.5M10.5 7.5v6M7.5 10.5h6"/>',
+ 'zoom-out':'<circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5.5 5.5M7.5 10.5h6"/>',
+ card:'<rect x="3" y="5" width="18" height="14" rx="2.5"/><path d="M3 10h18M7 15h4"/>',
+ user:'<circle cx="12" cy="8" r="4"/><path d="M4 21v-1a7 7 0 0 1 7-7h2a7 7 0 0 1 7 7v1"/>'
 };
 export function icon(n,cls=''){return `<svg class="icon ${cls}" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[n]||paths.info}</svg>`;}
