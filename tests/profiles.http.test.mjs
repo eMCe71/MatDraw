@@ -8,11 +8,9 @@
 import test,{before,beforeEach,after} from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
-import {setTimeout as sleep} from 'node:timers/promises';
-import {Client,base,fixture} from './helpers/http-client.mjs';
+import {Client,base,eventually,fixture} from './helpers/http-client.mjs';
 const shared=process.env.MATDRAW_TEST_SHARED_DIR;const skip=!base||!shared;
 const ADMIN=['admin@test.example','AdminForTests2026!'],PASSWORD='TestPassword2026!',NEW_PASSWORD='Another-Password-2026';
-const CONFIG_RELOAD_MS=2600;
 const now=()=>Math.floor(Date.now()/1000);
 const image=name=>readFileSync(new URL('./fixtures/avatars/'+name,import.meta.url));
 let seq=0;const uniq=p=>`${p}${Date.now().toString(36)}${(seq++).toString(36)}`;
@@ -30,7 +28,9 @@ async function upload(c,bytes,type='image/webp'){
 }
 /** A member from the fixture with a complete profile; exempt=true gives full access (billing is enforced in the test config). */
 function member(prefix,{exempt=false,profile={}}={}){const email=uniq(prefix)+'@example.test';return {...fixture('member',{email,profile:{firstName:'Test',lastName:'Członek',...profile},exempt}),email};}
-async function setConfig(set){const old=fixture('accounts-config',{set});await sleep(CONFIG_RELOAD_MS);return old;}
+/** Rewrites config keys (fixture accounts-config), then polls observe() until the server returns `want` (no fixed sleeps). */
+async function setConfig(set,observe,want){const old=fixture('accounts-config',{set});assert.deepEqual(await eventually(observe,want),want,'the server applies '+JSON.stringify(set));return old;}
+const publicConfig=async key=>(await get('public-config')).data?.[key];
 async function me(c){const r=await get('me',{cookie:c.cookie});assert.equal(r.status,200,JSON.stringify(r.data));return r.data;}
 /** A session that started the sign-up form $age seconds ago (server-side time, §3.6). */
 async function begun(age=10,body={}){const c=await fresh();const r=await c.req('signup-begin',body);assert.equal(r.status,200,JSON.stringify(r.data));if(age)fixture('session-edit',{sid:sid(c),set:{signup_at:now()-age}});return c;}
@@ -73,14 +73,13 @@ test('sign-up: 30 attempts per hour per address, then 429 with Retry-After',{ski
  assert.ok(r.data.retry>0&&Number(r.headers.get('retry-after'))>0);
 });
 test('sign-up switched off, then the invite-only window (§3.6, §6.10)',{skip},async()=>{
- const token='invite-'+'x'.repeat(30);const old=await setConfig({signup_enabled:false});
+ const token='invite-'+'x'.repeat(30),signup=()=>publicConfig('signup');assert.equal(await signup(),true);
+ const old=await setConfig({signup_enabled:false},signup,false);
  try{
   let c=await fresh();
   for(const route of ['signup-begin','signup']){const r=await c.req(route,route==='signup'?signupBody():{});assert.deepEqual([r.status,r.data.error],[404,'Rejestracja jest chwilowo wyłączona.'],route);}
-  assert.equal((await get('public-config')).data.signup,false);
-  await setConfig({signup_invite_token:token});
-  // The server may cache config.php a little longer than CONFIG_RELOAD_MS (opcache revalidation per worker): wait for the token.
-  for(const end=Date.now()+8000;Date.now()<end&&(await (await fresh()).req('signup-begin',{invite:token})).status!==200;)await sleep(250);
+  // public-config never advertises the invite mode: the token itself is the observation.
+  await setConfig({signup_invite_token:token},async()=>(await (await fresh()).req('signup-begin',{invite:token})).status,200);
   fixture('reset-limits');c=await fresh();
   assert.equal((await c.req('signup-begin',{})).status,404,'without the token');
   assert.equal((await c.req('signup-begin',{invite:token.slice(0,-1)+'y'})).status,404,'wrong token');
@@ -88,7 +87,7 @@ test('sign-up switched off, then the invite-only window (§3.6, §6.10)',{skip},
   c=await begun(10,{invite:token});
   assert.equal((await c.req('signup',signupBody())).status,404,'signup needs the token too');
   const r=await c.req('signup',signupBody({invite:token}));assert.equal(r.status,200,JSON.stringify(r.data));
- }finally{await setConfig({signup_enabled:old.signup_enabled,signup_invite_token:null});}
+ }finally{await setConfig({signup_enabled:old.signup_enabled,signup_invite_token:null},signup,true);}
 });
 
 test('username-check: POST only, after signup-begin or signed in; states and free suggestions',{skip},async()=>{
@@ -179,11 +178,12 @@ test('photos: the same picture of two people lives in two directories; deleting 
  assert.equal((await get(`avatar&id=${pb}&v=${vb}&s=64`,{cookie:ca.cookie})).status,200,'the other person still has the photo');
 });
 test('photos: switched off → 503 before anything else',{skip},async()=>{
- const m=member('off',{exempt:true});const c=await signIn(m.email);const old=await setConfig({avatars_enabled:false});
+ const m=member('off',{exempt:true});const c=await signIn(m.email);const avatars=()=>publicConfig('avatars'),before=await avatars();
+ const old=await setConfig({avatars_enabled:false},avatars,false);
  try{
   for(const [bytes,type] of [[image('photo.webp'),'image/webp'],[image('vector.svg'),'image/svg+xml'],[Buffer.alloc(600*1024),'image/png']]){const r=await upload(c,bytes,type);assert.deepEqual([r.status,r.data.error],[503,'Zdjęcia profilowe są chwilowo wyłączone.'],type);}
-  assert.equal((await get('public-config')).data.avatars,false);
- }finally{await setConfig({avatars_enabled:old.avatars_enabled});}
+  assert.equal(await avatars(),false);
+ }finally{await setConfig({avatars_enabled:old.avatars_enabled},avatars,before);}
 });
 
 test('admin-members: admin only, POST, literal LIKE with _ and %, Polish letters, billing filters',{skip},async()=>{

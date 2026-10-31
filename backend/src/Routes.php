@@ -138,12 +138,15 @@ final class Routes {
  public static function schemaBehind(\PDOException $e):bool{return in_array((string)($e->errorInfo[0]??$e->getCode()),['42S02','42S22'],true);}
  /**
   * One log line without personal data: class, file:line and, for PDOException, only SQLSTATE and driver code (MySQL
-  * puts duplicate values such as e-mails into the message); other messages are cut to 200 characters.
+  * puts duplicate values such as e-mails into the message); for StripeError only its status, type and code (Stripe's
+  * text may quote request values such as the customer's e-mail); other messages are cut to 200 characters.
   */
  public static function logThrowable(\Throwable $e,string $prefix='MatDraw'):void{error_log($prefix.': '.self::describe($e));}
  public static function describe(\Throwable $e):string {
   $where=get_class($e).' '.basename($e->getFile()).':'.$e->getLine();
   if($e instanceof \PDOException)return $where.' SQLSTATE '.($e->errorInfo[0]??$e->getCode()).' code '.($e->errorInfo[1]??'-');
+  // instanceof never autoloads: without the billing slice no StripeError can exist here.
+  if($e instanceof StripeError)return $where.' '.$e->code();
   return $where.' '.mb_substr((string)preg_replace('/\s+/u',' ',$e->getMessage()),0,200);
  }
 }

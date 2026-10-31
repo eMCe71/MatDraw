@@ -8,6 +8,20 @@ if(PHP_SAPI!=='cli'){http_response_code(404);exit;}
 require dirname(__DIR__,2).'/backend/bootstrap.php';
 use MatDraw\Domain;
 const FIXTURE_BILLING_COLUMNS=['billing_exempt','exempt_reason','exempt_by','exempt_at','exempt_until','currency','livemode','stripe_customer_id','customer_seq','stripe_subscription_id','sub_status','price_lookup_key','current_period_start','current_period_end','cancel_at_period_end','cancel_at','canceled_at','ended_at','latest_invoice_status','pending_checkout_id','pending_checkout_expires','last_synced_at','next_sync_at','sync_claimed_at','sync_error','stripe_redact_pending','deleted_at','created_at','updated_at'];
+/**
+ * Rewrites the test config (MATDRAW_CONFIG) for the config jobs of every slice: atomically (temporary file + rename)
+ * and with an mtime strictly above the previous one. opcache compares whole-second mtimes, so two rewrites within one
+ * second could otherwise leave the server on the bytes of the first one; scripts/test-http.sh also starts php -S with
+ * opcache.revalidate_freq=0, so the next request sees the new file. Returns the old values of the keys in $set.
+ */
+function fixture_config_set(array $set,array $allowed,string $job):array {
+ $path=getenv('MATDRAW_CONFIG');if(!$path||!is_file($path))throw new RuntimeException("$job: MATDRAW_CONFIG");
+ $c=require $path;$old=[];
+ foreach($set as $k=>$v){if(!in_array($k,$allowed,true))throw new RuntimeException("$job: key $k not allowed");$old[$k]=$c[$k]??null;if($v===null)unset($c[$k]);else $c[$k]=$v;}
+ clearstatcache(true,$path);$mtime=max(time(),(int)filemtime($path)+1);
+ $tmp=$path.'.tmp.'.getmypid();file_put_contents($tmp,"<?php\nreturn ".var_export($c,true).";\n");chmod($tmp,0600);touch($tmp,$mtime);rename($tmp,$path);
+ return $old;
+}
 function fixture_public_id():string{$a='0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz';$s='';for($i=0;$i<12;$i++)$s.=$a[random_int(0,61)];return $s;}
 function fixture_billing(PDO $pdo,string $userId,array $fields):array {
  foreach(array_keys($fields) as $k)if(!in_array($k,FIXTURE_BILLING_COLUMNS,true))throw new RuntimeException("billing: unknown column $k");

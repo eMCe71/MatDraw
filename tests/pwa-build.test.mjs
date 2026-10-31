@@ -136,7 +136,8 @@ test('browser: install, offline, update only on SKIP_WAITING, half-deployed rele
   s.writeHead(200,{'content-type':TYPES[path.extname(f)]||'application/octet-stream','cache-control':'no-cache','content-security-policy':"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'"});s.end(readFileSync(f));
  });
  await new Promise(r=>server.listen(+(process.env.MATDRAW_PWA_PORT||0),'127.0.0.1',r));
- const base=`http://127.0.0.1:${server.address().port}`,browser=await playwright.chromium.launch();
+ // The server is closed also when Chromium cannot start, so no open handle keeps the test process alive.
+ const base=`http://127.0.0.1:${server.address().port}`,browser=await playwright.chromium.launch().catch(e=>{server.close();throw e;});
  try{
   const demo=await browser.newContext(),d=await demo.newPage();await d.goto(base+'/');await d.waitForTimeout(2500);
   assert.equal(await d.evaluate(async()=>(await navigator.serviceWorker.getRegistrations()).length),0,'the demo registers no worker');await demo.close();

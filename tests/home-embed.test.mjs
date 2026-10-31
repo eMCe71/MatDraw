@@ -49,7 +49,8 @@ const serve=()=>new Promise(resolve=>{
  }).listen(0,'127.0.0.1',()=>resolve({server,url:'http://127.0.0.1:'+server.address().port+'/'}));
 });
 test('home page in a browser: layout, skip links, phone sign-in button, known device, preview tabs, member preview',{skip:!chromium&&'Playwright is not installed',timeout:120000},async()=>{
- const {server,url}=await serve(),browser=await chromium.launch(),errors=[];
+ // The server is closed also when Chromium cannot start, so no open handle keeps the test process alive.
+ const {server,url}=await serve(),browser=await chromium.launch().catch(e=>{server.close();throw e;}),errors=[];
  const open=async(width,height,init)=>{const ctx=await browser.newContext({viewport:{width,height},locale:'pl-PL'});if(init)await ctx.addInitScript(init);const page=await ctx.newPage();page.on('pageerror',e=>errors.push(e.message));page.on('console',m=>{if(m.type()==='error')errors.push(m.text());});await page.goto(url);await page.waitForSelector('.login-page');return {ctx,page};};
  try{
   // no horizontal scroll; sign-in form on the right at desktop

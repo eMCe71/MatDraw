@@ -24,14 +24,14 @@ import crypto from 'node:crypto';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {setTimeout as sleep} from 'node:timers/promises';
-import {Client,base,fixture,php} from './helpers/http-client.mjs';
+import {Client,base,eventually,fixture,php} from './helpers/http-client.mjs';
 const release=process.env.MATDRAW_TEST_RELEASE,skip=!base||!release;
 const fixtureScript=fileURLToPath(new URL('./helpers/fixture.php',import.meta.url));
 const stubBase=base?`http://127.0.0.1:${Number(new URL(base).port)+1}`:'';
 const ADMIN=['admin@test.example','AdminForTests2026!'],PASSWORD='MemberPassword2026!',VERSION='2026-09-30.endive',SECRET='whsec_test_secret';
 const ERR={unavailable:'Płatności są chwilowo niedostępne. Spróbuj ponownie później.',confirm:'Nie można potwierdzić tej płatności.'};
 const now=()=>Math.floor(Date.now()/1000),D=86400;
-/** The server may serve a cached config.php for up to ~3 s after a rewrite (opcache.revalidate_freq=2, whole seconds). */
+/** Polls until the server answers `expected` (e.g. after a config rewrite; scripts/test-http.sh re-validates config.php on every request). */
 async function until(probe,expected,ms=8000){let v;for(const end=Date.now()+ms;Date.now()<end;await sleep(250))if((v=await probe())===expected)break;return v;}
 const stub=async body=>{const r=await fetch(stubBase+'/__control',{method:'POST',body:JSON.stringify(body)});const j=await r.json();if(!r.ok)throw Error(JSON.stringify(j));return j;};
 /** Stub requests recorded since a marker (Date.now() before the action), optionally filtered by method and path regex. */
@@ -383,9 +383,14 @@ function fixtureAsync(job,payload){
 }
 test('two parallel syncs of one account make one Stripe call (60 s claim)',{skip},async()=>{
  const p=await paidMember('parallel');
- await stub({op:'delay',method:'GET',path:'^/v1/subscriptions$',ms:1500,times:2});
+ await stub({op:'delay',method:'GET',path:'^/v1/subscriptions$',ms:3000,times:2});
  const t=Date.now();
- const outcomes=await Promise.all([fixtureAsync('billing-run',{fn:'sync-user',userId:p.id}),fixtureAsync('billing-run',{fn:'sync-user',userId:p.id})]);
+ // The second sync starts once the first holds the claim and waits for the delayed Stripe answer, so the outcome does
+ // not depend on how fast two PHP processes start on a loaded machine. Both are awaited before any assertion.
+ const first=fixtureAsync('billing-run',{fn:'sync-user',userId:p.id});
+ const claimed=await eventually(()=>Number(row(p.id).sync_claimed_at)>0,true,10000,50);
+ const outcomes=await Promise.all([first,claimed?fixtureAsync('billing-run',{fn:'sync-user',userId:p.id}):'not started']);
+ assert.ok(claimed,'the first sync claims the account');
  assert.equal(outcomes.filter(o=>o==='busy').length,1,'the second one finds the claim: '+outcomes);
  assert.ok(outcomes.some(o=>['updated','unchanged'].includes(o)),String(outcomes));
  assert.equal((await since(t,'GET',/^\/v1\/subscriptions$/)).length,1,'one Stripe call');assert.equal(row(p.id).sync_claimed_at,0,'claim released');

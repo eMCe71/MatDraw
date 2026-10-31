@@ -242,6 +242,8 @@ test('Route and job registries: modes, unique names, refused definitions; descri
  finally{rmSync(jobsDir,{recursive:true,force:true});}
  const d=bridge({job:'describe',email:'secret.person@example.test'});
  assert.ok(!d.pdo.includes('secret.person'),d.pdo);assert.match(d.pdo,/^PDOException php-bridge-core\.php:\d+ SQLSTATE 23000 code 1062$/);
+ // Stripe's own text may quote request values (the customer's e-mail): only status, type and code are logged.
+ assert.match(d.stripe,/^MatDraw\\StripeError php-bridge-core\.php:\d+ stripe 400 invalid_request_error\/email_invalid$/);
  assert.equal(d.other.length,'RuntimeException php-bridge-core.php:'.length+String(d.other.match(/:(\d+) /)[1]).length+1+200);
  assert.equal(d.behind,true);assert.equal(d.notBehind,false);
 });

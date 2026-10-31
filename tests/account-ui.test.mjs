@@ -243,7 +243,8 @@ const shot=async(page,name)=>{if(!SHOTS)return;mkdirSync(SHOTS,{recursive:true})
 const noOverflow=async(page,what)=>assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth-document.documentElement.clientWidth),0,'horizontal overflow: '+what);
 
 test('demo in a browser: sign-up shows the demo message, the profile saves to localStorage and keeps a draft across a language switch',{skip:!BROWSER&&'MATDRAW_BROWSER_TESTS=1 and Playwright needed',timeout:120000},async()=>{
- const {server,url}=await serve(),browser=await chromium.launch(),errors=[];
+ // The server is closed also when Chromium cannot start, so no open handle keeps the test process alive.
+ const {server,url}=await serve(),browser=await chromium.launch().catch(e=>{server.close();throw e;}),errors=[];
  try{
   for(const [w,hh] of [[1440,900],[390,844]]){
    const ctx=await browser.newContext({viewport:{width:w,height:hh},locale:'pl-PL'}),page=await ctx.newPage();watch(page,errors);

@@ -11,7 +11,7 @@ import {existsSync,readdirSync,unlinkSync,utimesSync,writeFileSync} from 'node:f
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {setTimeout as sleep} from 'node:timers/promises';
-import {Client,base,fixture,php} from './helpers/http-client.mjs';
+import {Client,base,eventually,fixture,php} from './helpers/http-client.mjs';
 const repo=path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const backend=path.join(process.env.MATDRAW_TEST_RELEASE||repo,'backend');
 const shared=process.env.MATDRAW_TEST_SHARED_DIR,sessions=shared?path.join(shared,'sessions'):'';
@@ -50,8 +50,6 @@ async function me(c){
  return r.data;
 }
 const blockOr=(data,block)=>block??(data.features.chat?null:'off');
-// The server may serve a cached config.php for up to opcache.revalidate_freq (2 s) after a rewrite.
-const CONFIG_RELOAD_MS=2600;
 async function until(probe,expected,ms=6000){let v;for(const end=Date.now()+ms;Date.now()<end;await sleep(200))if((v=await probe())===expected)break;return v;}
 const TEST_ROUTES=String.raw`<?php
 // Test-only routes of tests/accounts.http.test.mjs, written into the disposable release and removed after the tests.
@@ -63,6 +61,8 @@ return [
  'zt-jobs'=>['method'=>'POST','auth'=>'session','handler'=>function(RouteContext $ctx):array{$pdo=$ctx->pdo();$c=$ctx->config;register_shutdown_function(static fn()=>Jobs::maybe($pdo,$c));return ['ok'=>true];}],
  // Control: slow work after the response that keeps the session open holds the next request of the same person.
  'zt-hold'=>['method'=>'POST','auth'=>'session','handler'=>function():array{register_shutdown_function(static fn()=>usleep(1500000));return ['ok'=>true];}],
+ // The config value this request runs with: the tests poll it after a fixture rewrites config.php (never a fixed sleep).
+ 'zt-config'=>['method'=>'GET','auth'=>'public','handler'=>fn(RouteContext $ctx):array=>['jobTestSleepMs'=>$ctx->config['job_test_sleep_ms']]],
  'zt-post'=>['method'=>'POST','auth'=>'session','user'=>'optional','max'=>200,'handler'=>$echo],
  'zt-none'=>['method'=>'POST','auth'=>'session','user'=>'optional','handler'=>fn()=>null],
  'zt-fail'=>['method'=>'POST','auth'=>'session','user'=>'optional','handler'=>fn()=>throw new ApiError('Brak uprawnień.',409,['code'=>'zt'])],
@@ -248,14 +248,18 @@ test('maintenance file and schema behind code answer 503 with Retry-After; an ou
 test('work after the response never holds the session: a second request with the same cookie answers in < 1 s',{skip:skipRoutes},async()=>{
  const c=await signIn(...ADMIN),second=async()=>{const t=performance.now(),r=await raw('session',{cookie:c.cookie});assert.equal(r.status,200);assert.equal(r.data.user.id,c.login.data.user.id);return performance.now()-t;};
  // Control: a shutdown function that keeps the session open holds the next request (so this measurement can fail).
- const hold=c.req('zt-hold',{});await sleep(300);const held=await second();assert.equal((await hold).status,200);
+ // Every request started here is awaited before the test ends, also when an assertion fails (no activity after the test).
+ const hold=c.req('zt-hold',{});let held;try{await sleep(300);held=await second();}finally{assert.equal((await hold).status,200);}
  assert.ok(held>=1000,`the held session lock was not noticed (${Math.round(held)} ms)`);
- const old=fixture('config-set',{set:{job_test_sleep_ms:2500}});await sleep(CONFIG_RELOAD_MS);
+ const jobSleep=async()=>(await raw('zt-config')).data?.jobTestSleepMs;
+ const old=fixture('config-set',{set:{job_test_sleep_ms:2500}});
  try{
+  assert.equal(await eventually(jobSleep,2500),2500,'the server runs with the slowed job');
   // A session POST (as chat-send) runs a slowed job after its response: Jobs::maybe released the session first.
   fixture('jobs-reset');let start=now(),t0=performance.now();
-  const first=c.req('zt-jobs',{}).then(r=>({...r,took:performance.now()-t0}));await sleep(400);
-  const took=await second();assert.ok(took<1000,`second request took ${Math.round(took)} ms`);
+  const first=c.req('zt-jobs',{}).then(r=>({...r,took:performance.now()-t0}));let took;
+  try{await sleep(400);took=await second();}finally{await first;}
+  assert.ok(took<1000,`second request took ${Math.round(took)} ms`);
   // php -S has no fastcgi_finish_request: the first answer ends after the slowed job, which proves the job ran meanwhile.
   const a=await first;assert.equal(a.status,200);assert.ok(a.took>=2000,`the job was not slowed down (${Math.round(a.took)} ms)`);
   assert.equal(fixture('job-runs').filter(r=>r.last_run_at>=start).length,1,'exactly one job per request: '+JSON.stringify(fixture('job-runs')));
@@ -267,7 +271,7 @@ test('work after the response never holds the session: a second request with the
   fixture('jobs-reset');start=now();t0=performance.now();
   const m=await raw('me',{cookie:c.cookie});assert.equal(m.status,200);assert.ok(performance.now()-t0>=2000,'me ran the slowed job');
   assert.equal(fixture('job-runs').filter(r=>r.last_run_at>=start).length,1);
- }finally{fixture('config-set',{set:{job_test_sleep_ms:old.job_test_sleep_ms}});}
+ }finally{fixture('config-set',{set:{job_test_sleep_ms:old.job_test_sleep_ms}});assert.equal(await eventually(jobSleep,old.job_test_sleep_ms??0),old.job_test_sleep_ms??0,'restored');}
 });
 
 test('dispatch of session POST: Origin and CSRF, JSON type, size, depth and shape; errors carry csrf; null answers 204',{skip:skipRoutes},async()=>{

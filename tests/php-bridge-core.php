@@ -76,7 +76,8 @@ $out=match($in['job']){
  'describe'=>(function()use($in){
   $pdo=new PDOException('SQLSTATE[23000]: Integrity constraint violation: 1062 Duplicate entry \''.$in['email'].'\' for key \'user_email\'');$pdo->errorInfo=['23000',1062,'Duplicate entry \''.$in['email'].'\''];
   $behind=new PDOException('SQLSTATE[42S02]: Base table or view not found');$behind->errorInfo=['42S02',1146,'Table x doesn\'t exist'];
-  return ['pdo'=>Routes::describe($pdo),'other'=>Routes::describe(new RuntimeException(str_repeat('x',300))),'behind'=>Routes::schemaBehind($behind),'notBehind'=>Routes::schemaBehind($pdo)];
+  $stripe=class_exists(MatDraw\StripeClient::class)?Routes::describe(new MatDraw\StripeError('Invalid email address: '.$in['email'],400,'invalid_request_error','email_invalid','req_1','email')):null;
+  return ['pdo'=>Routes::describe($pdo),'stripe'=>$stripe,'other'=>Routes::describe(new RuntimeException(str_repeat('x',300))),'behind'=>Routes::schemaBehind($behind),'notBehind'=>Routes::schemaBehind($pdo)];
  })(),
  'api-base'=>array_map(fn($c)=>Config::apiBaseAllowed($c[0],$c[1]),$in['cases']),
  // RouteContext::user() of peek and session routes with a database that cannot be opened: guests (no cookie, a malformed
