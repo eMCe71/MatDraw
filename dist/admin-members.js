@@ -44,9 +44,11 @@ export function validateRequireFrom(date,{scope='user',today=warsawToday()}={}){
 
 // ---- Plan badges ----
 /** {text,type} of a plan badge from the state the server computed (Access states, as if payments were enforced); null for no badge.
- * kind 'staff' is the accounts panel (admin-billing?list=staff), 'member' the members list. */
-export function planBadge(entry,kind='member'){
+ * kind 'staff' is the accounts panel (admin-billing?list=staff), 'member' the members list. With payments switched off or not
+ * enforced ({enforced:false}) a staff account that would need a plan works with full access, so it is not flagged as unpaid. */
+export function planBadge(entry,kind='member',{enforced=true}={}){
  const {state,until,reason}=entry||{},date=until?fmtSec(until):'';
+ if(!enforced&&kind==='staff'&&['none','ended','grace'].includes(state))return {text:T('Pełny dostęp (płatności wyłączone)'),type:'neutral'};
  switch(state){
   case 'staff':return {text:T('Bez płatności'),type:'neutral'};
   case 'free':return reason==='staff-default'?{text:T('Darmowe (domyślnie)'),type:'warning'}:date?{text:T('Darmowe do {date}',{date}),type:'success'}:{text:T('Darmowe'),type:'success'};
@@ -61,6 +63,9 @@ export function planBadge(entry,kind='member'){
  }
 }
 export const badgeHtml=(b)=>b?h`<span class="badge ${b.type}">${b.text}</span>`:h``;
+/** Whether payments are switched on and enforced (public-config billing = billing_enabled && billing_enforce, from account-boot);
+ * an unknown config counts as on. */
+export const paymentsEnforced=(cfg=registry.use('account')?.config?.())=>!cfg||cfg.billing!==false;
 
 // ---- The "Darmowe konto" switch (§3.2) ----
 /** Initial state of the switch: off for a new account (requirement 4), otherwise what admin-billing reports; hidden for the Admin role (never pays). */
@@ -179,7 +184,7 @@ export function pageView(st){
 export function factsView(d){
  const subs={active:T('Aktywna'),trialing:T('Okres próbny'),past_due:T('Zaległa płatność'),canceled:T('Anulowana'),incomplete:T('Niedokończona'),incomplete_expired:T('Wygasła'),unpaid:T('Niezapłacona'),paused:T('Wstrzymana'),none:T('Brak subskrypcji')};
  const sub=(subs[d.subStatus]||d.subStatus||subs.none)+(d.periodEnd?' · '+(d.cancelAtPeriodEnd?T('kończy się {date}',{date:fmtSec(d.periodEnd)}):T('do {date}',{date:fmtSec(d.periodEnd)})):'');
- const plan=planBadge({state:d.state,until:d.until,reason:d.exemptReason},d.role==='member'?'member':'staff');
+ const plan=planBadge({state:d.state,until:d.until,reason:d.exemptReason},d.role==='member'?'member':'staff',{enforced:paymentsEnforced()});
  return h`<dl class="mem-facts">
   <div><dt>${T('Stan planu')}</dt><dd>${badgeHtml(plan)}</dd></div>
   <div><dt>${T('Subskrypcja')}</dt><dd>${sub}${d.mode?h` <span class="badge neutral">${d.mode}</span>`:''}</dd></div>
@@ -220,7 +225,7 @@ export function staffPlans(force=false){
 export async function fillStaffBadges({force=false}={}){
  if(io.demo||!document.querySelector('[data-billing-badge]'))return;
  const users=await staffPlans(force);if(!users)return;
- for(const el of document.querySelectorAll('[data-billing-badge]')){const entry=users[el.dataset.billingBadge];setHtml(el,entry?badgeHtml(planBadge(entry,'staff')):h``);}
+ for(const el of document.querySelectorAll('[data-billing-badge]')){const entry=users[el.dataset.billingBadge];setHtml(el,entry?badgeHtml(planBadge(entry,'staff',{enforced:paymentsEnforced()})):h``);}
 }
 /** Accounts the bulk action changes: the server updates every row with reason 'grandfathered', also one whose end date has passed. */
 export const grandfathered=users=>Object.values(users||{}).filter(e=>e&&e.reason==='grandfathered').length;
@@ -452,7 +457,7 @@ function billingShell(s){
  const cur=s.detail?.currencyOverride||'',locked=!s.detail||CURRENCY_LOCK.includes(s.detail.subStatus);
  return h`<fieldset class="mem-bill" data-mem-bill><legend>${T('Płatności')}</legend>
   <label class="checkbox-label mem-free"><input type="checkbox" name="mem-free" data-mem-free${s.checked?' checked':''}> ${T('Darmowe konto (bez płatności)')}</label>
-  <p class="muted small mem-note">${NOTE(s)}</p>
+  <p class="muted small mem-note">${NOTE(s)}</p>${paymentsEnforced()?'':h`<p class="muted small mem-note-off">${T('Płatności są wyłączone: konto ma pełny dostęp. Te ustawienia zaczną działać po włączeniu płatności.')}</p>`}
   <div class="mem-on" data-mem-on hidden><div class="form-grid">
    <label class="span-two">${T('Powód darmowego konta')}<input name="mem-reason" maxlength="200" autocomplete="off" value="${s.loaded.reason}"></label>
    <label class="span-two">${T('Darmowe do (opcjonalnie)')}<input name="mem-until" type="date" min="${dayAdd(warsawToday(),1)}" value="${s.loaded.until}"></label></div>

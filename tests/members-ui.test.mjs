@@ -134,6 +134,11 @@ test('plan badges: every Access state has a text; staff-default is flagged; date
  assert.equal(text('past_due'),'Problem z płatnością');assert.equal(text('processing'),'Płatność w toku');
  assert.equal(text('none',{},'member'),'Bez planu');assert.equal(text('none',{},'staff'),'Wymaga płatności');assert.equal(text('ended',{},'staff'),'Wymaga płatności');assert.equal(text('ended',{},'member'),'Subskrypcja zakończona');
  assert.equal(text('staff'),'Bez płatności');assert.equal(planBadge({state:'open'}),null);assert.equal(planBadge(null),null);
+ // Payments off or not enforced (final review F4): a staff account that would need a plan works with full access, so no warning.
+ for(const state of ['none','ended','grace'])assert.deepEqual(planBadge({state,until},'staff',{enforced:false}),{text:'Pełny dostęp (płatności wyłączone)',type:'neutral'},state);
+ assert.equal(planBadge({state:'none'},'member',{enforced:false}).text,'Bez planu','members keep their plan state');
+ assert.equal(planBadge({state:'active',until},'staff',{enforced:false}).type,'success');
+ assert.equal(members.paymentsEnforced({billing:false}),false);assert.equal(members.paymentsEnforced({billing:true}),true);assert.equal(members.paymentsEnforced(null),true,'unknown counts as on');
  setLanguage('en',{persist:false});
  try{assert.equal(text('free',{reason:'staff-default'},'staff'),'Free (default)');assert.match(text('active',{until}),/^Paid until .*2026/);assert.equal(text('past_due'),'Payment problem');}
  finally{setLanguage('pl',{persist:false});}
