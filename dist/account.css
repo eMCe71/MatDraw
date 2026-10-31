@@ -1,1 +1,233 @@
-/* account.css: styles of the account feature (plan §8.7). Placeholder created by frontend-foundation; the feature slice owns it. */
+/* account.css: sign-up, profile, photo crop, plan, Stripe returns, subscription, home sign-up card and staff banner (plan §8.7,
+   §12.12; research 05 §9-§11, §14, §17 and the mockup). Every selector has the acct- prefix (or scopes an acct- element); tokens
+   from tokens.css; contrast per 05 §14; no new global element selectors. */
+[class*="acct-"][hidden]{display:none!important}
+.acct-loading{padding:28px 0;color:var(--chat-meta,#5b6f89);font-size:13px}
+.acct-link{background:transparent;border:0;padding:0;color:#0072bc;font:inherit;font-weight:650;text-decoration:underline;text-underline-offset:2px;cursor:pointer}
+.acct-link:hover{color:#00448a}
+.acct-hint{font-size:11.5px;line-height:1.6;color:var(--chat-meta,#5b6f89)}
+.acct-lead{font-size:13px;line-height:1.7;color:#4b6079}
+.acct-fine{font-size:11px;line-height:1.6;color:var(--chat-meta,#5b6f89)}
+.acct-wide{display:inline}
+.acct-spin{display:inline-block;width:14px;height:14px;border:2px solid #c9dcef;border-top-color:#0072bc;border-radius:50%;animation:acct-spin .8s linear infinite;vertical-align:-2px}
+.acct-spin.big{width:44px;height:44px;border-width:4px;margin:0 auto 18px;display:block}
+@keyframes acct-spin{to{transform:rotate(360deg)}}
+
+/* Home page: sign-up card in the sign-in column (mockup .acct-join) and the "forgot password" panel. */
+.acct-join{margin-top:24px;border:1px solid #d6e6f4;border-radius:14px;padding:16px 16px 14px;background:linear-gradient(160deg,#f4faff,#fff 60%)}
+.acct-join-top{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
+.acct-join .eyebrow{margin-bottom:0}
+.acct-join strong{display:block;font-size:15px;color:#102447;letter-spacing:-.2px;margin-top:3px}
+.acct-join .acct-price{text-align:right;line-height:1.1;flex-shrink:0}
+.acct-price b{display:block;font-size:20px;color:#102447;letter-spacing:-.5px}
+.acct-price span{font-size:10.5px;color:var(--muted)}
+.acct-join ul{list-style:none;margin:12px 0 14px;padding:0;display:grid;gap:6px}
+.acct-join li{display:flex;gap:8px;align-items:center;font-size:12px;color:#2f4d6d}
+.acct-join li .icon{width:15px;height:15px;color:#0072bc}
+.acct-join-cta{width:100%}
+.acct-join .acct-fine{margin-top:8px;text-align:center}
+.acct-help-host{line-height:1.7}
+.acct-help-join{white-space:nowrap}
+.acct-help-panel{display:grid;gap:6px;margin-top:10px;padding:12px 14px;border:1px solid #cfe6f5;border-radius:9px;background:#f4faff;color:#3d5a78;font-size:12px;line-height:1.6}
+.acct-help-panel strong{color:#00448a;font-size:12.5px}
+.acct-help-mail{display:inline-flex;align-items:center;gap:7px;color:#0072bc;font-weight:650;word-break:break-all}
+.acct-help-mail .icon{width:15px;height:15px;flex-shrink:0}
+
+/* Staff banner at the top of the shell content (plan §3.2, §6.6). */
+.acct-banner{display:flex;align-items:center;gap:12px;padding:12px 15px;margin:0 0 20px;border:1px solid #eadfc9;border-radius:9px;background:#fffbf2;color:#8a5a12}
+.acct-banner.blocked{border-color:#f0c9cb;background:#fdf3f3;color:var(--chat-danger,#b3424a)}
+.acct-banner-icon{display:grid;place-items:center}.acct-banner-icon .icon{width:18px;height:18px}
+.acct-banner p{flex:1;font-size:12px;line-height:1.6;color:#6e5427}
+.acct-banner.blocked p{color:#7d3a3f}
+.acct-banner strong{color:inherit;font-weight:700}
+.acct-banner-btn{min-height:34px;padding:7px 13px;font-size:12px;flex-shrink:0}
+.acct-self-img{width:100%;height:100%;border-radius:50%;object-fit:cover;display:block}
+
+/* Public sign-up page (guest bar header from workspace.css). */
+.acct-main{flex:1;padding:36px 24px 56px}
+.acct-column{max-width:560px;margin:0 auto;display:grid;gap:18px}
+.acct-steps{display:grid;gap:10px}
+.acct-steps-label{font-size:11px;font-weight:700;letter-spacing:1.2px;text-transform:uppercase;color:#00679d}
+.acct-steps ol{list-style:none;margin:0;padding:0;display:flex;gap:8px}
+.acct-steps li{flex:1;display:flex;align-items:center;gap:8px;padding:8px 10px;border-radius:9px;background:#eaf1f8;color:#5b6f89;font-size:12px;font-weight:600}
+.acct-steps li>span{width:22px;height:22px;border-radius:50%;display:grid;place-items:center;background:#fff;color:#5b6f89;font-size:11px;font-weight:700;flex-shrink:0}
+.acct-steps li>span .icon{width:13px;height:13px}
+.acct-steps li.current{background:#00448a;color:#fff}.acct-steps li.current>span{color:#00448a}
+.acct-steps li.done{background:#e3f5fc;color:#00448a}.acct-steps li.done>span{background:#00aeef;color:#fff}
+.acct-card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:28px;box-shadow:0 6px 24px #00448a0d;display:grid;gap:16px;min-width:0}
+.acct-card h1{font-size:26px;color:#102447;letter-spacing:-.7px;outline:0}
+.acct-card .notice{margin:0}
+.acct-form{display:grid;gap:16px;min-width:0}
+.acct-card .field-label,.acct-form .field-label,.acct-field .field-label{font-size:12px;color:#4b6079;font-weight:600}
+.acct-card input:not([type=checkbox]):not([type=file]),.acct-card select,.acct-form input:not([type=checkbox]):not([type=file]),.acct-form select{width:100%;min-height:44px;font-size:14px;border-color:var(--chat-field-border,#8296b0)}
+.acct-card input::placeholder,.acct-form input::placeholder{color:#627690}
+.acct-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
+.acct-field{display:grid;gap:7px;min-width:0}
+.acct-hp{position:absolute;left:-10000px;top:auto;width:1px;height:1px;overflow:hidden}
+.acct-consents:empty{display:none}
+.acct-actions{display:flex;flex-wrap:wrap;gap:10px;justify-content:flex-end;align-items:center}
+.acct-card .acct-actions .btn,.acct-form .acct-actions .btn{min-height:44px;font-size:13px;padding:11px 18px}
+.acct-card .form-error,.acct-form .form-error{margin-top:0}
+.acct-check{font-size:12.5px!important;color:#2f4d6d!important}
+.acct-check input{width:18px!important;height:18px!important}
+.acct-check-hint{margin-top:-10px;padding-left:26px}
+/* Password with show/hide and the strength hint. */
+.acct-pw{position:relative}
+.acct-pw input{padding-right:48px}
+.acct-pw-toggle{position:absolute;right:4px;top:50%;transform:translateY(-50%);width:38px;height:38px;border-radius:7px;background:transparent;display:grid;place-items:center;color:#4b6079}
+.acct-pw-toggle:hover{background:#eef4fa}
+.acct-pw-toggle[aria-pressed="true"]{color:#0072bc}
+.acct-pw-toggle .icon{width:18px;height:18px}
+.acct-meter-line{display:flex;align-items:center;gap:10px;font-size:11.5px;color:#4b6079;min-height:18px}
+.acct-meter{display:inline-flex;gap:4px}
+.acct-meter i{width:26px;height:5px;border-radius:3px;background:#dbe5f0}
+.acct-meter[data-level="1"] i:first-child{background:var(--chat-danger,#b3424a)}
+.acct-meter[data-level="2"] i:nth-child(-n+2){background:#c2810c}
+.acct-meter[data-level="3"] i{background:#0072bc}
+/* Username with "@" and the live availability line (aria-live on that line only). */
+.acct-at{display:flex;align-items:stretch;min-width:0}
+.acct-at>span{display:grid;place-items:center;padding:0 11px;border:1px solid var(--chat-field-border,#8296b0);border-right:0;border-radius:6px 0 0 6px;background:#f2f6fa;color:#4b6079;font-weight:700}
+.acct-at input{border-radius:0 6px 6px 0!important;min-width:0}
+.acct-at input[readonly]{background:#f5f8fc;color:#5b6f89}
+.acct-status{font-size:12px;line-height:1.6;color:#4b6079;min-height:19px}
+.acct-st{display:inline-flex;align-items:center;gap:6px}
+.acct-st .icon{width:15px;height:15px}
+.acct-st.ok{color:#0072bc;font-weight:650}
+.acct-st.bad{color:var(--chat-danger,#b3424a);font-weight:600}
+.acct-suggest{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:6px}
+/* Sports chips: aria-pressed carries the state; the main sport has a trophy icon. */
+.acct-sports{display:grid;gap:8px;min-width:0}
+.acct-sports legend{font-size:12px;color:#4b6079;font-weight:600;margin-bottom:2px}
+.acct-chips{display:flex;flex-wrap:wrap;gap:8px}
+.acct-chip{flex:0 0 auto;display:inline-flex;align-items:center;gap:6px;min-height:36px;padding:6px 12px;border-radius:999px;border:1px solid #c5d4e4;background:#fff;color:#2f4d6d;font-size:12.5px;font-weight:600}
+.acct-chip .icon{width:14px;height:14px;color:#7088a3}
+.acct-chip:hover:not(:disabled){border-color:#0072bc;background:#f4faff}
+.acct-chip[aria-pressed="true"]{background:var(--sport-tkd-bg,#e8f6fc);border-color:#7cc4e8;color:#00548a}
+.acct-chip[aria-pressed="true"] .icon{color:#0072bc}
+.acct-chip.main{background:#00448a;border-color:#00448a;color:#fff}.acct-chip.main .icon{color:#7fd6f7}
+.acct-chip.small{min-height:30px;padding:3px 10px;font-size:12px;border-radius:7px}
+.acct-chip:disabled{opacity:.45}
+.acct-main-sport{max-width:280px}
+/* Photo row. */
+.acct-photo{display:flex;align-items:center;gap:18px}
+.acct-photo-actions{display:grid;gap:8px;justify-items:start;min-width:0}
+.acct-photo-btns{display:flex;flex-wrap:wrap;gap:8px}
+.acct-photo-btns .btn{min-height:40px}
+.acct-photo-remove{color:var(--chat-danger,#b3424a)}
+.acct-avatar{width:56px;height:56px;border-radius:50%;background:#e4edf8;color:#335f92;display:grid;place-items:center;font-weight:700;font-size:18px;overflow:hidden;flex-shrink:0;text-transform:uppercase}
+.acct-avatar.large{width:96px;height:96px;font-size:30px}
+.acct-avatar img{width:100%;height:100%;object-fit:cover;display:block}
+.acct-avatar .icon{width:45%;height:45%}
+.acct-file{cursor:pointer;position:relative}
+.acct-file:focus-within{outline:3px solid #0072bc;outline-offset:3px}
+
+/* Signed-in pages (inside the shell). */
+.acct-page{min-width:0}
+.acct-wrap{max-width:880px;display:grid;gap:18px;min-width:0}
+.acct-narrow{max-width:640px}
+.acct-head{display:flex;align-items:center;gap:16px;padding:18px 22px}
+.acct-head-text{display:grid;gap:3px;min-width:0}
+.acct-head-text strong{font-size:17px;color:#102447}
+.acct-head-text>span{font-size:12.5px;color:#4b6079}
+.acct-private{display:inline-flex!important;align-items:center;gap:6px;font-size:11.5px!important;color:var(--chat-meta,#5b6f89)!important;overflow-wrap:anywhere}
+.acct-private .icon{width:13px;height:13px;flex-shrink:0}
+.acct-tabs{display:flex;gap:4px;border-bottom:1px solid var(--line);overflow-x:auto}
+.acct-tab{min-height:46px;padding:0 18px;margin-bottom:-1px;background:transparent;border-bottom:3px solid transparent;border-radius:8px 8px 0 0;font-size:13px;font-weight:650;color:#4f6987;white-space:nowrap}
+.acct-tab:hover:not(:disabled){color:#00448a;background:#eef6fc}
+.acct-tab[aria-selected="true"]{color:#00448a;border-bottom-color:#00aeef}
+.acct-tab:focus-visible{outline:2px solid #0072bc;outline-offset:-2px}
+.acct-panel{padding:26px;display:grid;gap:22px;min-width:0}
+.acct-panel h2{font-size:18px;color:#102447;letter-spacing:-.3px}
+.acct-block{padding-top:22px;border-top:1px solid var(--line)}
+section.acct-block{display:grid;gap:12px}
+.acct-panel>.acct-block:first-child,.acct-panel>.notice+.acct-block{padding-top:0;border-top:0}
+.acct-panel .notice{margin:0}
+.acct-block .acct-actions{justify-content:flex-start}
+.acct-must{border-color:#f0c9cb;background:#fdf3f3;color:var(--chat-danger,#b3424a)}
+.acct-must p{color:#7d3a3f;font-size:12px}.acct-must strong{color:#8f2f36}
+.acct-install .acct-lead{display:flex;align-items:center;gap:8px}
+.acct-danger h2{color:var(--chat-danger,#b3424a)}
+.acct-danger-btn{background:#fff;border:1px solid #d99ca0;color:var(--chat-danger,#b3424a)}
+.acct-danger-btn:hover{background:#fdf0f0;border-color:var(--chat-danger,#b3424a)}
+.modal-actions .acct-danger-btn{background:var(--chat-danger,#b3424a);border-color:var(--chat-danger,#b3424a);color:#fff}
+.modal-actions .acct-danger-btn:hover{background:#962f37}
+.acct-delete-end{align-items:flex-start;margin:12px 0 0}
+.acct-delete-end p{color:#7d5a26;font-size:12px;line-height:1.7}
+.acct-created{margin:0}
+/* Plan (05 §11.1). */
+.acct-plan{display:grid;gap:16px;padding:26px}
+.acct-plan h2{font-size:19px;color:#102447;letter-spacing:-.4px}
+.acct-plan-head{display:flex;justify-content:space-between;align-items:flex-start;gap:14px}
+.acct-plan-head .eyebrow{margin-bottom:6px}
+.acct-plan .acct-price{text-align:right;line-height:1.1;margin:0}
+.acct-plan .acct-price b{font-size:30px;letter-spacing:-1px}
+.acct-currency{display:flex;align-items:flex-start;gap:8px;padding:10px 12px;border-radius:9px;background:#f2f7fc;font-size:12px;line-height:1.6;color:#3d5a78}
+.acct-currency .icon{width:16px;height:16px;color:#0072bc;margin-top:2px}
+.acct-currency strong{color:#00448a}
+.acct-benefits{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.acct-benefits li{display:flex;align-items:center;gap:9px;font-size:13px;color:#2f4d6d}
+.acct-benefits .icon{width:16px;height:16px;color:#0072bc}
+.acct-test{font-size:11.5px;color:#8a5a12;background:#fff6e5;border:1px solid #f1dcb4;border-radius:7px;padding:7px 10px}
+.acct-pay{width:100%;min-height:48px;font-size:14px}
+.acct-stripe{display:flex;align-items:center;justify-content:center;gap:6px;text-align:center}
+.acct-stripe .icon{width:13px;height:13px}
+.acct-later{justify-self:center;font-size:12.5px;padding:8px}
+.acct-plan .form-error{margin:0}
+/* Return from Stripe (05 §11.2). */
+.acct-return{text-align:center;display:grid;gap:12px;justify-items:center;padding:36px 26px}
+.acct-return h2{font-size:20px;color:#102447;letter-spacing:-.4px;max-width:460px;outline:0}
+.acct-return p{font-size:13px;max-width:460px}
+.acct-return .acct-actions{justify-content:center;margin-top:6px}
+.acct-return-mascot{height:150px;width:auto}
+.acct-return-icon{width:40px!important;height:40px!important;color:#0072bc}
+.acct-return.failed .acct-return-icon,.acct-return.failed h2{color:var(--chat-danger,#b3424a)}
+/* Subscription tab (05 §11.3). */
+.acct-sub{display:grid;gap:16px}
+.acct-sub-head{display:flex;justify-content:space-between;align-items:flex-start;gap:14px;flex-wrap:wrap}
+.acct-sub-head .eyebrow{margin-bottom:6px}
+.acct-sub-head p{font-size:13px;margin-top:4px}
+.acct-sub-state{font-size:12px;padding:6px 10px;border-radius:999px;white-space:normal}
+.acct-sub .acct-actions{justify-content:flex-start}
+
+/* Photo crop dialog (§7.5): 280 px canvas, keyboard and button alternatives to dragging (WCAG 2.5.7). */
+.acct-crop{display:grid;gap:14px;justify-items:center}
+.acct-crop .modal-lead{font-size:12px;text-align:center;margin:0}
+.acct-crop-stage{width:280px;height:280px;max-width:100%;border-radius:14px;overflow:hidden;background:#102447}
+.acct-crop-canvas{width:280px;height:280px;max-width:100%;display:block;touch-action:none;cursor:grab}
+.acct-crop-canvas.dragging{cursor:grabbing}
+.acct-crop-canvas:focus-visible{outline:3px solid #4ac1ed;outline-offset:-3px}
+.acct-crop-zoom,.acct-crop-pan{display:flex;align-items:center;gap:8px;flex-wrap:wrap;justify-content:center}
+.acct-crop-range{display:flex;align-items:center;gap:8px;font-size:12px;color:#4b6079}
+.acct-crop-range input{width:150px;min-height:0;padding:0;border:0;accent-color:#0072bc}
+.acct-crop-btn{width:36px;height:36px;border-radius:8px;border:1px solid #c5d4e4;background:#fff;display:grid;place-items:center;color:#2f4d6d}
+.acct-crop-btn:hover{background:#eef6fc;border-color:#0072bc}
+.acct-crop-btn .icon{width:17px;height:17px}
+.acct-crop-btn.up .icon{transform:rotate(180deg)}
+.acct-crop-previews{display:flex;align-items:center;gap:14px}
+.acct-crop-preview{border-radius:50%;background:#eaf3fb;box-shadow:0 0 0 1px #d6e2ee}
+.acct-crop .form-error{margin:0;text-align:center}
+
+@media (max-width:650px){
+ .acct-main{padding:22px 16px 40px}
+ .acct-card{padding:20px 16px;border-radius:12px}
+ .acct-card h1{font-size:22px}
+ .acct-grid{grid-template-columns:1fr}
+ .acct-wide{display:none}
+ .acct-steps li{font-size:11px;padding:7px 8px;gap:6px}
+ .acct-actions{justify-content:stretch}
+ .acct-card .acct-actions .btn,.acct-form .acct-actions .btn{flex:1}
+ .acct-head{padding:16px}
+ .acct-panel,.acct-plan{padding:18px 16px}
+ .acct-tab{padding:0 12px;flex:1}
+ .acct-plan-head{flex-direction:column}
+ .acct-plan .acct-price{text-align:left}
+ .acct-photo{gap:14px}
+ .acct-banner{flex-wrap:wrap}
+ .acct-banner p{flex-basis:calc(100% - 40px)}
+}
+@media (max-width:440px){
+ .acct-steps li{flex-direction:column;gap:4px;text-align:center}
+ .acct-avatar.large{width:76px;height:76px;font-size:24px}
+}
+@media (prefers-reduced-motion:reduce){.acct-spin{animation:none;border-top-color:#c9dcef;border-right-color:#0072bc}}
+@media print{.acct-join,.acct-banner,.acct-help-panel{display:none!important}}
