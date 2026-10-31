@@ -124,7 +124,6 @@ export default {
  'Nie publikuj danych dzieci ani numerów telefonów.':'Do not post children\'s personal data or phone numbers.',
  'Dołącz do rozmowy':'Join the conversation',
  'Zaloguj się, aby pisać.':'Log in to post.',
- 'Załóż konto':'Create account',
  'Załóż konto, aby pisać i widzieć, kto rozmawia.':'Create an account to post and see who is talking.',
  '{price} / mies. · anulujesz w dowolnym momencie':'{price} / month · cancel at any time',
  'Aktywuj konto, aby pisać':'Activate your account to post',

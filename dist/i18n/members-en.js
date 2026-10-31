@@ -46,7 +46,6 @@ export default {
  'Płatne':'Paid',
  'Płatne do {date}':'Paid until {date}',
  'Kończy się':'Ending',
- 'Kończy się {date}':'Ends {date}',
  'Płatność w toku':'Payment in progress',
  'Wymaga płatności':'Payment required',
  'Subskrypcja zakończona':'Subscription ended',

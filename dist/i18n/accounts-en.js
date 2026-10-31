@@ -53,7 +53,7 @@ export default {
  'Pisz w czatach i czatach turniejów':'Post in the chats and tournament chats',
  'Profil z Twoim sportem, krajem i klubem':'A profile with your sport, country and club',
  'Widzisz, kto rozmawia':'See who is talking',
- 'Załóż konto':'Create an account',
+ 'Załóż konto':'Create account',
  'Konta klubów zakłada Administrator turnieju.':'Club accounts are created by the tournament Administrator.',
  'Nie pamiętasz hasła?':'Forgot your password?',
  'Nie masz konta?':'No account yet?',
