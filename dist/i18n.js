@@ -63,9 +63,27 @@ export function setLanguage(lang,{persist=true}={}){
 
 const fill=(text,params)=>params?String(text).replace(/\{(\w+)\}/g,(m,k)=>Object.hasOwn(params,k)?String(params[k]):m):String(text);
 export const hasTranslation=key=>Object.hasOwn(DICTIONARY,key);
-/** t('Polish text {n}',{n}) – English entries may be a string, {one,other} (chosen by params.n) or a function. */
+const PL_RULES=typeof Intl==='object'&&typeof Intl.PluralRules==='function'?new Intl.PluralRules('pl-PL'):null;
+/** Polish plural category of a count: 'one' (1), 'few' (2–4, 22–24, … but not 12–14) or 'many' (0, 5–21, 25…); fractions 'few'. */
+export function pluralCategory(n){
+ const x=Number(n);if(!Number.isFinite(x))return 'many';
+ const c=PL_RULES?PL_RULES.select(x):null;if(c==='one'||c==='few'||c==='many')return c;if(c==='other')return 'few';
+ const i=Math.abs(Math.trunc(x));return x!==Math.trunc(x)?'few':i===1?'one':i%10>=2&&i%10<=4&&(i%100<12||i%100>14)?'few':'many';
+}
+/** Polish form for a count: plural(5,{one:'wiadomość',few:'wiadomości',many:'wiadomości'}) (a missing form falls back to many). */
+export const plural=(n,forms)=>forms[pluralCategory(n)]??forms.many??forms.few??forms.one;
+/** Polish forms of keys with a count {n}: the key stays the Polish text looked up in the English dictionaries; t() picks the form. */
+export const PL_FORMS={
+ 'Czat turnieju: {n} wiadomości':{one:'Czat turnieju: {n} wiadomość',few:'Czat turnieju: {n} wiadomości',many:'Czat turnieju: {n} wiadomości'},
+ '{n} nieprzeczytanych':{one:'{n} nieprzeczytana',few:'{n} nieprzeczytane',many:'{n} nieprzeczytanych'},
+ 'Archiwum · {n} zakończone':{one:'Archiwum · {n} zakończony',few:'Archiwum · {n} zakończone',many:'Archiwum · {n} zakończonych'},
+ 'Zostało {n} znaków':{one:'Został {n} znak',few:'Zostały {n} znaki',many:'Zostało {n} znaków'}
+};
+/** t('Polish text {n}',{n}) – Polish keys with a count use PL_FORMS; English entries may be a string, {one,other} (chosen by
+ * params.n) or a function. */
 export function t(key,params){
- if(current==='pl'||!Object.hasOwn(DICTIONARY,key))return fill(key,params);
+ if(current==='pl'){const forms=Object.hasOwn(PL_FORMS,key)&&params&&params.n!=null?PL_FORMS[key]:null;return fill(forms?plural(params.n,forms):key,params);}
+ if(!Object.hasOwn(DICTIONARY,key))return fill(key,params);
  const entry=DICTIONARY[key];
  if(typeof entry==='function')return String(entry(params||{}));
  if(entry&&typeof entry==='object')return fill(params?.n===1?entry.one:entry.other,params);

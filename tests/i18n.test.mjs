@@ -113,6 +113,25 @@ test('Polish output is the key itself (unchanged behaviour); English uses plural
  });
 });
 
+test('Polish plurals (one/few/many) for the community count texts; the key stays the English dictionary key',async()=>{
+ const {plural,pluralCategory,PL_FORMS}=await import('../dist/i18n.js');
+ assert.deepEqual([0,1,2,3,4,5,11,12,14,21,22,24,25,104,112].map(pluralCategory),['many','one','few','few','few','many','many','many','many','many','few','few','many','few','many']);
+ assert.equal(plural(3,{one:'znak',few:'znaki',many:'znaków'}),'znaki');assert.equal(plural(7,{one:'a',many:'b'}),'b','a missing form falls back to many');
+ for(const [key,forms] of Object.entries(PL_FORMS)){
+  assert.ok(Object.hasOwn(EN,key),'English entry for '+key);
+  assert.deepEqual(Object.keys(forms).sort(),['few','many','one'],key);
+  for(const form of Object.values(forms))assert.deepEqual(placeholders(form),placeholders(key),key);
+  assert.ok(Object.values(forms).includes(key),'one of the forms is the key itself: '+key);
+ }
+ polish(()=>{
+  assert.equal(t('Czat turnieju: {n} wiadomości',{n:1}),'Czat turnieju: 1 wiadomość');assert.equal(t('Czat turnieju: {n} wiadomości',{n:2}),'Czat turnieju: 2 wiadomości');
+  assert.equal(t('{n} nieprzeczytanych',{n:1}),'1 nieprzeczytana');assert.equal(t('{n} nieprzeczytanych',{n:3}),'3 nieprzeczytane');assert.equal(t('{n} nieprzeczytanych',{n:12}),'12 nieprzeczytanych');
+  assert.equal(t('Archiwum · {n} zakończone',{n:1}),'Archiwum · 1 zakończony');assert.equal(t('Archiwum · {n} zakończone',{n:5}),'Archiwum · 5 zakończonych');
+  assert.equal(t('Zostało {n} znaków',{n:1}),'Został 1 znak');assert.equal(t('Zostało {n} znaków',{n:22}),'Zostały 22 znaki');assert.equal(t('Zostało {n} znaków',{n:50}),'Zostało 50 znaków');
+  assert.equal(t('Zostało {n} znaków'),'Zostało {n} znaków','without a count the key is returned as before');
+ });
+ english(()=>{assert.equal(t('Czat turnieju: {n} wiadomości',{n:1}),'Tournament chat: 1 message');assert.equal(t('Zostało {n} znaków',{n:2}),'2 characters left');});
+});
 test('rule-engine labels: all events, roles, statuses and open rule issues are translated',()=>english(()=>{
  for(const [map,name] of [[EVENTS,'EVENTS'],[ROLES,'ROLES'],[STATUSES,'STATUSES']])for(const value of Object.values(map))assert.ok(Object.hasOwn(EN,value),name+': '+value);
  for(const issue of RULE_ISSUES){assert.ok(Object.hasOwn(EN,issue.title),issue.id);assert.ok(Object.hasOwn(EN,issue.detail),issue.id);}
