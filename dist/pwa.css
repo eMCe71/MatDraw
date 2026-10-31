@@ -2,8 +2,10 @@
    below modals (100) and the toast (200). The root #pwa-root is filled by pwa.js and stays empty in the demo and on #screen. */
 #pwa-root .pwa-region[hidden]{display:none!important}
 /* Bars and the card stack at the bottom right (the left edge is the shell's menu with the account entries) and full width on phones; a chat page can lift them above its composer or bottom nav with --pwa-offset. */
-.pwa-stack{position:fixed;z-index:var(--z-pwa-bar,90);right:16px;bottom:calc(16px + var(--pwa-offset,0px) + env(safe-area-inset-bottom,0px));width:min(440px,calc(100vw - 32px));display:flex;flex-direction:column;gap:8px;pointer-events:none}
+.pwa-stack{position:fixed;z-index:var(--z-pwa-bar,90);right:16px;bottom:calc(16px + var(--pwa-offset,0px) + env(safe-area-inset-bottom,0px));width:min(440px,calc(100vw - 32px));display:flex;flex-direction:column;pointer-events:none}
 .pwa-stack>.pwa-region{pointer-events:auto}
+/* The status/alert regions stay in the tree (empty) so that screen readers announce what is inserted; spacing only for filled regions. */
+.pwa-stack>.pwa-region:not(:empty){margin-top:8px}
 .pwa-bar,.pwa-card,.pwa-chip,.pwa-inapp{background:#fff;color:var(--ink,#19324f);border:1px solid #cfdcea;border-radius:12px;box-shadow:0 8px 28px #13253c2e}
 .pwa-bar{display:flex;align-items:center;gap:12px;padding:10px 10px 10px 16px;border-left:4px solid var(--mb-cyan,#00aeef)}
 .pwa-bar-text{flex:1;margin:0;font-size:13px;font-weight:600;line-height:1.4;color:var(--ink,#19324f)}

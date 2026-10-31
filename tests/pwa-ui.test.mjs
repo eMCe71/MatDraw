@@ -1,6 +1,6 @@
 // PWA interface (plan §9.4, §11 point "pwa-ui"): install card rules, iOS and in-app detection, dismissal memory, the update flow and the
 // required update (client-outdated). dist/pwa.js exposes its rules and the update flow as plain functions, so no browser is needed here;
-// the DOM wiring was checked by hand in Chromium (see the slice report).
+// the DOM detectors are pure functions tested with stubs below; the real wiring runs in Chromium in tests/pwa-browser.test.mjs.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
@@ -9,7 +9,7 @@ import {registry,SafeHtml} from '../dist/registry.js';
 import {setLanguage} from '../dist/i18n.js';
 import * as pwa from '../dist/pwa.js';
 import {KEY,DAY,MUTE_MS,MIN_AGE,SENT_DELAY,ACTIVE_NEED,LOOP_GUARD_MS,CHECK_MS,cleanRecord,muted,refused,inappMuted,visited,createStore,platformOf,inAppBrowser,
- manifestHref,setManifestLanguage,tournamentToday,busyRoute,blocker,dueTrigger,decide,inappDue,shareUrl,createUpdater,updateView,cardView,sheetView,inappView} from '../dist/pwa.js';
+ manifestHref,setManifestLanguage,tournamentToday,busyRoute,installedNow,isFirstVisit,isScreenHash,isPrinting,modalOpen,typingIn,dirtyForm,dirties,flowBusy,FLOW_MARK,FLOW_MS,FLOW_KEYS_MS,blocker,dueTrigger,decide,inappDue,shareUrl,createUpdater,updateView,cardView,sheetView,inappView} from '../dist/pwa.js';
 
 const read=file=>readFileSync(new URL('../'+file,import.meta.url),'utf8');
 const POLISH_LETTERS=/[ąćęłńóśźżĄĆĘŁŃÓŚŹŻ]/;
@@ -83,6 +83,14 @@ test('standalone is detected from display-mode and navigator.standalone',()=>{
  assert.equal(pwa.standaloneNow(mm([])),false);assert.equal(pwa.standaloneNow({matchMedia:()=>({matches:false}),navigator:{standalone:true}}),true,'iOS');
  assert.equal(pwa.standaloneNow({matchMedia(){throw new TypeError();},navigator:{}}),false,'never throws');
 });
+test('fullscreen is not an installed app: only standalone, minimal-ui and iOS count; only standalone and iOS are remembered as installed',()=>{
+ const only=on=>({matchMedia:q=>({matches:q==='(display-mode: '+on+')'}),navigator:{}});
+ assert.equal(pwa.standaloneNow(only('fullscreen')),false,'the Fullscreen API (F11, the hall view button) matches display-mode: fullscreen in a plain tab');
+ assert.equal(installedNow(only('fullscreen')),false);assert.equal(installedNow(only('minimal-ui')),false);assert.equal(pwa.standaloneNow(only('minimal-ui')),true);
+ assert.equal(installedNow(only('standalone')),true);assert.equal(installedNow({matchMedia:()=>({matches:false}),navigator:{standalone:true}}),true);
+ assert.equal(installedNow({matchMedia(){throw new TypeError();},navigator:{}}),false);assert.equal(installedNow({}),false);
+ assert.ok(!/'fullscreen'/.test(read('dist/pwa.js').replace(/\/\*[\s\S]*?\*\//g,'')),'pwa.js never listens for display-mode fullscreen');
+});
 test('manifest language: English manifest for en, Polish for everything else, guarded without a document',()=>{
  assert.equal(manifestHref('en'),'./manifest.en.webmanifest');assert.equal(manifestHref('pl'),'./manifest.webmanifest');assert.equal(manifestHref('de'),'./manifest.webmanifest');
  const link={href:'./manifest.webmanifest',getAttribute(k){return k==='href'?this.href:null;},setAttribute(k,v){if(k==='href')this.href=v;}};
@@ -117,6 +125,40 @@ test('busyRoute: signup and billing routes and the return-from-payment query',()
 test('shareUrl copies origin and path only (no invite token, payment session or route)',()=>{
  assert.equal(shareUrl({origin:'https://matbravo.com',pathname:'/',search:'?billing=success&session_id=cs_live_1',hash:'#signup?invite=secret'}),'https://matbravo.com/');
  assert.equal(shareUrl({origin:'https://x.test',pathname:'/app/'}),'https://x.test/app/');
+});
+
+// ---- DOM detectors (stubs) ----
+const classes=(...names)=>({contains:n=>names.includes(n)});
+test('detectors: first visit, #screen, print and projection, modal, typing, unsaved forms',()=>{
+ assert.equal(isFirstVisit(cleanRecord(null,NOW)),true);assert.equal(isFirstVisit(cleanRecord({first:'2026-10-01'},NOW)),false);assert.equal(isFirstVisit(null),false,'unusable storage is not a first visit');
+ for(const hash of ['#screen','#screen?tournament=t-1'])assert.equal(isScreenHash(hash),true,hash);for(const hash of ['','#chat','#screens','#draws?x=#screen'])assert.equal(isScreenHash(hash),hash==='#screens',hash);
+ assert.equal(isPrinting({body:{classList:classes('print-preview')}}),true);assert.equal(isPrinting({body:{classList:classes('projection')}}),true);assert.equal(isPrinting({body:{classList:classes('x')}}),false);assert.equal(isPrinting({}),false);
+ assert.equal(modalOpen({body:{classList:classes('modal-open')},querySelector:()=>null}),true,'body.modal-open');
+ assert.equal(modalOpen({body:{classList:classes()},querySelector:s=>s==='#modal-root .modal'?{}:null}),true,'a modal in #modal-root');
+ assert.equal(modalOpen({body:{classList:classes()},querySelector:()=>null}),false);
+ const field=(matches,extra={})=>({isContentEditable:false,matches:()=>matches,...extra});
+ assert.equal(typingIn(field(true)),true);assert.equal(typingIn(field(false)),false);assert.equal(typingIn(field(false,{isContentEditable:true})),true);assert.equal(typingIn(null),false);assert.equal(typingIn({}),false);
+ assert.equal(dirtyForm({querySelector:s=>s==='form[data-dirty]'?{}:null}),true);assert.equal(dirtyForm({querySelector:()=>null}),false);assert.equal(dirtyForm(null),false);
+});
+test('detectors: typing marks a form dirty except searches, the chat composer and [data-no-dirty] forms',()=>{
+ const form=skip=>({matches:sel=>skip.some(k=>sel.includes(k))});
+ const input=(f,type)=>({closest:()=>f,matches:sel=>sel==='[type=search]'&&type==='search'});
+ assert.equal(dirties(input(form([]),'text')),true);assert.equal(dirties(input(form([]),'search')),false);
+ assert.equal(dirties(input(form(['.chat-composer']),'text')),false);assert.equal(dirties(input(form(['[data-no-dirty]']),'text')),false);
+ assert.equal(dirties({closest:()=>null,matches:()=>false}),false,'a field outside a form');assert.equal(dirties(null),false);
+});
+test('flowBusy: an explicit mark is trusted for 30 minutes; leftover signup/billing keys block a page only for 10 minutes',()=>{
+ const seen=new Map();let t=NOW;
+ assert.equal(flowBusy({mark:null,keys:[],seen,now:t}),false);
+ assert.equal(flowBusy({mark:String(t-1000),keys:[],seen,now:t}),true,'flow in progress');
+ assert.equal(flowBusy({mark:String(t-FLOW_MS),keys:[],seen,now:t}),false,'a stale mark');assert.equal(flowBusy({mark:'junk',keys:[],seen,now:t}),false);
+ assert.equal(FLOW_MARK,'matdraw.flow.active');
+ const keys=['matdraw.billing.session'];
+ assert.equal(flowBusy({keys,seen,now:t}),true,'a key that was just seen');
+ t+=FLOW_KEYS_MS-1;assert.equal(flowBusy({keys,seen,now:t}),true);
+ t+=1;assert.equal(flowBusy({keys,seen,now:t}),false,'a key nobody removes cannot block the tab (or the required update) for good');
+ assert.equal(flowBusy({keys:[],seen,now:t}),false);assert.equal(seen.size,0,'removed keys are forgotten');
+ assert.equal(flowBusy({keys,seen,now:t+1}),true,'a new key starts a new window');
 });
 
 // ---- Install card rules ----
@@ -286,7 +328,7 @@ test('client-outdated with no waiting worker yet: asks for an update, waits for 
  await h.updater.outdated();assert.equal(h.log.updates,1);assert.deepEqual(w.sent,['SKIP_WAITING']);
  const none=harness();await none.updater.register();await none.updater.outdated();assert.equal(none.log.reloads,1,'an update check that finds nothing falls back to a reload');
 });
-test('client-outdated: a reload that did not help is not repeated within a minute (blocking bar instead; silence on #screen)',async()=>{
+test('client-outdated: a reload that did not help is not repeated within a minute (blocking bar instead; no reload on #screen either)',async()=>{
  const h=harness({waiting:new Worker()});await h.updater.register();h.log.shown.length=0;h.flags.recent=true;
  await h.updater.outdated();assert.deepEqual(h.log.shown,['blocking']);assert.equal(h.log.reloads,0);
  const screen=harness({waiting:new Worker()});await screen.updater.register();screen.flags.recent=true;screen.flags.hash='#screen';await screen.updater.outdated();
@@ -299,7 +341,7 @@ test('pwa.js: never touches the network or the server (no counters), never skips
  const code=read('dist/pwa.js').replace(/\/\*[\s\S]*?\*\//g,'').replace(/(^|[^:\\])\/\/.*$/gm,'$1');
  assert.ok(!/\bfetch\s*\(|XMLHttpRequest|sendBeacon|WebSocket|EventSource/.test(code),'no network use');
  assert.ok(!/\bskipWaiting\s*\(/.test(code),'only the page sends SKIP_WAITING, and only on a click or client-outdated');
- assert.equal((code.match(/'SKIP_WAITING'/g)||[]).length,2,'refresh() and applyNow()');
+ assert.equal((code.match(/'SKIP_WAITING'/g)||[]).length,2,'refresh() and go()');
  assert.ok(!/\.innerHTML|insertAdjacentHTML|outerHTML|document\.write/.test(code));
  assert.ok(/\{scope:'\.\/',updateViaCache:'none'\}/.test(code));
  assert.ok(/'#screen'/.test(code),'#screen is excluded');
@@ -321,4 +363,40 @@ test('index.html loads pwa.css before brand.css and has #pwa-root after #toast; 
   assert.deepEqual(Object.keys(dict).filter(k=>!used.has(k)),[],'dictionary entries without a use in pwa.js');
   assert.deepEqual([...used].filter(k=>!Object.hasOwn(dict,k)&&k!=='Zamknij'),[],'texts without an English entry');
  });
+});
+
+// ---- The hall screen never stays on old code; a worker that is already installing is noticed ----
+const stuckScreen=async over=>{
+ const h=harness({waiting:over?.waiting===false?null:new Worker(),...over});await h.updater.register();h.log.shown.length=0;h.flags.recent=true;h.flags.hash='#screen?tournament=t-1';
+ await h.updater.outdated();return h;
+};
+test('#screen stuck on old code (reload did not help): a worker that finishes installing later is applied at once, even inside the loop guard',async()=>{
+ const h=await stuckScreen({waiting:false});assert.equal(h.log.reloads,0);assert.deepEqual(h.log.shown,[],'nothing is shown on the hall screen');assert.equal(h.updater.state.awaiting,true);
+ assert.ok(h.log.timers.some(([,ms])=>ms>=LOOP_GUARD_MS),'a retry is scheduled after the guard');
+ const w=new Worker('installing');h.reg.installing=w;h.reg.dispatchEvent(new Event('updatefound'));w.become('installed');
+ assert.deepEqual(w.sent,['SKIP_WAITING']);assert.equal(h.updater.state.awaiting,false);assert.deepEqual(h.log.shown,[],'still no bar');
+ takeControl(h.sw);assert.equal(h.log.reloads,1);
+});
+test('#screen stuck: a worker that was already installing when the page registered is tracked (watch handles reg.installing)',async()=>{
+ const h=harness();const w=new Worker('installing');h.reg.installing=w;
+ h.flags.recent=true;h.flags.hash='#screen';await h.updater.outdated();assert.equal(h.updater.state.awaiting,true,'bootstrap answered 409 before the registration');
+ await h.updater.register();w.become('installed');assert.deepEqual(w.sent,['SKIP_WAITING']);takeControl(h.sw);assert.equal(h.log.reloads,1);
+});
+test('#screen stuck and nothing installs: one retry after the loop guard (never a tight reload loop)',async()=>{
+ const h=await stuckScreen({waiting:false});const retry=h.log.timers.find(([,ms])=>ms>=LOOP_GUARD_MS);assert.ok(retry);
+ assert.equal(h.log.reloads,0,'nothing before the guard has passed');
+ await retry[0]();await new Promise(r=>setImmediate(r));assert.equal(h.log.marks,1,'applyNow ran');assert.ok(h.log.updates>=1,'an update was requested while waiting');
+});
+test('#screen stuck with a worker already waiting: left to the retry, not applied in a loop',async()=>{
+ const h=await stuckScreen();assert.deepEqual(h.updater.state.waiting.sent,[]);assert.equal(h.log.reloads,0);assert.equal(h.updater.state.awaiting,true);
+});
+test('a stuck non-screen tab keeps the blocking bar and is not auto-applied by a later worker (the person presses "Refresh now")',async()=>{
+ const h=harness({waiting:new Worker()});await h.updater.register();h.flags.recent=true;await h.updater.outdated();
+ const w=new Worker('installing');h.reg.installing=w;h.reg.dispatchEvent(new Event('updatefound'));w.become('installed');
+ assert.deepEqual(w.sent,[]);assert.deepEqual(h.log.shown,['update','blocking']);
+});
+test('watch: a worker already installing at registration is offered when it installs (a reload in the middle of an install)',async()=>{
+ const h=harness();const w=new Worker('installing');h.reg.installing=w;await h.updater.register();assert.deepEqual(h.log.shown,[]);
+ w.become('installed');assert.deepEqual(h.log.shown,['update']);assert.deepEqual(w.sent,[],'offered, not applied');
+ const first=harness({controller:null});const f=new Worker('installing');first.reg.installing=f;await first.updater.register();f.become('installed');assert.deepEqual(first.log.shown,[],'no controller: the first install is not an update');
 });

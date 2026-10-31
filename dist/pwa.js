@@ -5,7 +5,8 @@
  *   get a passive notice. Nothing is ever shown on #screen or in the print preview.
  * - 'client-outdated' (409, plan §9.4): no unsaved form (form[data-dirty]), no signup/payment in progress -> the waiting worker is
  *   applied and the tab reloads; otherwise a blocking bar. #screen reloads at once (it has no fields). A reload that did not help is
- *   not repeated within a minute (no reload loop when the server needs a client the cached shell cannot provide).
+ *   not repeated within a minute (no reload loop when the server needs a client the cached shell cannot provide); on #screen the page then
+ *   waits for a worker that finishes installing (applied at once) and retries after the guard, so the hall display never stays stuck.
  * - Install card: only for a signed-in person, never on the first visit, in the demo, standalone, on #screen, in the print preview,
  *   during signup or payment, with a modal open, while a field has focus, within the first 15 s of a page or twice in a session.
  *   Dismissal memory in localStorage['matdraw.pwa'] (30 days; after the third refusal never). Without working storage nothing is shown.
@@ -53,13 +54,39 @@ export const manifestHref=lang=>lang==='en'?MANIFEST.en:MANIFEST.pl;
 export function setManifestLanguage(lang,doc=globalThis.document){
  try{const link=doc?.querySelector?.('link[rel="manifest"]');if(link&&link.getAttribute('href')!==manifestHref(lang))link.setAttribute('href',manifestHref(lang));}catch{}
 }
-/** Installed-app display mode (display-mode media queries, iOS navigator.standalone). */
-export const standaloneNow=(w=globalThis)=>{try{return ['standalone','minimal-ui','fullscreen'].some(m=>w.matchMedia?.('(display-mode: '+m+')').matches)||w.navigator?.standalone===true;}catch{return false;}};
+/** Installed-app display mode (display-mode media queries, iOS navigator.standalone). 'fullscreen' is deliberately not here: Chromium
+ * matches (display-mode: fullscreen) whenever the Fullscreen API is active (the hall view full-screen button, F11), in a plain tab too. */
+export const standaloneNow=(w=globalThis)=>{try{return ['standalone','minimal-ui'].some(m=>w.matchMedia?.('(display-mode: '+m+')').matches)||w.navigator?.standalone===true;}catch{return false;}};
+/** What may be remembered as "installed" for good: a standalone window or iOS home-screen launch, never minimal-ui (also a mere hint). */
+export const installedNow=(w=globalThis)=>{try{return !!w.matchMedia?.('(display-mode: standalone)').matches||w.navigator?.standalone===true;}catch{return false;}};
 /** Whether this club has entries in a tournament dated today (Warsaw time): the "tournament day" trigger. */
 export const tournamentToday=(workspace,today)=>{
  const user=workspace?.user;if(!user)return false;
  return (workspace.tournaments||[]).some(t=>t.date===today&&t.status!=='draft'&&(t.entries||[]).some(e=>e.clubId===user.clubId));
 };
+/** True on the first visit ever (storage works and no first day was recorded before this page). */
+export const isFirstVisit=before=>!!before&&!before.first;
+export const isScreenHash=hash=>String(hash||'').startsWith('#screen');
+/** Print preview or projection mode of the shell. */
+export const isPrinting=doc=>!!doc?.body&&(doc.body.classList.contains('print-preview')||doc.body.classList.contains('projection'));
+/** An app modal is open (shell marks body.modal-open and fills #modal-root). */
+export const modalOpen=doc=>!!doc?.body&&(doc.body.classList.contains('modal-open')||!!doc.querySelector('#modal-root .modal'));
+/** The focused element takes text (a click on a button or a checkbox is not typing). */
+export const typingIn=a=>!!a&&!!(a.isContentEditable||a.matches?.('textarea,select,input:not([type=button],[type=submit],[type=reset],[type=checkbox],[type=radio],[type=range],[type=file])'));
+/** A form the person has typed in (form[data-dirty]; searches and the chat composer never mark it). */
+export const dirtyForm=doc=>!!doc?.querySelector?.('form[data-dirty]');
+/** Whether an input event dirties its form: not for [data-no-dirty] forms, the chat composer or search fields. */
+export const dirties=el=>{const form=el?.closest?.('form');return !!form&&!form.matches('[data-no-dirty],.chat-composer')&&!el.matches('[type=search]');};
+export const FLOW_MARK='matdraw.flow.active',FLOW_MS=18e5,FLOW_KEYS_MS=6e5,FLOW_KEYS=/^matdraw\.(?:signup|billing)\./;
+/** Signup or payment in progress. The contract: account-frontend sets sessionStorage['matdraw.flow.active']=Date.now() while a flow runs
+ * and removes it on completion or cancel (a mark older than 30 minutes is stale). Leftover matdraw.signup.* / matdraw.billing.* keys
+ * count too, but only for 10 minutes after this page first saw them, so a key that is never removed cannot block the tab for good. */
+export function flowBusy({mark,keys=[],seen,now}){
+ const m=Number(mark);if(m>0&&now-m<FLOW_MS)return true;
+ let busy=false;for(const k of [...seen.keys()])if(!keys.includes(k))seen.delete(k);
+ for(const k of keys){if(!seen.has(k))seen.set(k,now);if(now-seen.get(k)<FLOW_KEYS_MS)busy=true;}
+ return busy;
+}
 /** Hash routes where the person is registering or paying (nothing is shown, nothing is reloaded behind their back). */
 export const busyRoute=(hash,search='')=>/^#(?:signup|billing)(?:[?/]|$)/.test(hash||'')||/(?:^|[?&])billing=/.test(search||'');
 
@@ -105,12 +132,16 @@ export const shareUrl=loc=>String(loc.origin||'')+String(loc.pathname||'/');
 /** Service worker registration, update offer and the required update. env: {mode, sw, secure, hash(), dirty(), busy(), reload(),
  * show(kind|null) with kind 'update'|'passive'|'blocking', later(fn,ms), now(), recent(), mark()}; everything is injected for tests. */
 export function createUpdater(env){
- const s={reg:null,waiting:null,refreshing:false,controlled:false,outdated:false,checkedAt:0};
- const offer=w=>{s.waiting=w;if(!s.outdated)env.show('update');};
+ const s={reg:null,waiting:null,refreshing:false,controlled:false,outdated:false,awaiting:false,checkedAt:0};
+ // A worker that finishes installing while a required update is stuck on #screen (s.awaiting) is applied at once; otherwise it is offered.
+ const offer=(w,fresh)=>{s.waiting=w;if(!s.outdated){env.show('update');return;}if(fresh&&s.awaiting){s.awaiting=false;env.mark();go(w);}};
+ const track=w=>w.addEventListener('statechange',()=>{if(w.state==='installed'&&env.sw.controller)offer(w,true);});
+ function go(w){s.refreshing=true;w.postMessage('SKIP_WAITING');env.later(()=>env.reload(),5000);}
  function watch(reg){
   s.reg=reg;s.checkedAt=env.now();
   if(reg.waiting&&env.sw.controller)offer(reg.waiting);
-  reg.addEventListener('updatefound',()=>{const w=reg.installing;w?.addEventListener('statechange',()=>{if(w.state==='installed'&&env.sw.controller)offer(w);});});
+  if(reg.installing)track(reg.installing);
+  reg.addEventListener('updatefound',()=>{if(reg.installing)track(reg.installing);});
  }
  async function register(){
   if(env.mode!=='api'||!env.sw||!env.secure)return null;
@@ -146,13 +177,18 @@ export function createUpdater(env){
  async function applyNow(){
   s.refreshing=true;env.mark();
   const w=await ensureWaiting();
-  if(w){w.postMessage('SKIP_WAITING');env.later(()=>env.reload(),5000);}else env.reload();
+  if(w)go(w);else env.reload();
  }
  /** 409 client_outdated (plan §9.4); returns the promise of the automatic update when one is started. */
  function outdated(){
   if(s.outdated)return;s.outdated=true;
   const screen=String(env.hash()).startsWith('#screen');
-  if(env.recent()){if(!screen)env.show('blocking');return;}
+  if(env.recent()){
+   if(!screen){env.show('blocking');return;}
+   // The hall screen has nobody to press a button: wait for a worker that finishes installing, ask for one, and try again after the guard.
+   s.awaiting=true;try{s.reg?.update?.()?.catch?.(()=>{});}catch{}
+   env.later(()=>{if(s.awaiting){s.awaiting=false;applyNow();}},LOOP_GUARD_MS+1000);return;
+  }
   if(screen||!(env.dirty()||env.busy()))return applyNow();
   env.show('blocking');
  }
@@ -197,22 +233,21 @@ if(browser){
  const win=window,doc=document,nav=win.navigator,started=Date.now(),mode=CONFIG.mode;
  const store=createStore((()=>{try{return win.localStorage;}catch{return {getItem(){throw new TypeError();},setItem(){throw new TypeError();}};}})());
  const platform=platformOf({ua:nav.userAgent,platform:nav.platform,touch:nav.maxTouchPoints}),inApp=inAppBrowser(nav.userAgent);
- const view={update:null,blocking:false,card:null,inapp:false,sheet:false,copied:false,fallback:''};
+ const view={update:null,blocking:false,card:null,inapp:false,sheet:false,copied:false,fallback:'',focusUrl:false};
  let deferred=null,sentAt=0,activeMs=0,firstVisit=false,previousFocus=null,regions=null;
  const SHOWN='matdraw.pwa.shown',RELOADED='matdraw.pwa.reloaded';
  const session={get:k=>{try{return win.sessionStorage.getItem(k);}catch{return null;}},set:(k,v)=>{try{win.sessionStorage.setItem(k,v);}catch{}},keys:re=>{try{const out=[];for(let i=0;i<win.sessionStorage.length;i++){const k=win.sessionStorage.key(i);if(k&&re.test(k))out.push(k);}return out;}catch{return [];}}};
  const workspace=()=>{try{return ui()?.getWorkspace?.()||null;}catch{return null;}};
- const onScreen=()=>String(win.location.hash).startsWith('#screen');
- const printing=()=>doc.body.classList.contains('print-preview')||doc.body.classList.contains('projection');
- const busy=()=>busyRoute(win.location.hash,win.location.search)||session.keys(/^matdraw\.(?:signup|billing)\./).length>0;
- const dirty=()=>!!doc.querySelector('form[data-dirty]');
- const modalOpen=()=>doc.body.classList.contains('modal-open')||!!doc.querySelector('#modal-root .modal');
- const typing=()=>{const a=doc.activeElement;return !!a&&(a.isContentEditable||a.matches?.('textarea,select,input:not([type=button],[type=submit],[type=reset],[type=checkbox],[type=radio],[type=range],[type=file])'));};
+ const onScreen=()=>isScreenHash(win.location.hash);
+ const printing=()=>isPrinting(doc);
+ const seenKeys=new Map();
+ const busy=()=>busyRoute(win.location.hash,win.location.search)||flowBusy({mark:session.get(FLOW_MARK),keys:session.keys(FLOW_KEYS),seen:seenKeys,now:Date.now()});
+ const dirty=()=>dirtyForm(doc);
  const standalone=()=>standaloneNow(win);
 
  // -- storage and visits --
  const touch=signedIn=>store.update(r=>visited(r,warsawToday(),signedIn));
- { const before=store.read();firstVisit=!!before&&!before.first;touch(false); }
+ { const before=store.read();firstVisit=isFirstVisit(before);touch(false); }
 
  // -- update bars --
  const updater=createUpdater({mode,sw:nav.serviceWorker||null,secure:win.isSecureContext!==false,hash:()=>win.location.hash,dirty,busy,
@@ -225,16 +260,16 @@ if(browser){
   const root=doc.querySelector('#pwa-root');if(!root)return null;
   if(regions&&regions.root===root)return regions;
   root.textContent='';
-  const make=(parent,name,attrs={})=>{const el=doc.createElement('div');el.className='pwa-region';el.dataset.pwaRegion=name;el.hidden=true;for(const [k,v] of Object.entries(attrs))el.setAttribute(k,v);parent.append(el);return el;};
+  const make=(parent,name,attrs={})=>{const el=doc.createElement('div');el.className='pwa-region';el.dataset.pwaRegion=name;if(attrs.role)el.dataset.live='';else el.hidden=true;for(const [k,v] of Object.entries(attrs))el.setAttribute(k,v);parent.append(el);return el;};
   const top=doc.createElement('div');top.className='pwa-top';root.append(top);
   const stack=doc.createElement('div');stack.className='pwa-stack';root.append(stack);
   regions={root,inapp:make(top,'inapp'),update:make(stack,'update',{role:'status'}),blocking:make(stack,'blocking',{role:'alert'}),card:make(stack,'card'),sheet:make(root,'sheet')};
   root.addEventListener('click',onClick);
   return regions;
  }
- /** Writes a region only when its HTML changed; keeps the focused control focused across a re-render. */
+ /** Writes a region only when its HTML changed (role=status/alert regions stay in the tree, empty, so screen readers announce what is inserted); keeps the focused control focused across a re-render. */
  function put(el,safe){
-  const key=safe?String(safe):'';el.hidden=!safe;
+  const key=safe?String(safe):'';if(!('live' in el.dataset))el.hidden=!safe;
   if(el.dataset.key===key)return;
   const act=el.contains(doc.activeElement)?doc.activeElement.dataset?.pwaAct:null;
   if(safe)setHtml(el,safe);else el.textContent='';
@@ -251,7 +286,7 @@ if(browser){
   const open=!hide&&view.sheet;
   put(r.sheet,open?sheetView():null);
   if(open&&!r.sheet.contains(doc.activeElement))r.sheet.querySelector('.pwa-sheet')?.focus();
-  if(view.fallback&&!hide){const input=r.inapp.querySelector('.pwa-url');if(input&&doc.activeElement!==input){input.focus();input.select();}}
+  if(view.focusUrl&&view.fallback&&!hide){const input=r.inapp.querySelector('.pwa-url');if(input){view.focusUrl=false;input.focus();input.select();}}
  }
 
  // -- install --
@@ -274,11 +309,11 @@ if(browser){
  function later(){store.update(r=>refused(r,Date.now()));view.card=null;paint();}
  async function copyLink(){
   const url=shareUrl(win.location);
-  try{await nav.clipboard.writeText(url);view.copied=true;view.fallback='';ui()?.toast?.(T('Link skopiowany.'));}catch{view.copied=false;view.fallback=url;}
+  try{await nav.clipboard.writeText(url);view.copied=true;view.fallback='';ui()?.toast?.(T('Link skopiowany.'));}catch{view.copied=false;view.fallback=url;view.focusUrl=true;}
   paint();
  }
  const ACTS={refresh:()=>updater.refresh(),reload:()=>win.location.reload(),'update-now':()=>updater.applyNow(),install,how:openSheet,later,'sheet-close':closeSheet,copy:copyLink,
-  'inapp-close':()=>{store.update(r=>({...r,inappAt:Date.now()}));view.inapp=false;view.fallback='';paint();}};
+  'inapp-close':()=>{store.update(r=>({...r,inappAt:Date.now()}));view.inapp=false;view.fallback='';view.focusUrl=false;paint();}};
  function onClick(event){
   const target=event.target;if(!target?.closest)return;
   if(target.hasAttribute('data-pwa-backdrop')){closeSheet();return;}
@@ -300,7 +335,7 @@ if(browser){
  function context(){
   const rec=store.read(),ws=workspace(),now=Date.now(),signedIn=!!ws?.user;
   return {mode,storage:!!rec&&store.ok,record:rec||cleanRecord(null),now,signedIn,standalone:standalone(),inApp,firstVisit,age:now-started,shown:!!session.get(SHOWN),
-   screen:onScreen(),printing:printing(),busy:busy(),modal:modalOpen(),typing:typing(),hidden:doc.hidden,canInstall:api.canInstall(),platform,
+   screen:onScreen(),printing:printing(),busy:busy(),modal:modalOpen(doc),typing:typingIn(doc.activeElement),hidden:doc.hidden,canInstall:api.canInstall(),platform,
    sentAt,activeMs,tournamentToday:signedIn&&tournamentToday(ws,warsawToday())};
  }
  function check(){
@@ -315,18 +350,21 @@ if(browser){
 
  // -- standalone, install events --
  function applyStandalone(){
+  if(doc.fullscreenElement)return;
   const on=standalone();doc.documentElement.toggleAttribute('data-standalone',on);
-  if(on){store.update(r=>r.installed?r:{...r,installed:Date.now()});if(view.card||view.sheet){view.card=null;view.sheet=false;paint();}}
+  if(!on)return;
+  if(installedNow(win))store.update(r=>r.installed?r:{...r,installed:Date.now()});
+  if(view.card||view.sheet){view.card=null;view.sheet=false;paint();}
  }
  applyStandalone();
- for(const m of ['standalone','minimal-ui','fullscreen']){try{win.matchMedia('(display-mode: '+m+')').addEventListener('change',applyStandalone);}catch{}}
+ for(const m of ['standalone','minimal-ui']){try{win.matchMedia('(display-mode: '+m+')').addEventListener('change',applyStandalone);}catch{}}
  win.addEventListener('beforeinstallprompt',event=>{event.preventDefault();deferred=event;});
  win.addEventListener('appinstalled',()=>{deferred=null;store.update(r=>({...r,installed:Date.now()}));view.card=null;view.sheet=false;paint();applyStandalone();ui()?.toast?.(T('MatBravo jest na ekranie głównym.'));});
 
  // -- unsaved forms: form[data-dirty] marks a form the person has typed in (searches and the chat composer do not count) --
  doc.addEventListener('input',event=>{
-  const el=event.target,form=el?.closest?.('form');
-  if(form&&!form.matches('[data-no-dirty],.chat-composer')&&!el.matches('[type=search]'))form.setAttribute('data-dirty','');
+  const el=event.target;
+  if(dirties(el))el.closest('form').setAttribute('data-dirty','');
  },true);
  doc.addEventListener('reset',event=>event.target?.removeAttribute?.('data-dirty'),true);
  registry.on('saved',detail=>detail?.element?.removeAttribute?.('data-dirty'));
@@ -337,6 +375,7 @@ if(browser){
   if(mode==='api')win.setTimeout(()=>updater.register(),2000);
  });
  registry.on('login',()=>{touch(true);});
+ registry.on('logout',()=>{view.card=null;view.sheet=false;sentAt=0;activeMs=0;paint();});
  registry.on('language',({lang}={})=>{setManifestLanguage(lang);paint();});
  registry.on('painted',()=>paint());
  registry.on('client-outdated',()=>updater.outdated());
