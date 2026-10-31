@@ -31,6 +31,22 @@ $out=match($in['job']){
    return ['ok'=>['ext'=>$img['ext'],'sizes'=>$info]];
   },$in['files']);
  })(),
+ // EXIF orientations 1–8 on a JPEG made here: quadrants red, green / blue, white, an APP1 segment with only Orientation.
+ // Returns per orientation the colours at the centres of the four quadrants of the 64 px result (TL, TR, BL, BR).
+ 'orient'=>(function(){
+  $c=Config::DEFAULTS;$out=['exif'=>function_exists('exif_read_data'),'allowUrlFopen'=>(bool)ini_get('allow_url_fopen')];
+  $im=imagecreatetruecolor(128,128);
+  foreach([[0,0,[255,0,0]],[64,0,[0,255,0]],[0,64,[0,0,255]],[64,64,[255,255,255]]] as [$x,$y,$rgb])imagefilledrectangle($im,$x,$y,$x+63,$y+63,(int)imagecolorallocate($im,...$rgb));
+  ob_start();imagejpeg($im,null,95);$jpeg=(string)ob_get_clean();imagedestroy($im);
+  for($o=1;$o<=8;$o++){
+   $tiff="MM\x00\x2A\x00\x00\x00\x08\x00\x01\x01\x12\x00\x03\x00\x00\x00\x01\x00".chr($o)."\x00\x00\x00\x00\x00\x00";
+   $app1="\xFF\xE1".pack('n',strlen($tiff)+8)."Exif\x00\x00".$tiff;
+   $img=Avatars::process($c,substr($jpeg,0,2).$app1.substr($jpeg,2));$g=imagecreatefromstring($img[64]);
+   $out[$o]=array_map(function($p)use($g){$rgb=imagecolorsforindex($g,imagecolorat($g,$p[0],$p[1]));
+    return match(true){$rgb['red']>200&&$rgb['green']>200&&$rgb['blue']>200=>'W',$rgb['red']>200=>'R',$rgb['green']>200=>'G',$rgb['blue']>200=>'B',default=>'?'};},[[16,16],[48,16],[16,48],[48,48]]);
+  }
+  return $out;
+ })(),
  'mode'=>['mode'=>Capabilities::avatarMode([]),'gd'=>Capabilities::gd(),'readable'=>Capabilities::readable()],
 };
 echo json_encode($out,JSON_THROW_ON_ERROR|JSON_INVALID_UTF8_SUBSTITUTE);

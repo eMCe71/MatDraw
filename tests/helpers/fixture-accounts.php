@@ -2,7 +2,9 @@
 // Test-only fixture jobs of the accounts-profiles-backend slice (loaded by tests/helpers/fixture.php; CLI, test database only).
 //   accounts-config {set:{key:value}}     rewrites MATDRAW_CONFIG atomically (allow-listed keys; null removes a key); returns the old values
 //   accounts-state {userId}               users row (password hash only as a fingerprint), profile, billing row and audit actions
-//   accounts-cleanup {config?,now?}       runs the accounts-cleanup job once with config overrides; returns its result
+//   accounts-cleanup {config?,now?,prev?} runs the accounts-cleanup job once with config overrides; returns its result;
+//                                         prev: job_runs.last_result seen by that run (the previous value is put back)
+//   accounts-sweep {after?,budget}        Avatars::sweep with a small budget: {files,dirs,next}
 //   accounts-chat {userId,kind}           a chat message ('message') or a report filed by the user ('report'); creates the
 //                                         chat tables with the DDL of plan §2.4 when migration 0003 is not installed
 //   accounts-avatar-files {publicId}      files of a person's avatar directory with their modes (and the directory mode)
@@ -29,7 +31,16 @@ return [
  },
  'accounts-cleanup'=>function(PDO $pdo,array $p,array $c):string{
   $job=Jobs::all()['accounts-cleanup']??null;if(!$job)throw new RuntimeException('accounts-cleanup: job missing');
-  return ($job['run'])($pdo,array_replace($c,(array)($p['config']??[])),(int)($p['now']??time()));
+  $run=fn()=>($job['run'])($pdo,array_replace($c,(array)($p['config']??[])),(int)($p['now']??time()));
+  if(!array_key_exists('prev',$p))return $run();
+  $old=$pdo->query("SELECT last_result FROM job_runs WHERE name='accounts-cleanup'")->fetch(PDO::FETCH_NUM);
+  $set=fn($v)=>$pdo->prepare("INSERT INTO job_runs (name,last_result) VALUES ('accounts-cleanup',?) ON DUPLICATE KEY UPDATE last_result=?")->execute([$v,$v]);
+  $set((string)$p['prev']);
+  try{return $run();}finally{if($old)$set($old[0]);else $pdo->exec("DELETE FROM job_runs WHERE name='accounts-cleanup'");}
+ },
+ 'accounts-sweep'=>function(PDO $pdo,array $p,array $c):array{
+  [$files,$dirs,$next]=Avatars::sweep($pdo,$c,time(),(int)($p['budget']??1),isset($p['after'])?(string)$p['after']:null);
+  return ['files'=>$files,'dirs'=>$dirs,'next'=>$next];
  },
  'accounts-chat'=>function(PDO $pdo,array $p):array{
   $id=(string)($p['userId']??'');$kind=$p['kind']??'';if(!in_array($kind,['message','report'],true))throw new RuntimeException('accounts-chat: kind');

@@ -9,7 +9,7 @@ import {spawnSync} from 'node:child_process';
 import {readFileSync} from 'node:fs';
 import {COUNTRIES,SPORTS,SPORT_COLORS,RESERVED,RESERVED_PREFIXES,validateUsername,normalizeUsername,validateName,slugName,suggestUsernames,cleanText} from '../dist/profile-data.js';
 const php=process.env.PHP_BIN;const skip=!php;
-function bridge(input){const r=spawnSync(php,['tests/php-bridge-community.php'],{input:JSON.stringify(input),encoding:'utf8',maxBuffer:50_000_000});assert.equal(r.status,0,r.stderr||r.stdout);return JSON.parse(r.stdout);}
+function bridge(input,ini=[]){const r=spawnSync(php,[...ini.flatMap(v=>['-d',v]),'tests/php-bridge-community.php'],{input:JSON.stringify(input),encoding:'utf8',maxBuffer:50_000_000});assert.equal(r.status,0,r.stderr||r.stdout);return JSON.parse(r.stdout);}
 const POLISH_LETTERS=/[ąćęłńóśźżĄĆĘŁŃÓŚŹŻ]/;
 const fixture=name=>readFileSync(new URL('./fixtures/avatars/'+name,import.meta.url));
 
@@ -108,6 +108,16 @@ test('Profiles::own has the me.profile shape (§4.3)',{skip},()=>{
  assert.deepEqual([q.complete,q.usernameChangeAt,q.mustChangePassword,q.avatar],[false,null,true,null]);
 });
 
+test('avatar pipeline: every EXIF orientation 1–8 (mirrored ones too), also with allow_url_fopen=0',{skip},t=>{
+ if(bridge({job:'mode'}).mode==='off'){t.skip('GD cannot write avatars');return;}
+ // Quadrants of the stored image: R G / B W. The displayed image per EXIF orientation (TL, TR, BL, BR):
+ const want={1:'RGBW',2:'GRWB',3:'WBGR',4:'BWRG',5:'RBGW',6:'BRWG',7:'WGBR',8:'GWRB'};
+ for(const ini of [[],['allow_url_fopen=0']]){
+  const r=bridge({job:'orient'},ini);if(!r.exif){t.skip('no ext-exif');return;}
+  assert.equal(r.allowUrlFopen,!ini.length);
+  for(const o of Object.keys(want))assert.equal(r[o].join(''),want[o],`orientation ${o} ${ini.join(' ')}`);
+ }
+});
 test('Capabilities: memory_limit parsing and the avatar mode of this PHP build',{skip},()=>{
  assert.deepEqual(bridge({job:'bytes',values:['128M','1G','2g','512K','1048576','-1','',' 64MB ','abc','-5']}),[134217728,1073741824,2147483648,524288,1048576,-1,-1,67108864,-1,-1]);
  const m=bridge({job:'mode'});assert.ok(['gd-webp','gd-jpeg','off'].includes(m.mode));

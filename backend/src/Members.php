@@ -184,7 +184,7 @@ final class Members {
  /**
   * Deletes a member account (§3.8, also the Admin's delete): forced payment sync, 409 confirmEnd while a subscription
   * runs and does not end (unless $endSubscription), Stripe customer deletion (failure → stripe_redact_pending=1),
-  * chat messages to tombstones, then one transaction: mutes and profile deleted, users anonymised (kept for foreign
+  * then one transaction: chat messages to tombstones, mutes and profile deleted, users anonymised (kept for foreign
   * keys), billing_accounts kept as a tombstone without personal data, account_audit entry; finally the avatar directory.
   */
  public static function erase(PDO $pdo,array $c,string $userId,string $actor,string $action,bool $endSubscription):void {
@@ -200,14 +200,15 @@ final class Members {
    try{[$called,$ok]=self::bridge('MatDraw\\Billing','deleteCustomer',$pdo,$c,$userId);$redact=!$called||$ok===false?1:0;}
    catch(\Throwable $e){Routes::logThrowable($e,'MatDraw billing delete');$redact=1;}
   }
-  if(class_exists('MatDraw\\Chat')&&method_exists('MatDraw\\Chat','tombstoneUser'))Chat::tombstoneUser($pdo,$userId);
   $q=$pdo->prepare('SELECT public_id FROM user_profiles WHERE user_id=?');$q->execute([$userId]);$publicId=$q->fetchColumn();$q->closeCursor();
   $mutes=self::tableExists($pdo,'chat_mutes');$now=time();
   self::tx($pdo,function()use($pdo,$userId,$actor,$action,$redact,$mutes,$now){
+   // Chat::tombstoneUser joins this transaction (it begins its own only outside one): messages and account go together.
+   if(class_exists('MatDraw\\Chat')&&method_exists('MatDraw\\Chat','tombstoneUser'))Chat::tombstoneUser($pdo,$userId);
    if($mutes)$pdo->prepare('DELETE FROM chat_mutes WHERE user_id=?')->execute([$userId]);
    $pdo->prepare('DELETE FROM user_profiles WHERE user_id=?')->execute([$userId]);
    $pdo->prepare("UPDATE users SET email=?,password_hash=?,active=0,auth_version=auth_version+1 WHERE id=? AND role='member'")->execute(['deleted+'.$userId.'@invalid.matbravo',password_hash(bin2hex(random_bytes(24)),PASSWORD_DEFAULT),$userId]);
-   $pdo->prepare('INSERT INTO billing_accounts (user_id,stripe_redact_pending,deleted_at,created_at,updated_at) VALUES (?,?,?,?,?) ON DUPLICATE KEY UPDATE billing_exempt=0,exempt_reason=NULL,exempt_by=NULL,exempt_at=NULL,exempt_until=NULL,pending_checkout_id=NULL,pending_checkout_expires=NULL,next_sync_at=NULL,stripe_redact_pending=GREATEST(stripe_redact_pending,VALUES(stripe_redact_pending)),deleted_at=VALUES(deleted_at),updated_at=VALUES(updated_at)')->execute([$userId,$redact,$now,$now,$now]);
+   $pdo->prepare('INSERT INTO billing_accounts (user_id,stripe_redact_pending,deleted_at,created_at,updated_at) VALUES (?,?,?,?,?) ON DUPLICATE KEY UPDATE billing_exempt=0,exempt_reason=NULL,exempt_by=NULL,exempt_at=NULL,exempt_until=NULL,pending_checkout_id=NULL,pending_checkout_expires=NULL,next_sync_at=NULL,stripe_redact_pending=GREATEST(stripe_redact_pending,?),deleted_at=?,updated_at=?')->execute([$userId,$redact,$now,$now,$now,$redact,$now,$now]);
    self::audit($pdo,$actor,$action,$userId);
   });
   Avatars::removeOwner($c,is_string($publicId)?$publicId:null);
@@ -225,7 +226,9 @@ final class Members {
   if($q!==''){
    // Literal prefix: ! escapes itself, % and _ (the same in MySQL and MariaDB, whatever NO_BACKSLASH_ESCAPES says).
    $like=strtr(mb_strtolower($q),['!'=>'!!','%'=>'!%','_'=>'!_']).'%';
-   $sql.=" AND (u.email LIKE ? ESCAPE '!' OR p.username LIKE ? ESCAPE '!' OR p.last_name LIKE ? ESCAPE '!')";$params=[$like,$like,$like];
+   // username is ascii_bin: a phrase outside ASCII cannot match it, and comparing it would be error 1267 (mix of collations).
+   $ascii=!preg_match('/[^\x00-\x7F]/',$like);
+   $sql.=" AND (u.email LIKE ? ESCAPE '!'".($ascii?" OR p.username LIKE ? ESCAPE '!'":'')." OR p.last_name LIKE ? ESCAPE '!')";$params=$ascii?[$like,$like,$like]:[$like,$like];
   }
   $st=$pdo->prepare($sql.' ORDER BY p.created_at DESC,u.id');$st->execute($params);$rows=$st->fetchAll(PDO::FETCH_ASSOC);
   $cfg=array_replace($c,['billing_enforce'=>true]);$now=time();$items=[];
@@ -236,17 +239,18 @@ final class Members {
    $keep=match($filter){'paid'=>in_array($a['state'],['active','ending','past_due'],true),'free'=>in_array($a['state'],['free','grace'],true),'none'=>in_array($a['state'],['none','ended'],true),'problem'=>$problem,default=>true};
    if($keep)$items[]=['id'=>$r['id'],'email'=>$r['email'],'username'=>$r['username'],'name'=>trim(($r['first_name']??'').' '.($r['last_name']??'')),'country'=>$r['country'],
     'createdAt'=>$r['created_at']===null?null:(int)$r['created_at'],'lastLoginAt'=>$r['last_login_at']===null?null:(int)$r['last_login_at'],'active'=>(bool)$r['active'],
-    'billing'=>['state'=>$a['state'],'until'=>$a['until'],'exempt'=>$exempt,'reason'=>$exempt||$a['state']==='grace'?$r['exempt_reason']:null],'mutedUntil'=>null];
+    'billing'=>['state'=>$a['state'],'until'=>$a['until'],'exempt'=>$exempt,'reason'=>$exempt||$a['state']==='grace'?$r['exempt_reason']:null],'muted'=>false,'mutedUntil'=>null];
   }
   if($filter==='muted'){$muted=self::muted($pdo,array_column($items,'id'));$items=array_values(array_filter($items,fn($i)=>array_key_exists($i['id'],$muted)));}
   $total=count($items);$items=array_slice($items,($page-1)*self::PAGE,self::PAGE);
   $muted=$filter==='muted'?$muted:self::muted($pdo,array_column($items,'id'));
-  foreach($items as &$i)$i['mutedUntil']=$muted[$i['id']]??null;
+  foreach($items as &$i){$i['muted']=array_key_exists($i['id'],$muted);$i['mutedUntil']=$muted[$i['id']]??null;}
   unset($i);
   return ['total'=>$total,'page'=>$page,'items'=>$items];
  }
  /**
-  * id => mutedUntil (int, or null for no end) of the muted accounts among $ids, via ChatModeration::mutedIds
+  * id => mutedUntil (int, or null for no end) of the muted accounts among $ids (items carry muted:true for both, so a
+  * mute without an end differs from no mute), via ChatModeration::mutedIds
   * (chat-backend). Accepts a list of ids or a map id => until|true|null|false from that method.
   */
  private static function muted(PDO $pdo,array $ids):array {
@@ -256,10 +260,15 @@ final class Members {
   foreach($r as $id=>$until){if($until===false||(is_int($until)&&$until<=$now))continue;$out[(string)$id]=is_int($until)?$until:null;}
   return $out;
  }
- /** The member account $userId (any other role or an unknown id: 404 'Konto nie istnieje.'). */
- private static function target(PDO $pdo,mixed $userId):array {
+ /**
+  * The member account $userId (any other role or an unknown id: 404 'Konto nie istnieje.'). A deleted account (billing
+  * tombstone with deleted_at, §3.8) is gone too: 404, except for a repeated 'delete', which answers as done ($deleted).
+  */
+ private static function target(PDO $pdo,mixed $userId,bool &$deleted=false):array {
   $u=is_string($userId)&&$userId!==''?Accounts::find($pdo,$userId):null;
   if(!$u||$u['role']!=='member')throw new AppError('Konto nie istnieje.',404);
+  $q=$pdo->prepare('SELECT deleted_at FROM billing_accounts WHERE user_id=?');$q->execute([$u['id']]);$gone=$q->fetchColumn();$q->closeCursor();
+  $deleted=$gone!==false&&$gone!==null;
   return $u;
  }
  /** admin-member {action,…}: create, active, password, email, profile, delete; members only, every action audited. */
@@ -277,7 +286,8 @@ final class Members {
    self::audit($pdo,$admin['id'],'create',$id,($in['free']??false)===true?'free':null);
    return ['id'=>$id]+($temp===null?[]:['temporaryPassword'=>$temp]);
   }
-  $u=self::target($pdo,$in['userId']??null);
+  $deleted=false;$u=self::target($pdo,$in['userId']??null,$deleted);
+  if($deleted){if($action==='delete')return ['id'=>$u['id'],'deleted'=>true];throw new AppError('Konto nie istnieje.',404);}
   switch($action){
    case 'active':
     if(!is_bool($in['active']??null))throw new AppError('Niepoprawny formularz.',400);

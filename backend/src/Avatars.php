@@ -62,13 +62,20 @@ final class Avatars {
    return $out;
   }finally{imagedestroy($src);}
  }
- /** Applies the EXIF orientation of a JPEG (1–8) when ext-exif is present; metadata itself is never kept. */
+ /**
+  * Applies the EXIF orientation of a JPEG (1–8) when ext-exif is present; metadata itself is never kept. EXIF is read
+  * from a php://memory stream (the data:// wrapper is off with allow_url_fopen=0). The mirrored values flip
+  * horizontally first, then every value turns counter-clockwise (imagerotate): 2 mirror, 3 180°, 4 mirror+180° (= vertical
+  * mirror), 5 mirror+90° (transpose), 6 270° (90° clockwise), 7 mirror+270° (transverse), 8 90°.
+  */
  private static function orient(\GdImage $img,string $raw):\GdImage {
   if(!function_exists('exif_read_data'))return $img;
-  $exif=@exif_read_data('data://image/jpeg;base64,'.base64_encode($raw));$o=is_array($exif)?(int)($exif['Orientation']??1):1;
+  $f=fopen('php://memory','w+b');if($f===false)return $img;
+  try{fwrite($f,$raw);rewind($f);$exif=@exif_read_data($f);}catch(\Throwable){$exif=false;}finally{fclose($f);}
+  $o=is_array($exif)?(int)($exif['Orientation']??1):1;
   if($o<2||$o>8)return $img;
-  if(in_array($o,[2,4,5,7],true))imageflip($img,$o===4?IMG_FLIP_VERTICAL:IMG_FLIP_HORIZONTAL);
-  $angle=match($o){3,4=>180,5,6=>270,7,8=>90,default=>0};
+  if(in_array($o,[2,4,5,7],true))imageflip($img,IMG_FLIP_HORIZONTAL);
+  $angle=match($o){3,4=>180,5,8=>90,6,7=>270,default=>0};
   if($angle){$r=imagerotate($img,$angle,0);if($r){imagedestroy($img);return $r;}}
   return $img;
  }
@@ -152,23 +159,28 @@ final class Avatars {
  /**
   * Cleanup for the accounts-cleanup job (§7.5): in each person's directory, files that are not the current avatar and
   * are older than one day; directories whose public_id no longer has a profile row (and is older than one day).
-  * At most $budget directory entries and about 2 seconds per run. Returns [files removed, directories removed].
+  * At most $budget person directories and about 2 seconds per run, in name order, resuming after $after (the last
+  * public_id the previous run visited), so a run that stops early never leaves the later directories unvisited.
+  * Returns [files removed, directories removed, cursor]: the last public_id visited when the run stopped early, or null
+  * when it reached the end (the next run starts from the beginning).
   */
- public static function sweep(PDO $pdo,array $c,int $now,int $budget=5000):array {
-  $root=Paths::uploads($c).'/avatars';if(!is_dir($root)||is_link($root))return [0,0];
-  $start=microtime(true);$seen=0;$files=0;$dirs=0;$day=86400;
+ public static function sweep(PDO $pdo,array $c,int $now,int $budget=5000,?string $after=null):array {
+  $root=Paths::uploads($c).'/avatars';if(!is_dir($root)||is_link($root))return [0,0,null];
+  if($after!==null&&!preg_match('/^[A-Za-z0-9]{12}$/D',$after))$after=null;
+  $start=microtime(true);$seen=0;$files=0;$dirs=0;$day=86400;$last=$after;$from=$after===null?'':substr($after,0,2);
   foreach(scandir($root)?:[] as $prefix){
-   if(!preg_match('/^[A-Za-z0-9]{2}$/D',$prefix)||!is_dir("$root/$prefix")||is_link("$root/$prefix"))continue;
-   $owners=array_values(array_filter(scandir("$root/$prefix")?:[],fn($d)=>preg_match('/^[A-Za-z0-9]{12}$/D',$d)&&str_starts_with($d,$prefix)));
-   if(!$owners){if(filemtime("$root/$prefix")<$now-$day)@rmdir("$root/$prefix");continue;}
+   if(!preg_match('/^[A-Za-z0-9]{2}$/D',$prefix)||strcmp($prefix,$from)<0||!is_dir("$root/$prefix")||is_link("$root/$prefix"))continue;
+   $all=array_values(array_filter(scandir("$root/$prefix")?:[],fn($d)=>preg_match('/^[A-Za-z0-9]{12}$/D',$d)&&str_starts_with($d,$prefix)));
+   if(!$all){if(filemtime("$root/$prefix")<$now-$day)@rmdir("$root/$prefix");continue;}
+   $owners=$after===null?$all:array_values(array_filter($all,fn($d)=>strcmp($d,$after)>0));
    $current=[];
    foreach(array_chunk($owners,200) as $chunk){
     $q=$pdo->prepare('SELECT public_id,avatar FROM user_profiles WHERE public_id IN ('.implode(',',array_fill(0,count($chunk),'?')).')');$q->execute($chunk);
     foreach($q->fetchAll(PDO::FETCH_ASSOC) as $r)$current[$r['public_id']]=(string)$r['avatar'];
    }
    foreach($owners as $pid){
-    if(++$seen>$budget||microtime(true)-$start>2)return [$files,$dirs];
-    $dir="$root/$prefix/$pid";if(!is_dir($dir)||is_link($dir))continue;
+    if(++$seen>$budget||microtime(true)-$start>2)return [$files,$dirs,$last];
+    $last=$pid;$dir="$root/$prefix/$pid";if(!is_dir($dir)||is_link($dir))continue;
     if(!array_key_exists($pid,$current)){if(filemtime($dir)<$now-$day){self::removeOwner($c,$pid);$dirs++;}continue;}
     $keep=self::parse($current[$pid]);
     foreach(scandir($dir)?:[] as $f){
@@ -178,6 +190,6 @@ final class Avatars {
     }
    }
   }
-  return [$files,$dirs];
+  return [$files,$dirs,null];
  }
 }

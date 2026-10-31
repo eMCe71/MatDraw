@@ -186,18 +186,22 @@ test('photos: switched off → 503 before anything else',{skip},async()=>{
  }finally{await setConfig({avatars_enabled:old.avatars_enabled});}
 });
 
-test('admin-members: admin only, POST, literal LIKE with _ and %, billing filters',{skip},async()=>{
+test('admin-members: admin only, POST, literal LIKE with _ and %, Polish letters, billing filters',{skip},async()=>{
  const tag=uniq('zq');const lit=member(tag+'_x',{exempt:true}),plain=member(tag+'ax'),pct=member(tag+'%y');
  const c=await signIn(...ADMIN);const list=async body=>{const r=await c.req('admin-members',body);assert.equal(r.status,200,JSON.stringify(r.data));return r.data;};
  const ids=d=>d.items.map(i=>i.id).sort();
  assert.deepEqual(ids(await list({q:tag+'_'})),[lit.id],'_ is literal');assert.deepEqual(ids(await list({q:tag+'%'})),[pct.id],'% is literal');
  assert.deepEqual(ids(await list({q:tag.toUpperCase()})),[lit.id,plain.id,pct.id].sort(),'case-insensitive prefix');
  const d=await list({q:tag+'_'});const item=d.items[0];
- assert.deepEqual(Object.keys(item),['id','email','username','name','country','createdAt','lastLoginAt','active','billing','mutedUntil']);
- assert.deepEqual([d.total,d.page,item.email,item.name,item.billing.state,item.billing.exempt,item.mutedUntil],[1,1,lit.email,'Test Członek','free',true,null]);
+ assert.deepEqual(Object.keys(item),['id','email','username','name','country','createdAt','lastLoginAt','active','billing','muted','mutedUntil']);
+ assert.deepEqual([d.total,d.page,item.email,item.name,item.billing.state,item.billing.exempt,item.muted,item.mutedUntil],[1,1,lit.email,'Test Członek','free',true,false,null]);
  assert.deepEqual(ids(await list({q:tag,filter:'free'})),[lit.id]);assert.deepEqual(ids(await list({q:tag,filter:'none'})),[plain.id,pct.id].sort());
  assert.deepEqual(ids(await list({q:tag,filter:'paid'})),[]);
  const surname=uniq('Zzlast');const named=member('named',{profile:{lastName:surname}});assert.deepEqual(ids(await list({q:surname.toLowerCase()})),[named.id],'by last name');
+ // A phrase outside ASCII (username is ascii_bin) still searches e-mails and last names, without a collation error.
+ const pl='Świątek'+uniq('q');const polish=member('polish',{profile:{lastName:pl}});
+ assert.deepEqual(ids(await list({q:pl.slice(0,-1)})),[polish.id],'Polish last name');assert.deepEqual(ids(await list({q:pl.toLowerCase()})),[polish.id],'any case');
+ assert.ok((await list({q:'Żak'})).items.every(i=>i.id!==polish.id));
  assert.equal((await c.req('admin-members',{q:'x'.repeat(101)})).status,422);assert.equal((await c.req('admin-members',{filter:'bogus'})).status,422);
  assert.equal((await get('admin-members&q=x',{cookie:c.cookie})).status,405,'search terms never in a URL');
  const muted=await list({q:tag,filter:'muted'});assert.ok(Array.isArray(muted.items));
@@ -246,6 +250,10 @@ test('admin-member delete and account-delete anonymise the account and keep a bi
  assert.equal(fixture('accounts-avatar-files',{publicId:pa}).dir,null,'avatar directory removed');
  assert.equal((await get('me',{cookie:ca.cookie})).status,401);
  assert.ok(!(await admin.req('admin-members',{q:a.email})).data.items.length,'deleted accounts leave the panel');
+ // A deleted account is gone for the panel's actions too: only a repeated delete answers (as done), nothing is revived.
+ for(const action of ['active','password','email','profile'])assert.equal((await admin.req('admin-member',{action,userId:a.id,active:true,email:uniq('back')+'@example.test',firstName:'X'})).status,404,action);
+ r=await admin.req('admin-member',{action:'delete',userId:a.id});assert.deepEqual([r.status,r.data],[200,{id:a.id,deleted:true}]);
+ const again=fixture('accounts-state',{userId:a.id});assert.deepEqual([again.user,again.profile,again.billing.deleted_at,again.audit.map(x=>x.action)],[st.user,null,st.billing.deleted_at,['delete']]);
  // Self-service deletion.
  const b=member('self');const cb=await signIn(b.email);
  assert.deepEqual([(await cb.req('account-delete',{password:'wrong-password-123'})).status],[422]);
@@ -305,6 +313,17 @@ test('accounts-cleanup: old files beside the current photo and directories witho
  const files=Object.keys(fixture('accounts-avatar-files',{publicId:p.publicId}).files);
  assert.equal(files.length,2,'current photo kept, the old foreign file removed: '+files.join(','));assert.ok(files.every(f=>f.startsWith(p.avatar)));
  assert.equal(fixture('accounts-avatar-files',{publicId:orphan}).dir,null,'directory without a profile removed');
+});
+test('accounts-cleanup: the avatar sweep resumes where the previous run stopped',{skip},async()=>{
+ const tail=uniq('').replace(/[^A-Za-z0-9]/g,'').padEnd(9,'q').slice(-9),pid=k=>'Zy'+tail+k;
+ for(const k of 'abc')fixture('accounts-avatar-orphan',{publicId:pid(k)});
+ const gone=k=>fixture('accounts-avatar-files',{publicId:pid(k)}).dir===null;
+ // A run with a budget of one directory stops after it and names it as the cursor.
+ assert.deepEqual(fixture('accounts-sweep',{after:pid('0'),budget:1}),{files:0,dirs:1,next:pid('a')});assert.deepEqual(['a','b','c'].map(gone),[true,false,false]);
+ // The job reads the cursor of its previous result: directories up to it wait for the next pass.
+ const out=fixture('accounts-cleanup',{config:{billing_enforce:false},prev:'abandoned=off deleted=0 failed=0 avatar_files=0 avatar_dirs=1 avatar_next='+pid('b')});
+ assert.match(out,/ avatar_next=(-|[A-Za-z0-9]{12})$/);assert.deepEqual(['b','c'].map(gone),[false,true],'resumed after b');
+ assert.match(fixture('accounts-cleanup',{config:{billing_enforce:false},prev:'avatar_next=-'}),/avatar_dirs=[1-9]/);assert.ok(gone('b'),'the next pass starts from the beginning');
 });
 test('diagnostics: admin only, no secrets; probe=stripe limited to 6 per hour',{skip},async()=>{
  const c=await signIn(...ADMIN);const r=await get('diagnostics',{cookie:c.cookie});assert.equal(r.status,200,JSON.stringify(r.data));
