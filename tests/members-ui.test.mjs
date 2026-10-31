@@ -206,7 +206,7 @@ test('currency override: sent only when it changes and no subscription runs; "" 
  assert.deepEqual(currencyChange(d({currencyOverride:'usd'}),''),{action:'currency',currency:null});
  assert.equal(currencyChange(d({currencyOverride:'usd'}),'usd'),null);assert.equal(currencyChange(d(),''),null);
  assert.equal(currencyChange(d({currencyOverride:'usd'}),'eur').currency,null,'an unknown value never goes to the server as a currency');
- for(const subStatus of ['active','trialing','past_due'])assert.equal(currencyChange(d({subStatus}),'usd'),null,subStatus);
+ for(const subStatus of ['active','trialing','past_due','incomplete'])assert.equal(currencyChange(d({subStatus}),'usd'),null,subStatus);
  assert.equal(currencyChange(null,'usd'),null);assert.equal(currencyChange(d(),null),null,'select disabled: nothing to send');
 });
 
@@ -328,6 +328,24 @@ test('glue: blocking a staff account with a live subscription offers (and by def
   assert.equal(f.n.blockRow.hidden,true,'no live subscription, no warning');
   await members.onAccountSaved({payload:{role:'club',active:false},result:{id:'u7'},element:f.form});
   assert.deepEqual(actions(calls),[]);
+ });
+});
+
+test('glue: saving an already blocked staff account never stops its subscription; blocking while making it free stops it once',async()=>{
+ const live=detail({exempt:false,exemptReason:null,state:'active',active:false,subStatus:'active',subscriptionId:'sub_1'});
+ await withServer(billingRoutes(live),async({calls})=>{
+  const f=await mounted(fakeForm({id:'u7',active:'no'}));
+  assert.equal(f.n.blockRow.hidden,true,'already blocked: no warning');
+  await members.onAccountSaved({payload:{role:'club',active:false},result:{id:'u7'},element:f.form});
+  assert.deepEqual(actions(calls),[],'a later save (club, e-mail, password) sends no billing action');
+ });
+ const paying=detail({exempt:false,exemptReason:null,state:'active',subStatus:'active',subscriptionId:'sub_1'});
+ await withServer(billingRoutes(paying,{exempt:{warnLive:true}}),async({calls,toasts})=>{
+  const f=await mounted(fakeForm({id:'u7',active:'no'}));
+  f.n.free.checked=true;f.n.reason.value='Stypendium';members.syncBilling(f.mount);
+  await members.onAccountSaved({payload:{role:'club',active:false},result:{id:'u7'},element:f.form});
+  assert.deepEqual(actions(calls),[{action:'exempt',reason:'Stypendium',userId:'u7'},{action:'cancelAtPeriodEnd',userId:'u7'}]);
+  assert.ok(!toasts.some(m=>/Trwająca subskrypcja/.test(m)),'the subscription was just stopped: no second offer');
  });
 });
 

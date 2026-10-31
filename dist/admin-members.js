@@ -19,6 +19,8 @@ export const PAGE_SIZE=50,GRACE_DAYS=7,BULK_MIN_DAYS=14,FRESH_MS=15000,STAFF_MS=
 export const FILTERS=[['all',()=>T('Wszyscy')],['paid',()=>T('Płacący')],['free',()=>T('Darmowi')],['none',()=>T('Bez planu')],['problem',()=>T('Problem z płatnością')],['muted',()=>T('Wyciszeni')]];
 const INTERNAL_REASONS=['grandfathered','staff-default'];
 const ONGOING=['active','trialing','past_due'];
+/** Statuses the server refuses a currency change for (BillingSync::ONGOING: ONGOING plus 'incomplete'). */
+const CURRENCY_LOCK=['active','trialing','past_due','incomplete'];
 
 // ---- Dates ----
 const pad=n=>String(n).padStart(2,'0');
@@ -93,7 +95,7 @@ export const reasonRequired=({free,isNew,wasExempt,loaded={reason:'',until:''},u
 /** The 'currency' action (P20) for the select value, or null: nothing to send while a subscription runs (the server refuses it), without a loaded
  * account, or when the Admin override is unchanged ('' = the country rule). */
 export function currencyChange(detail,value){
- if(!detail||ONGOING.includes(detail.subStatus)||value==null)return null;
+ if(!detail||CURRENCY_LOCK.includes(detail.subStatus)||value==null)return null;
  const next=value==='pln'||value==='usd'?value:null;
  return next===(detail.currencyOverride||null)?null:{action:'currency',currency:next};
 }
@@ -447,7 +449,7 @@ const mounts=new WeakMap();
 const NOTE=s=>s.member?T('Darmowe konto daje pełny dostęp bez subskrypcji.'):T('Bez darmowego konta osoba po włączeniu płatności ma tylko podgląd, dopóki nie wykupi planu.');
 const CURRENCIES=[['',()=>T('Z kraju w profilu')],['pln','PLN'],['usd','USD']];
 function billingShell(s){
- const cur=s.detail?.currencyOverride||'',locked=!s.detail||ONGOING.includes(s.detail.subStatus);
+ const cur=s.detail?.currencyOverride||'',locked=!s.detail||CURRENCY_LOCK.includes(s.detail.subStatus);
  return h`<fieldset class="mem-bill" data-mem-bill><legend>${T('Płatności')}</legend>
   <label class="checkbox-label mem-free"><input type="checkbox" name="mem-free" data-mem-free${s.checked?' checked':''}> ${T('Darmowe konto (bez płatności)')}</label>
   <p class="muted small mem-note">${NOTE(s)}</p>
@@ -522,8 +524,8 @@ export async function applyPlan({s,userId,v,blocked=false}){
  }
  const cur=s.isNew?null:currencyChange(s.detail,v.currency);
  if(cur){await send(billingCall({...cur,userId}));changed=true;}
- if(blocked&&!stopped&&v.blockStop&&cancelable(s.detail)){await stopSubscription(userId);changed=true;}
- return {ok:true,changed,offerStop};
+ if(blocked&&!stopped&&v.blockStop&&s.detail?.active!==false&&cancelable(s.detail)){await stopSubscription(userId);stopped=true;changed=true;}
+ return {ok:true,changed,offerStop:offerStop&&!stopped};
 }
 const offerStopDialog=userId=>openModal(T('Trwająca subskrypcja'),h`<p>${T('Ta osoba ma trwającą subskrypcję w Stripe. Nadal będzie z niej obciążana, dopóki jej nie zatrzymasz.')}</p>`,all(btn(T('Zostaw'),'close'),btn(T('Zatrzymaj subskrypcję na koniec okresu'),'stop-later','primary',{'data-mem-id':userId})));
 /** After a successful account.save (event 'saved' with result.id): sends the plan change decided by applyPlan. The form may already be
