@@ -1,0 +1,44 @@
+name: Diagnostyka 403 (tymczasowa)
+
+on:
+  push:
+    branches: ['claude/admiring-gauss-torrum']
+    paths: ['.github/workflows/diagnose.yml']
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    runs-on: ubuntu-24.04
+    environment: production
+    env:
+      SITE: /home/meducase/domains/matbravo.com
+    steps:
+      - uses: actions/checkout@v4
+      - name: Połączenie SSH
+        env:
+          SSH_HOST: ${{ secrets.SSH_HOST }}
+          SSH_PORT: ${{ secrets.SSH_PORT }}
+          SSH_USER: ${{ secrets.SSH_USER }}
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
+        run: bash scripts/deploy-ssh-setup.sh
+      - name: Stan katalogu i logi
+        run: |
+          ssh deploy "ls -la $SITE $SITE/public_html; stat -c '%a %U:%G %n' $SITE $SITE/public_html $SITE/public_html/index.html $SITE/public_html/.htaccess $SITE/public_html/api $SITE/public_html/api/index.php $SITE/backend; ls -la /var/log/httpd/domains/ 2>&1 | grep -i -e matbravo -e denied -e 'No such' | head -5; tail -n 15 /var/log/httpd/domains/matbravo.com.error.log 2>&1 | tail -n 15" || true
+          echo "== nagłówki odpowiedzi https://matbravo.com/"; curl -skI --max-time 15 https://matbravo.com/ | head -12 || true
+      - name: Eksperymenty (każdy przywraca stan)
+        run: |
+          probe(){ for u in "https://matbravo.com/" "https://matbravo.com/runtime-config.js" "https://matbravo.com/api/index.php?route=session" "http://matbravo.com/" "https://www.matbravo.com/"; do printf '  %-50s %s\n' "$u" "$(curl -sk -o /dev/null --max-time 15 -w '%{http_code} %{size_download}B %{redirect_url}' "$u")"; done; }
+          echo "== A: obecny stan"; probe
+          echo "== B: bez .htaccess"; ssh deploy "mv $SITE/public_html/.htaccess $SITE/public_html/.htaccess.diag"; sleep 5; probe
+          ssh deploy "mv $SITE/public_html/.htaccess.diag $SITE/public_html/.htaccess"
+          echo "== C: .htaccess bez reguł przekierowania"; ssh deploy "cp -p $SITE/public_html/.htaccess $SITE/public_html/.htaccess.diag && sed -i '/IfModule mod_rewrite.c/,/\/IfModule/d' $SITE/public_html/.htaccess && cat $SITE/public_html/.htaccess | head -3"; sleep 5; probe
+          ssh deploy "mv -f $SITE/public_html/.htaccess.diag $SITE/public_html/.htaccess"
+          echo "== D: plik testowy 644"; ssh deploy "echo ok > $SITE/public_html/diag.txt && chmod 644 $SITE/public_html/diag.txt"; sleep 2; curl -sk -o /dev/null --max-time 15 -w '  diag.txt: %{http_code}\n' https://matbravo.com/diag.txt
+          ssh deploy "rm -f $SITE/public_html/diag.txt"
+          echo "== E: po przywróceniu"; sleep 5; probe
+      - name: Przywrócenie stanu (zawsze)
+        if: always()
+        run: ssh deploy "[ -f $SITE/public_html/.htaccess.diag ] && mv -f $SITE/public_html/.htaccess.diag $SITE/public_html/.htaccess; rm -f $SITE/public_html/diag.txt; ls -la $SITE/public_html | head -5" || true
