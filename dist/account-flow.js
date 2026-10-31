@@ -14,7 +14,7 @@ import {registry,h,setHtml} from './registry.js';
 import * as Client from './client.js';
 import {getMe,loadMe,saveDemoProfile,purgeSession} from './me.js';
 import {t as T,getLanguage,translateMessage} from './i18n.js';
-import {COUNTRIES,SPORTS,SPORTS_MAX,CLUB_MAX,validateUsername,normalizeUsername,validateName,suggestUsernames,cleanText} from './profile-data.js';
+import {COUNTRIES,SPORTS,SPORTS_MAX,CLUB_MAX,validateUsername,normalizeUsername,validateName,suggestUsernames,slugName,cleanText} from './profile-data.js';
 import {openCrop} from './avatar-crop.js';
 import {flowStart,flowEnd,readReturn,clearReturn,formatPrice,formatDate,publicConfig,takePaymentMessage,avatarSrc,KNOWN_DEVICE,NOTICE_KEY} from './account-boot.js';
 
@@ -72,6 +72,14 @@ export function fieldsError(f){
  if(!f.sports.length)return new Error('Wybierz co najmniej jeden sport.');
  const club=cleanText(f.club||'');if(club===null||[...club].length>CLUB_MAX)return new Error('Sprawdź pole: klub lub szkoła.');
  return null;
+}
+/** The username filled in while the sign-up field is untouched (§7.7, privacy by default): the first name and the surname's initial
+ * only (marta.k), never the full surname, whatever the full-name box says; the person may still type any valid name. */
+export const prefillUsername=f=>suggestUsernames(f?.first,f?.last,'',{full:false})[0]||'';
+/** Server suggestions for a taken name, as shown: without the full surname unless "show my full name" is ticked. */
+export function shownSuggestions(list,f){
+ const last=slugName(f?.last||''),hide=!f?.full&&last.length>1;
+ return (Array.isArray(list)?list:[]).filter(x=>typeof x==='string'&&validateUsername(x)==='valid'&&!(hide&&x.includes(last))).slice(0,3);
 }
 /** Only an https address on exactly this origin (Checkout or the portal) may be opened (plan §6.2); otherwise null. */
 export function stripeUrl(value,origin){
@@ -151,7 +159,7 @@ const countrySelect=value=>h`<option value=""${value?'':h` selected`}>${T('Wybie
 export function fieldsView(f,{id,signup}){
  const at=!signup&&getMe()?.profile?.usernameChangeAt,locked=!!at&&at*1000>Date.now();
  return h`<div class="acct-grid"><label class="field-label">${T('Imię')}<input name="firstName" autocomplete="given-name" maxlength="50" required value="${f.first}"></label><label class="field-label">${T('Nazwisko')}<input name="lastName" autocomplete="family-name" maxlength="50" required value="${f.last}"></label></div>
-<div class="acct-field"><label class="field-label" for="${id}-username">${T('Nazwa użytkownika')}</label><div class="acct-at"><span aria-hidden="true">@</span><input id="${id}-username" name="username" maxlength="24" autocomplete="nickname" autocapitalize="none" spellcheck="false" required value="${f.username}" aria-describedby="${id}-username-status"${locked?h` readonly`:''}></div><div class="acct-status" id="${id}-username-status" aria-live="polite">${statusView(f)}</div>${signup?'':h`<p class="acct-hint">${locked?T('Kolejna zmiana nazwy będzie możliwa {date}.',{date:formatDate(at)}):T('Nazwę użytkownika można zmienić raz na 30 dni.')}</p>`}</div>
+<div class="acct-field"><label class="field-label" for="${id}-username">${T('Nazwa użytkownika')}</label><div class="acct-at"><span aria-hidden="true">@</span><input id="${id}-username" name="username" maxlength="24" autocomplete="nickname" autocapitalize="none" spellcheck="false" required value="${f.username}" aria-describedby="${id}-username-status"${locked?h` readonly`:''}></div><div class="acct-status" id="${id}-username-status" aria-live="polite">${statusView(f)}</div>${signup?h`<p class="acct-hint">${T('Nazwę użytkownika widzą członkowie czatu.')}</p>`:h`<p class="acct-hint">${locked?T('Kolejna zmiana nazwy będzie możliwa {date}.',{date:formatDate(at)}):T('Nazwę użytkownika można zmienić raz na 30 dni.')}</p>`}</div>
 <label class="field-label">${T('Kraj')}<select name="country" required>${countrySelect(f.country)}</select></label>
 <fieldset class="acct-sports" data-acct-sports>${sportsView(f)}</fieldset>
 <label class="field-label">${T('Klub lub szkoła (opcjonalnie)')}<input name="clubText" maxlength="100" autocomplete="organization" value="${f.club}"></label>
@@ -436,7 +444,7 @@ function scheduleCheck(f,form){
    const r=await Client.request('username-check',{method:'POST',body:{u,firstName:String(f.first||''),lastName:String(f.last||'')},signal:abort?.signal});
    if(abort?.signal.aborted||normalizeUsername(f.username)!==u)return;
    const state=['available','taken','invalid','reserved'].includes(r?.status)?r.status:'idle';
-   setStatus(document.getElementById(form.id),f,{state,suggestions:state==='taken'&&Array.isArray(r.suggestions)?r.suggestions.filter(x=>typeof x==='string'&&validateUsername(x)==='valid').slice(0,3):[]});
+   setStatus(document.getElementById(form.id),f,{state,suggestions:state==='taken'?shownSuggestions(r.suggestions,f):[]});
   }catch(error){if(abort?.signal.aborted)return;setStatus(document.getElementById(form.id),f,{state:'error',message:message(error)});}
  },CHECK_DELAY);
 }
@@ -492,7 +500,7 @@ function onInput(event){
  const f=modelFor(form);if(!f)return;readForm(form,f);
  if(t.name==='username'){f.touched=true;scheduleCheck(f,form);}
  else if((t.name==='firstName'||t.name==='lastName')&&form.id==='acct-signup-2'&&!f.touched&&f.first.trim()&&f.last.trim()){
-  const c=suggestUsernames(f.first,f.last)[0];if(c&&c!==f.username){f.username=c;form.elements.username.value=c;scheduleCheck(f,form);}
+  const c=prefillUsername(f);if(c&&c!==f.username){f.username=c;form.elements.username.value=c;scheduleCheck(f,form);}
  }
 }
 function onChange(event){

@@ -143,6 +143,28 @@ test('profile fields: "show my full name" is unticked by default and the names t
  assert.match(src,/request\('username-check',\{method:'POST',body:\{u,firstName:/,'username-check is a POST with the names in the body');
  assert.doesNotMatch(src+source('account-boot.js'),/route=username-check|username-check\?|apiUrl\(\{route:'username-check'/);
 });
+test('username prefill and suggestions never show the full surname by default (plan §7.7, §10: minors, "initial" default)',async()=>{
+ const {suggestUsernames,slugName}=await import('../dist/profile-data.js');
+ const PEOPLE=[['Marta','Kowalska'],['Łukasz','Żółć'],['Zoë','Brontë-Smith'],['Jan','Nowak'],['Aleksandra','Wiśniewska-Kowalczyk'],['Li','Wu']];
+ for(const [first,last] of PEOPLE){
+  const l=slugName(last),list=suggestUsernames(first,last,'',{full:false});
+  assert.ok(list.length>0,first);
+  for(const c of list)assert.ok(!c.includes(l)||l.length<2,c+' contains the surname '+l);
+  assert.equal(flow.prefillUsername({first,last,full:false}),list[0]);
+  assert.equal(flow.prefillUsername({first,last,full:true}),list[0],'the box does not turn the prefill into the full surname');
+ }
+ assert.equal(flow.prefillUsername({first:'Marta',last:'Kowalska'}),'marta.k');
+ assert.equal(flow.prefillUsername({first:'Łukasz',last:'Żółć'}),'lukasz.z','ASCII-folded');
+ assert.deepEqual(suggestUsernames('Marta','Kowalska','marta.k',{full:false}).slice(0,3),['marta_k','marta.k2','martak']);
+ assert.deepEqual(suggestUsernames('Marta','Kowalska').slice(0,2),['marta.kowalska','marta_kowalska'],'the default order (server parity) is unchanged');
+ // Server suggestions for a taken name: the full-surname ones are hidden unless the person chose to show the full name.
+ const server=['marta.kowalska','marta_kowalska','marta.k2','bad name'];
+ assert.deepEqual(flow.shownSuggestions(server,{last:'Kowalska',full:false}),['marta.k2']);
+ assert.deepEqual(flow.shownSuggestions(server,{last:'Kowalska',full:true}),['marta.kowalska','marta_kowalska','marta.k2']);
+ assert.deepEqual(flow.shownSuggestions(null,{last:'K'}),[]);
+ const html=String(flow.fieldsView(flow.newFields(null,['pl-PL']),{id:'t',signup:true}));
+ assert.match(html,/Nazwę użytkownika widzą członkowie czatu\./,'the sign-up says who sees the username');
+});
 test('flow mark (plan §9.4): set and removed through the contract key, stale after 30 minutes',()=>{
  const s=new Store();assert.equal(boot.FLOW_MARK,'matdraw.flow.active');
  boot.flowStart(s,1000);assert.equal(s.getItem('matdraw.flow.active'),'1000');assert.ok(boot.flowActive(s,1000+29*60e3));assert.ok(!boot.flowActive(s,1000+31*60e3));
@@ -327,12 +349,12 @@ test('PHP build in a browser: sign-up, Checkout and return, portal, cancel, prof
   await page.click('#acct-signup-1 button[type="submit"]');await page.waitForSelector('#acct-signup-2');
   // Step 2: suggestion from the names, live check, language switch keeps everything (QA §11 point 1).
   await page.fill('#acct-signup-2 [name="firstName"]','Marta');await page.fill('#acct-signup-2 [name="lastName"]','Kowalska');
-  await page.waitForSelector('#acct-signup-2 .acct-st.ok');assert.equal(await page.inputValue('#acct-signup-2 [name="username"]'),'marta.kowalska');
+  await page.waitForSelector('#acct-signup-2 .acct-st.ok');assert.equal(await page.inputValue('#acct-signup-2 [name="username"]'),'marta.k','the prefill uses the surname initial only (§7.7)');
   assert.equal(await page.inputValue('#acct-signup-2 [name="country"]'),'PL');assert.equal(await page.isChecked('#acct-signup-2 [name="fullName"]'),false);
   await page.click('[data-sport="karate"]');await page.click('[data-sport="taekwondo"]');
   await page.fill('#acct-signup-2 [name="clubText"]','KS Tygrys');
   await page.click('[data-set-lang="en"]');await page.waitForFunction(()=>document.querySelector('#acct-step-title')?.textContent==='Your profile');
-  for(const [name,value] of [['firstName','Marta'],['lastName','Kowalska'],['username','marta.kowalska'],['clubText','KS Tygrys'],['country','PL']])assert.equal(await page.inputValue(`#acct-signup-2 [name="${name}"]`),value,name);
+  for(const [name,value] of [['firstName','Marta'],['lastName','Kowalska'],['username','marta.k'],['clubText','KS Tygrys'],['country','PL']])assert.equal(await page.inputValue(`#acct-signup-2 [name="${name}"]`),value,name);
   assert.equal(await page.getAttribute('[data-sport="karate"]','aria-pressed'),'true');
   await page.click('[data-set-lang="pl"]');await page.waitForFunction(()=>document.querySelector('#acct-step-title')?.textContent==='Twój profil');
   await shot(page,'php-signup2-1440');

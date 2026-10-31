@@ -75,10 +75,12 @@ export function slugName(value){
  * Username candidates from a first and last name (§7.2), best first: first.last, first_last, first.l2, requested+2,
  * firstlast, first.last2, first.l3, first_last2 (without a last name: first, requested+2, first2, first3). Too long parts
  * are cut so the number survives; only valid, non-reserved names other than the requested one, without duplicates.
- * The server returns at most 3 of them that are free.
+ * The server returns at most 3 of them that are free (Profiles::candidates, same order).
+ * {full:false} (nameDisplay 'initial', the default, §7.7): only the surname's initial is used (first.l, first_l, first.l2,
+ * requested+2, firstl, first.l3), so no candidate shows the full surname to other members.
  */
-export function suggestUsernames(first,last,requested=''){
- const f=slugName(first),l=slugName(last),r=normalizeUsername(requested)??'';
+export function suggestUsernames(first,last,requested='',{full=true}={}){
+ const f=slugName(first),l=full?slugName(last):slugName(last).slice(0,1),r=normalizeUsername(requested)??'';
  if(!/^[a-z]/.test(f))return [];
  const fit=(base,suffix='')=>base.slice(0,USERNAME_MAX-suffix.length).replace(/[._]+$/,'')+suffix;
  const req=validateUsername(r)==='valid'?fit(r,'2'):'';
