@@ -434,6 +434,22 @@ test('PHP build in a browser: sign-up, Checkout and return, portal, cancel, prof
   await page.click('.acct-banner [data-acct-act="plan"]');await page.waitForSelector('.acct-plan');assert.equal(await page.locator('.acct-banner').count(),0,'no banner on the plan page');
   await ctx.close();
 
+  // billing-checkout 409 {portal:true} (Stripe still holds a subscription, e.g. past_due after the grace days): the plan page offers
+  // the Customer Portal instead of painting the same checkout button again.
+  const payer=fixture('member',{email:'e2e.payer.'+Date.now()+'@example.test',profile:true});
+  ({ctx,page}=await context(1440,900));
+  await page.goto(app);await page.fill('#login-form [name="email"]',payer.email);await page.fill('#login-form [name="password"]','TestPassword2026!');
+  await page.click('#login-form button[type="submit"]');await page.waitForSelector('.app-shell');
+  await page.goto(app+'#billing');await page.waitForSelector('.acct-plan [data-acct-act="checkout"]');
+  const isCheckout=u=>new URL(u).searchParams.get('route')==='billing-checkout';
+  await page.route(isCheckout,route=>route.fulfill({status:409,contentType:'application/json',body:JSON.stringify({error:'Masz już aktywną subskrypcję.',portal:true})}));
+  await page.click('.acct-plan [data-acct-act="checkout"]');await page.waitForSelector('.acct-plan [data-acct-act="portal"]');
+  assert.match(await page.textContent('.acct-plan h2'),/Masz już aktywną subskrypcję/);assert.equal(await page.locator('.acct-plan [data-acct-act="checkout"]').count(),0,'no second checkout button');
+  assert.equal(await page.evaluate(()=>document.activeElement?.dataset?.acctAct),'portal','focus on the portal button');
+  const portalAsked=page.waitForRequest(r=>new URL(r.url()).searchParams.get('route')==='billing-portal');await page.click('.acct-plan [data-acct-act="portal"]');await portalAsked;
+  await page.unroute(isCheckout);
+  await ctx.close();
+
   // Staff password on #profile while someone else saves (final review F3): account.password reads no workspace data, so a revision
   // conflict is retried once with the fresh revision; a conflict that persists is shown in the form, with what was typed kept.
   const pwEmail='e2e.pw.'+Date.now()+'@example.test';

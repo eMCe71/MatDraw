@@ -132,7 +132,7 @@ const languages=()=>{try{return navigator.languages?.length?[...navigator.langua
 const message=error=>translateMessage(String(error?.message||error||''));
 const workspace=()=>{try{return ui()?.getWorkspace?.()||null;}catch{return null;}};
 const newSignup=()=>({step:1,email:'',password:'',website:'',invite:null,begin:null,beginError:'',f:newFields(null,languages()),avatar:null,error:''});
-const S={signup:null,draft:null,draftFor:null,ret:null,payment:'',del:null};
+const S={signup:null,draft:null,draftFor:null,ret:null,payment:'',del:null,portal:''};
 S.signup=newSignup();
 const sportLabel=slug=>SPORTS.find(s=>s[0]===slug)?.[1]||slug;
 const initials=f=>((f?.first||'').trim()[0]||'')+((f?.last||'').trim()[0]||'');
@@ -264,6 +264,9 @@ function leaveSignup(){
 function planView(m,{signup=false}={}){
  const b=m.billing||{},a=m.access||{},cur=b.currency,amount=cur?b.amounts?.[cur]:null,back=signup?h`<button type="button" class="acct-link acct-later" data-acct-act="later">${T('Później · wróć do czatu')}</button>`:'';
  if(!b.enabled)return h`<section class="acct-plan panel"><p class="acct-lead">${T('Płatności są wyłączone.')} ${T('Masz pełny dostęp do społeczności MatBravo.')}</p>${back}</section>`;
+ // billing-checkout answered 409 {portal:true}: Stripe still has a subscription for this account (e.g. past_due after the grace
+ // days, or a stale cache). A second Checkout is refused, so the way forward is the Customer Portal (update the card, see the state).
+ if(S.portal&&!a.full)return h`<section class="acct-plan panel"><h2>${S.portal}</h2><p class="acct-lead">${T('Zaktualizuj kartę lub sprawdź stan subskrypcji w panelu Stripe.')}</p><div class="form-error" role="alert"></div><div class="acct-actions"><button type="button" class="btn primary" data-acct-act="portal">${icon('external')} ${T('Zarządzaj subskrypcją')}</button></div><p class="acct-fine">${T('Otworzy się bezpieczna strona Stripe.')}</p>${back}</section>`;
  if(a.full&&['active','ending','past_due'].includes(a.state))return h`<section class="acct-plan panel"><h2>${T('Masz już aktywną subskrypcję.')}</h2><p class="acct-lead">${subscriptionState(m).text}</p><div class="form-error" role="alert"></div><div class="acct-actions"><button type="button" class="btn primary" data-acct-act="portal">${icon('external')} ${T('Zarządzaj subskrypcją')}</button></div><p class="acct-fine">${T('Otworzy się bezpieczna strona Stripe.')}</p>${back}</section>`;
  if(a.full&&(a.state!=='free'||!a.until)&&a.state!=='grace')return h`<section class="acct-plan panel"><h2>${T('Masz pełny dostęp.')}</h2><p class="acct-lead">${subscriptionState(m).text}</p>${back}</section>`;
  if(!cur||!amount)return h`<section class="acct-plan panel"><h2>${T('Wybierz kraj w profilu, aby wybrać plan.')}</h2><p class="acct-lead">${T('Cena i waluta zależą od kraju: Polska płaci w złotych, inne kraje w dolarach.')}</p><div class="acct-actions"><button type="button" class="btn primary" data-acct-act="go-profile">${T('Uzupełnij profil')}</button></div>${back}</section>`;
@@ -332,7 +335,7 @@ async function openStripe(button,route,origin){
   button.disabled=false;button.replaceChildren(...label);
   if(error?.status===401||error?.status===402){ui()?.handleError?.(error);return;}
   if(box)box.textContent=message(error);else ui()?.toast?.(message(error));
-  if(error?.data?.portal){await loadMe({force:true});repaint();}
+  if(error?.data?.portal&&route==='billing-checkout'){S.portal=message(error);await loadMe({force:true});repaint();document.querySelector('.acct-plan [data-acct-act="portal"]')?.focus();}
  }
 }
 
@@ -565,13 +568,13 @@ function wire(){
  document.addEventListener('click',onClick);document.addEventListener('keydown',onKey);
  // A finished return screen stays while the plan page is re-rendered (language) and is dropped once another page is shown.
  registry.on('painted',({view,page}={})=>{
-  if(view==='app'&&page!=='billing'){S.payment='';if(S.ret&&!S.ret.running)S.ret=null;}
+  if(view==='app'&&page!=='billing'){S.payment='';if(S.ret&&!S.ret.running)S.ret=null;if(page!=='signup')S.portal='';}
   // Shared devices (plan §8.3 point 8): the typed e-mail, password and profile of a sign-up that was left (Back, logo, another hash)
   // are forgotten, and so is an unsaved profile draft once another page is shown (a language re-render keeps the same page).
   if(!(view==='public'&&page==='signup'))S.signup=newSignup();
   if(!(view==='app'&&page==='profile')){S.draft=null;S.draftFor=null;}
  });
- registry.on('logout',()=>{S.signup=newSignup();S.draft=null;S.draftFor=null;S.ret=null;S.del=null;S.payment='';});
+ registry.on('logout',()=>{S.signup=newSignup();S.draft=null;S.draftFor=null;S.ret=null;S.del=null;S.payment='';S.portal='';});
  // Back/forward cache: a page left for another site keeps its DOM and no 'painted' follows its return, so the typed sign-up
  // and the passwords are dropped before it is stored, and a sign-up shown again starts over (§8.3 point 8).
  addEventListener('pagehide',forget);
