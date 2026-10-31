@@ -202,12 +202,14 @@ final class Members {
   }
   $q=$pdo->prepare('SELECT public_id FROM user_profiles WHERE user_id=?');$q->execute([$userId]);$publicId=$q->fetchColumn();$q->closeCursor();
   $mutes=self::tableExists($pdo,'chat_mutes');$now=time();
-  self::tx($pdo,function()use($pdo,$userId,$actor,$action,$redact,$mutes,$now){
+  // Hashed before the transaction: tombstoneUser holds chat_channels rows FOR UPDATE until commit, and bcrypt/Argon2 must not stretch that.
+  $dead=password_hash(bin2hex(random_bytes(24)),PASSWORD_DEFAULT);
+  self::tx($pdo,function()use($pdo,$userId,$actor,$action,$redact,$mutes,$now,$dead){
    // Chat::tombstoneUser joins this transaction (it begins its own only outside one): messages and account go together.
    if(class_exists('MatDraw\\Chat')&&method_exists('MatDraw\\Chat','tombstoneUser'))Chat::tombstoneUser($pdo,$userId);
    if($mutes)$pdo->prepare('DELETE FROM chat_mutes WHERE user_id=?')->execute([$userId]);
    $pdo->prepare('DELETE FROM user_profiles WHERE user_id=?')->execute([$userId]);
-   $pdo->prepare("UPDATE users SET email=?,password_hash=?,active=0,auth_version=auth_version+1 WHERE id=? AND role='member'")->execute(['deleted+'.$userId.'@invalid.matbravo',password_hash(bin2hex(random_bytes(24)),PASSWORD_DEFAULT),$userId]);
+   $pdo->prepare("UPDATE users SET email=?,password_hash=?,active=0,auth_version=auth_version+1 WHERE id=? AND role='member'")->execute(['deleted+'.$userId.'@invalid.matbravo',$dead,$userId]);
    $pdo->prepare('INSERT INTO billing_accounts (user_id,stripe_redact_pending,deleted_at,created_at,updated_at) VALUES (?,?,?,?,?) ON DUPLICATE KEY UPDATE billing_exempt=0,exempt_reason=NULL,exempt_by=NULL,exempt_at=NULL,exempt_until=NULL,pending_checkout_id=NULL,pending_checkout_expires=NULL,next_sync_at=NULL,stripe_redact_pending=GREATEST(stripe_redact_pending,?),deleted_at=?,updated_at=?')->execute([$userId,$redact,$now,$now,$now,$redact,$now,$now]);
    self::audit($pdo,$actor,$action,$userId);
   });
