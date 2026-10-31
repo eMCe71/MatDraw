@@ -56,10 +56,11 @@ final class Billing {
   * billing-checkout (§6.2): 409 {portal:true} with an ongoing subscription (active, trialing, past_due and incomplete:
   * an async payment still running would charge twice next to a second subscription); 422 without a country; an open
   * session of the same currency that expires in more than 5 minutes is reused; otherwise Stripe's view of a returning
-  * customer comes first (BillingSync::syncUser: one list call): an ongoing subscription the cache did not know yet (a
-  * stale 'incomplete', a session paid in another tab) refuses the checkout, and a customer deleted in the Dashboard or
-  * whose Customer.currency (fixed by its first invoice, 03 §3.3) differs from the plan currency is replaced before the
-  * session is created. Then Customer (once) and a new subscription session. Returns {url} on checkout.stripe.com.
+  * customer comes first (BillingSync::syncUser: one list call; while another sync holds the claim, the same read without
+  * writing, BillingSync::fetchCustomer): an ongoing subscription the cache did not know yet (a stale 'incomplete', a
+  * session paid in another tab) refuses the checkout, and a customer deleted in the Dashboard or whose Customer.currency
+  * (fixed by its first invoice, 03 §3.3) differs from the plan currency is replaced before the session is created.
+  * Then Customer (once) and a new subscription session. Returns {url} on checkout.stripe.com.
   */
  public static function checkout(PDO $pdo,array $c,array $u,mixed $lang=null):array {
   $row=Access::row($pdo,$u['id']);$now=time();
@@ -79,6 +80,14 @@ final class Billing {
   $replace=false;
   if($known){
    $r=BillingSync::syncUser($pdo,$c,$u['id'],$client,$u['id']);$row=$r['row']??$row;$cus=$r['customer']??null;
+   if($r['outcome']==='busy'){
+    // Another sync holds the claim (the lazy sync after me, a double click) and only the cached row came back: Stripe is
+    // read here without writing, so a subscription the cache does not know yet still refuses the checkout and the
+    // Customer.currency check below still has the customer.
+    [$subs,$cus]=BillingSync::fetchCustomer($client,(string)$row['stripe_customer_id']);
+    if(BillingSync::ongoingIds($c,$subs))self::locked();
+    if(!empty($cus['deleted']))$r['outcome']='customer-deleted';
+   }
    if(in_array(Access::subStatus($row,$c),BillingSync::ONGOING,true))self::locked();
    $currency=self::currencyFor($pdo,$c,$row,$country,$u['id'])??$currency;
    if(!isset($c['stripe_prices'][$currency]))throw new StripeError('No price for '.$currency,0,'config');

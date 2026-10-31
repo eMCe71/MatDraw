@@ -12,7 +12,8 @@
 //   pay {sessionId, status='active', invoice='paid', created?}      completes a Checkout Session with a new subscription
 //   subscription {id, status?, cancel_at_period_end?, current_period_start?, current_period_end?, invoice?, created?, event?}
 //   create-subscription {customer, status='active', created?, lookup_key='matbravo_monthly_pln', metadata?, invoice?}
-//   expire-session {sessionId}   event {type, object}   bulk-events {type, objects} → ids   events {}   customer {id}
+//   expire-session {sessionId}   event {type, object, created?}   bulk-events {type, objects} → ids   events {}   customer {id}
+//   (event with an earlier created: an event Stripe lists late, behind events already read)
 //   delete-customer {id} (as in the Dashboard)
 //   A customer keeps the currency of its first paid session (Customer.currency) and Checkout in another currency answers
 //   400 (03 §3.3); hide-currency {id} clears the visible Customer.currency but keeps the refusal (the message fallback).
@@ -65,7 +66,7 @@ function page(url,items,q){// newest first; starting_after or ending_before; lim
 const newestFirst=(a,b)=>(b.created-a.created)||(b._seq-a._seq);
 const strip=o=>{if(o&&typeof o==='object'){if(Array.isArray(o))return o.map(strip);const r={};for(const [k,v] of Object.entries(o))if(!k.startsWith('_'))r[k]=strip(v);return r;}return o;};
 
-function event(type,object){const e={id:'evt_'+rand(),object:'event',api_version:'2026-09-30.endive',type,livemode:false,created:now(),data:{object:strip(clone(object))},_seq:++S.seq};S.events.push(e);return e;}
+function event(type,object,created){const e={id:'evt_'+rand(),object:'event',api_version:'2026-09-30.endive',type,livemode:false,created:created===undefined?now():Number(created),data:{object:strip(clone(object))},_seq:++S.seq};S.events.push(e);return e;}
 function customerView(id){const c=S.customers[id];if(!c)return id;return c.deleted?{id,object:'customer',deleted:true}:strip(clone(c));}
 function invoice(sub,status){const id='in_'+rand();S.invoices[id]={id,object:'invoice',status,customer:sub.customer,currency:sub.currency,parent:{type:'subscription_details',subscription_details:{subscription:sub.id,metadata:sub.metadata}},livemode:false,created:now()};return S.invoices[id];}
 function subView(sub,expand=[]){
@@ -149,7 +150,7 @@ function api(m,parts,q,b){
    if(m==='POST'&&sub){const c=S.portal[sub];if(!c)throw missing('billing_portal.configuration',sub);Object.assign(c,b);return c;}
   }
  }
- if(res==='events'&&m==='GET'){let all=[...S.events].sort(newestFirst);const gte=q.created?.gte;if(gte!==undefined)all=all.filter(e=>e.created>=Number(gte));const types=[].concat(q.types||[]);if(types.length)all=all.filter(e=>types.includes(e.type));const p=page('/v1/events',all,q);p.data=strip(p.data);return p;}
+ if(res==='events'&&m==='GET'){let all=[...S.events].sort(newestFirst);const gte=q.created?.gte,lte=q.created?.lte;if(gte!==undefined)all=all.filter(e=>e.created>=Number(gte));if(lte!==undefined)all=all.filter(e=>e.created<=Number(lte));const types=[].concat(q.types||[]);if(types.length)all=all.filter(e=>types.includes(e.type));const p=page('/v1/events',all,q);p.data=strip(p.data);return p;}
  if(res==='webhook_endpoints'){
   if(m==='GET'&&!id)return page('/v1/webhook_endpoints',Object.values(S.webhooks).map(w=>({...w,secret:undefined})),q);
   if(m==='POST'&&!id){const w={id:'we_'+rand(),object:'webhook_endpoint',url:b.url,enabled_events:[].concat(b.enabled_events||[]),api_version:b.api_version||null,description:b.description||null,metadata:b.metadata||{},status:'enabled',livemode:false};S.webhooks[w.id]=w;return {...w,secret:'whsec_'+rand(32)};}
@@ -177,7 +178,7 @@ function control(b){
    const sub=newSubscription({customer:b.customer,priceId:p.id,status:b.status||'active',created:b.created,metadata:b.metadata,invoiceStatus:b.invoice||'paid',start:b.current_period_start,end:b.current_period_end});
    if(b.status==='canceled')setSub(sub,{status:'canceled'});if(b.event)event('customer.subscription.created',sub);return subView(sub,['latest_invoice']);}
   case 'expire-session':{const s=S.sessions[b.sessionId];if(!s)throw missing('checkout.session',b.sessionId);s.status='expired';event('checkout.session.expired',s);return sessionView(s);}
-  case 'event':return strip(event(b.type,b.object));
+  case 'event':return strip(event(b.type,b.object,b.created));
   case 'bulk-events':return [].concat(b.objects||[]).map(o=>event(b.type,o).id);
   case 'hide-currency':{const c=S.customers[b.id];if(!c)throw missing('customer',b.id);c.currency=null;return customerView(b.id);}
   case 'events':return strip([...S.events].sort(newestFirst));

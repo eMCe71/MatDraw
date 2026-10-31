@@ -5,7 +5,8 @@
 // account or event after about 2 s of work (BillingSync::JOB_BUDGET; at least one per run).
 //   billing-due    (10 min) up to 5 accounts: retries of Stripe customer deletions (stripe_redact_pending, at most 2
 //                  slots) first, then accounts whose next_sync_at passed;
-//   billing-events (15 min) /v1/events forward from the cursor in pages of 20, then stripe_events older than 90 days
+//   billing-events (15 min) /v1/events forward from the cursor in pages of 20 and, after a complete pass, the 120 s
+//                  up to the cursor once more (events Stripe lists late); then stripe_events older than 90 days
 //                  are pruned.
 declare(strict_types=1);
 use MatDraw\BillingSync;

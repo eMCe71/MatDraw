@@ -8,10 +8,11 @@
 // grandfathered scope; webhook (valid, duplicate, bad signature, stale timestamp, livemode, bad JSON, unknown type,
 // processing failure → 500 then retry, 404 without secrets); /v1/events pull without double processing (stripe-sync.php)
 // and forward from the cursor (more than one page, time budget, one fetch per object, a refused event skipped, 429 stops,
-// unknown cursor); subscription precedence (reconcile and a late event about an old canceled subscription); Admin tools
-// with audit (exempt + warnLive, require, cancelAtPeriodEnd, currency, resync); no second subscription next to an
-// incomplete one or a session paid elsewhere, and 'sub.multiple' for two ongoing ones; two parallel syncs = one Stripe
-// call; circuit breaker after a network error; account deletion (DELETE /v1/customers, failure → stripe_redact_pending →
+// unknown cursor, an event listed late behind the cursor and the 120 s margin); subscription precedence (reconcile and a
+// late event about an old canceled subscription); Admin tools with audit (exempt + warnLive, require, cancelAtPeriodEnd,
+// currency, resync); no second subscription next to an incomplete one or a session paid elsewhere (also while another
+// sync holds the claim), and 'sub.multiple' for two ongoing ones; two parallel syncs = one Stripe call; circuit breaker
+// after a network error; account deletion (DELETE /v1/customers, failure → stripe_redact_pending →
 // billing-due retry, tombstone) and refused deletions that cannot starve billing-due; e-mail pushed to Stripe and
 // corrected by sync; 503 when Stripe fails, transparent retry of one 500; a new customer for another currency
 // (Customer.currency first, Stripe's refusal as the fallback); and every request the app sent carried the pinned
@@ -235,7 +236,7 @@ test('events pull: an event received by webhook is not processed again by stripe
  await stub({op:'subscription',id:p.sub,status:'active',current_period_start:now(),invoice:'paid'});
  const e2=(await stub({op:'events'})).find(e=>e.data.object.id===p.sub&&e.id!==e1.id&&e.type==='customer.subscription.updated');
  const t=Date.now();const out=cli('stripe-sync.php',['--events']);assert.equal(out.code,0,out.err+out.out);
- const counts=out.out.match(/^events: events=(\d+) processed=(\d+) deduped=(\d+) duplicates=(\d+) skipped=0 failed=0 complete=yes$/m);assert.ok(counts,out.out);assert.ok(Number(counts[4])>=1,'the webhook event counts as a duplicate');
+ const counts=out.out.match(/^events: events=(\d+) processed=(\d+) deduped=(\d+) duplicates=(\d+) skipped=0 failed=0 late=0 complete=yes$/m);assert.ok(counts,out.out);assert.ok(Number(counts[4])>=1,'the webhook event counts as a duplicate');
  const events=fixture('stripe-events');
  assert.deepEqual([events.find(x=>x.event_id===e1.id).source,events.find(x=>x.event_id===e1.id).attempts],['webhook',1]);assert.equal(events.find(x=>x.event_id===e2.id).source,'pull');
  // The state is fetched again (the session with its subscription expanded, oldest event first); the later events about
@@ -249,6 +250,31 @@ test('events pull: an event received by webhook is not processed again by stripe
  assert.ok(fixture('billing-kv',{})['events_cursor:test'],'cursor stored');
 });
 
+test('events pull: an event listed late behind the cursor is handled through the 120 s margin, the cursor stays',{skip},async()=>{
+ const p=await paidMember('late');assert.equal(run('events',{pages:50}).complete,true);
+ const cursor=()=>JSON.parse(fixture('billing-kv',{})['events_cursor:test']);const at=cursor();
+ // The subscription changes in Stripe; its event was created 30 s before the cursor event but shows up in the list only
+ // now, so ending_before=<cursor> never returns it (report 03 §8.5).
+ await stub({op:'subscription',id:p.sub,status:'past_due',event:false});
+ const late=await stub({op:'event',type:'customer.subscription.updated',object:{id:p.sub,object:'subscription',customer:p.customer},created:at.created-30});
+ let t=Date.now();let r=run('events',{limit:20});
+ assert.deepEqual([r.events,r.late,r.processed,r.failed,r.complete],[0,1,1,0,true],JSON.stringify(r));
+ assert.equal(row(p.id).sub_status,'past_due');assert.deepEqual(cursor(),at,'the cursor stays on the newest event');
+ const reads=await since(t,'GET',/^\/v1\/events$/);
+ assert.ok(reads.length>=2);// the forward read, then the margin (pages of 100 when earlier tests left many events there)
+ assert.deepEqual(reads.map(x=>[x.query.ending_before??null,x.query.created??null,x.query.limit]),reads.map((x,i)=>i?[null,{gte:String(at.created-120),lte:String(at.created)},'100']:[at.id,null,'20']));
+ assert.equal(fixture('stripe-events').find(x=>x.event_id===late.id).source,'pull');
+ // Handled once: the next run finds nothing behind the cursor and fetches nothing.
+ t=Date.now();r=run('events',{});assert.deepEqual([r.late,r.processed,r.complete],[0,0,true]);
+ assert.deepEqual(await since(t,'GET',new RegExp('^/v1/subscriptions/'+p.sub+'$')),[]);
+ // A late event that cannot be fetched now (429) leaves the run incomplete and is retried by the next one.
+ await stub({op:'subscription',id:p.sub,status:'active',invoice:'paid',event:false});
+ const again=await stub({op:'event',type:'customer.subscription.updated',object:{id:p.sub,object:'subscription',customer:p.customer},created:at.created-10});
+ await stub({op:'fault',method:'GET',path:'^/v1/subscriptions/'+p.sub+'$',status:429,type:'rate_limit_error',times:1});
+ r=run('events',{background:true});assert.deepEqual([r.late,r.failed,r.complete],[1,1,false]);assert.equal(row(p.id).sub_status,'past_due');
+ r=run('events',{});assert.deepEqual([r.late,r.processed,r.complete],[1,1,true]);assert.equal(row(p.id).sub_status,'active');
+ assert.ok(fixture('stripe-events').find(x=>x.event_id===again.id).processed_at);assert.deepEqual(cursor(),at);
+});
 test('events pull walks forward from the cursor: more than a page, time budget, one fetch per object, a refused event is skipped',{skip},async()=>{
  const p=await paidMember('forward');
  assert.equal(run('events',{pages:50}).complete,true,'caught up: the cursor is the newest event');
@@ -261,8 +287,12 @@ test('events pull walks forward from the cursor: more than a page, time budget, 
  r=run('events',{pages:1});assert.deepEqual([r.events,r.processed,r.complete],[50,50,true]);assert.equal(cursor().id,ids[149]);
  const done=new Set(fixture('stripe-events').filter(x=>x.processed_at).map(x=>x.event_id));
  assert.deepEqual(ids.filter(id=>!done.has(id)),[],'every one of the 150 events was handled');
- const reads=await since(t,'GET',/^\/v1\/events$/);assert.deepEqual(reads.map(x=>x.query.ending_before),[start,ids[99]]);
- assert.ok(reads.every(x=>!x.query.created&&x.query.types.length===15&&x.query.limit==='100'));
+ const reads=await since(t,'GET',/^\/v1\/events$/),fwd=reads.filter(x=>x.query.ending_before);assert.deepEqual(fwd.map(x=>x.query.ending_before),[start,ids[99]]);
+ assert.ok(fwd.every(x=>!x.query.created&&x.query.types.length===15&&x.query.limit==='100'));
+ // Only the complete run reads the 120 s up to the cursor once more (nothing late there): more than 100 events, so pages.
+ const margin=reads.filter(x=>!x.query.ending_before),c2=cursor().created;
+ assert.ok(margin.length>=2&&margin.length<=3,'pages of 100, at most 3: '+margin.length);
+ assert.deepEqual(margin.map(x=>[x.query.created.gte,x.query.created.lte,x.query.limit,x.query.types.length,Boolean(x.query.starting_after)]),margin.map((x,i)=>[String(c2-120),String(c2),'100',15,i>0]));
  // A time budget: one event per run at least, and the cursor moves exactly past what was handled.
  const three=await stub({op:'bulk-events',type:'customer.subscription.updated',objects:objects.slice(0,3).map(o=>({...o,id:o.id+'b'}))});
  r=run('events',{budget:0.000001});assert.deepEqual([r.processed,r.complete],[1,false]);assert.equal(cursor().id,three[0]);
@@ -292,7 +322,7 @@ test('events pull walks forward from the cursor: more than a page, time budget, 
  assert.equal(cursor().id,bad[1],'back on the newest event');
  // The job: background client, pages of 20, the counters in job_runs.
  fixture('jobs-reset');const cron=cli('cron.php',['--job=billing-events']);assert.equal(cron.code,0,cron.err);
- assert.match(cron.out,/^billing-events: events=0 processed=0 deduped=0 duplicates=0 skipped=0 failed=0 complete=yes pruned=\d+$/m);
+ assert.match(cron.out,/^billing-events: events=0 processed=0 deduped=0 duplicates=0 skipped=0 failed=0 late=0 complete=yes pruned=\d+$/m);
 });
 test('subscription precedence: reconcile keeps the active B over an old canceled A; a late event about A changes nothing',{skip},async()=>{
  const p=await paidMember('prec');
@@ -483,6 +513,27 @@ test('checkout: no second subscription next to an incomplete one or a session pa
  const det=await admin.req('admin-billing&userId='+m.id);assert.ok(det.data.audit.some(a=>a.action==='sub.multiple'&&a.detail===multi[0].detail));
  // The Admin's free-account warning covers every ongoing state (an incomplete payment may still go through).
  const ex=await admin.req('admin-billing-action',{action:'exempt',userId:m.id,reason:'Test'});assert.equal(ex.data.warnLive,true);
+});
+
+test('checkout while another sync holds the claim: Stripe is read without writing, so the lock and Customer.currency still apply',{skip},async()=>{
+ const keys=await prices();
+ // A session paid in another tab, unknown to the cache, while a lazy sync (or a double click) holds the claim.
+ const m=member('busy'),c=await signIn(m.email);const sessionId=sessionOf((await c.req('billing-checkout',{})).data.url);
+ const paid=await stub({op:'pay',sessionId});const held=now();fixture('billing',{userId:m.id,sync_claimed_at:held});
+ let t=Date.now();let r=await c.req('billing-checkout',{});assert.deepEqual([r.status,r.data.portal],[409,true],JSON.stringify(r.data));
+ assert.equal((await since(t,'GET',/^\/v1\/subscriptions$/))[0].query.customer,paid.customer);assert.deepEqual(await since(t,'POST'),[]);
+ let rw=row(m.id);assert.deepEqual([rw.sub_status,rw.stripe_subscription_id,Number(rw.sync_claimed_at)],['none',null,held],'nothing written, the claim untouched');
+ // Once the claim is free the same click syncs as usual.
+ fixture('billing',{userId:m.id,sync_claimed_at:0});r=await c.req('billing-checkout',{});assert.equal(r.status,409);
+ rw=row(m.id);assert.deepEqual([rw.sub_status,rw.stripe_subscription_id],['active',paid.id]);
+ // Customer.currency (usd) differs from the plan (pln) while the claim is held: a new customer before the one session.
+ const p=await paidMember('busy-cur','DE');await stub({op:'subscription',id:p.sub,status:'canceled'});assert.equal(run('sync',{userId:p.id}).sub_status,'canceled');
+ fixture('billing-country',{userId:p.id,country:'PL'});fixture('billing',{userId:p.id,sync_claimed_at:now()});
+ t=Date.now();r=await p.c.req('billing-checkout',{});assert.equal(r.status,200,JSON.stringify(r.data));
+ const sessions=await since(t,'POST',/^\/v1\/checkout\/sessions$/),swapped=row(p.id);
+ assert.deepEqual(sessions.map(x=>[x.body.customer,x.body.line_items[0].price]),[[swapped.stripe_customer_id,keys.matbravo_monthly_pln]],'one session, no refusal first');
+ assert.notEqual(swapped.stripe_customer_id,p.customer);assert.equal(swapped.customer_seq,1);
+ assert.ok(audit(p.id,'customer.replace').some(a=>a.detail===`${p.customer} -> ${swapped.stripe_customer_id}`));
 });
 
 test('billing-due: refused customer deletions take at most half of the slots and then wait; due accounts are still synced',{skip},async()=>{
