@@ -145,6 +145,18 @@ bash ~/matdraw/bin/deploy-remote.sh activate ~/matdraw ~/domains/matbravo.com/pu
 
 Rollback zmienia tylko kod. Baza danych pozostaje bez zmian, więc przed aktualizacją, która zmienia schemat, wykonaj kopię bazy (phpMyAdmin → Eksport lub DirectAdmin → MySQL Management → Backup).
 
+## Publiczny terminarz i podgląd gościa
+
+Ekran logowania pokazuje „Najbliższe turnieje”. Kliknięcie turnieju otwiera okno reklamy; dopiero jego zamknięcie otwiera podgląd turnieju tylko do odczytu, bez logowania. Ta funkcja nie wymaga zmian w `config.php`, w bazie ani w `.htaccess` — wdraża się jak zwykle.
+
+- Publiczne adresy (tylko GET, bez sesji, ciasteczka i tokenu CSRF; odpowiedź może być buforowana 60 s):
+  - `https://matbravo.com/api/index.php?route=public` — do 6 najbliższych turniejów: id, nazwa, data, miasto, status.
+  - `https://matbravo.com/api/index.php?route=public-tournament&id=ID` — podgląd jednego turnieju.
+- Gość widzi tylko turnieje o statusie innym niż „Roboczy” z datą od dziś (czas Europe/Warsaw): nazwę, datę, miasto, status, liczbę zgłoszeń, klubów, kategorii i drabinek, listę kategorii oraz zapisane drabinki, w których zawodnik jest pokazany **wyłącznie inicjałami i nazwą klubu** (np. „J. K. · TKD Warszawa”). Inicjały tworzy serwer — pełne imię i nazwisko nigdy nie trafia do przeglądarki gościa. Gość nie widzi dat urodzenia, wieku, wagi, wzrostu, stopni, obecności, e-maili, kont ani historii zmian.
+- Aby ukryć turniej przed gośćmi, ustaw mu status „Roboczy”. Po dacie turnieju znika z terminarza i podglądu automatycznie.
+- Sprawdzenie po wdrożeniu (z własnego komputera albo przez SSH; serwery GitHub dostają od hostingu 403): `curl -s 'https://matbravo.com/api/index.php?route=public'` powinno zwrócić JSON `{"tournaments":[…]}` bez nagłówka `Set-Cookie`.
+- Treść reklamy i zachęty do zalogowania zmienia się w `dist/promo.js` (obiekty `AD` i `ACCESS`, tekst polski), a angielskie wersje w `dist/i18n-en.js`. Potem `node --test tests/i18n.test.mjs`. Marka w przykładowej reklamie (KYORUVO) jest fikcyjna. Dozwolone są tylko pliki aplikacji (CSP): bez zewnętrznych obrazków, linków i skryptów śledzących.
+
 ## Ważne cechy hostingu AfterMarket (web9)
 
 - **HTTP 429 bez własnych reguł `RewriteEngine`.** W katalogu domowym konta jest plik hostingu `~/.htaccess` (właściciel `root`, tylko do odczytu), którego reguły obejmują wszystkie domeny konta. Domena, której `public_html/.htaccess` nie włącza własnych reguł `RewriteEngine On`, odpowiada na każde żądanie `429 Too Many Requests` (pusta treść), także ze stroną domyślną DirectAdmin. Tak było 30–31.10.2026 z `matdraw.mdcse.com`, `test429.mdcse.com` i `matbravo.com`. `.htaccess` aplikacji ma własne reguły (przekierowanie `http` i `www` na `https://matbravo.com`), więc strona działa, tak jak `mdcse.com`. Nie usuwaj tych reguł z `backend/public/.htaccess`.
