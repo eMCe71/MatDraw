@@ -25,8 +25,16 @@ export class SafeHtml{
 const ESC={'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;','`':'&#96;'};
 export const escapeHtml=value=>String(value??'').replace(/[&<>"'`]/g,c=>ESC[c]);
 const part=value=>value instanceof SafeHtml?value.html:Array.isArray(value)?value.map(part).join(''):value==null||value===false?'':escapeHtml(value);
-/** Tagged template: every ${value} is escaped (null/undefined/false give ''), SafeHtml values are kept, arrays are joined. */
-export function h(strings,...values){let out=strings[0];for(let i=0;i<values.length;i++)out+=part(values[i])+strings[i+1];return new SafeHtml(out,TOKEN);}
+// The value of an aria-* attribute (aria-pressed="${x}"): ARIA states need the words true/false, an empty value means "undefined".
+const ARIA_VALUE=/\saria-[a-z]+=["']$/i;
+/** Tagged template: every ${value} is escaped (null/undefined/false give ''), SafeHtml values are kept, arrays are joined.
+ * A boolean that is the whole quoted value of an aria-* attribute gives "true"/"false" (aria-selected="${on}"); anywhere else
+ * false still gives '' (so ${cond&&h`…`} and real boolean attributes such as ${x?h` disabled`:''} keep working). */
+export function h(strings,...values){
+ let out=strings[0];
+ for(let i=0;i<values.length;i++){const v=values[i];out+=(typeof v==='boolean'&&ARIA_VALUE.test(strings[i])&&/^["']/.test(strings[i+1])?String(v):part(v))+strings[i+1];}
+ return new SafeHtml(out,TOKEN);
+}
 /** Wraps HTML that app.js built with its own escaping (shell, icon, mascot). Feature modules must not call it (tests/xss-scan). */
 export const trustedHtml=html=>new SafeHtml(html,TOKEN);
 /** The only place that writes innerHTML for feature modules. */
