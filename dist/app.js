@@ -5,8 +5,12 @@ import {ROLES,STATUSES,ageAt,managesTournament,managesProfile,canEnter} from './
 import {t as T,LANGUAGES,STORAGE_KEY as LANGUAGE_KEY,getLanguage,setLanguage,onLanguageChange,locale,formatNumber,gradeName,gradeLabel,ruleLabel,ruleText,translateMessage} from './i18n.js';
 import {warsawToday} from './guest-view.js';
 import {AD,ACCESS} from './promo.js';
+// Feature modules register pages, actions and menu items in the registry (plan §8); app.js keeps one hook per extension point.
+import {registry,h,trustedHtml,SafeHtml} from './registry.js';
+import {purgeSession} from './me.js';
+import './chat-boot.js';import './moderation-boot.js';import './account-boot.js';import './members-boot.js';import './pwa.js';
 const isDemo=Client.isDemo;
-const eventName=key=>ruleLabel(EVENTS[key]),roleName=role=>T(ROLES[role]),statusName=status=>T(STATUSES[status]);
+const eventName=key=>ruleLabel(EVENTS[key]),roleName=role=>ROLES[role]?T(ROLES[role]):T('Członek'),statusName=status=>T(STATUSES[status]);
 const plural=(n,one,few,many)=>n===1?one:n%10>=2&&n%10<=4&&(n%100<12||n%100>14)?few:many;
 let workspace=null,state={tournament:{},athletes:[],draws:{},activity:[]},saving=false;
 let activeId=sessionStorage.getItem('matdraw.activeTournament');
@@ -31,17 +35,33 @@ const mascot=(pose,cls)=>`<img class="mascot ${cls}" src="./brand/matbravo-${pos
 const emptyMascot=()=>mascot('avatar','empty-mascot');
 const footer=()=>`<footer class="footer"><span>MatBravo <span class="footer-dot">·</span> ${T('Turniej pod kontrolą.')}</span><a class="creator" href="https://mdcse.com" target="_blank" rel="noopener noreferrer" aria-label="${T('Wykonano przez MEDUCASE — przejdź do mdcse.com')}"><span>${T('Wykonano przez')}</span><img src="./assets/meducase.png" alt="MEDUCASE" width="150" height="48"></a></footer>`;
 const langSwitch=()=>`<div class="lang-switch" role="group" aria-label="Język / Language">${[['pl','PL','Polski'],['en','EN','English']].map(([code,label,name])=>`<button type="button" class="lang-option" data-set-lang="${code}" lang="${code}" aria-pressed="${getLanguage()===code}" aria-label="${name}" title="${name}">${label}</button>`).join('')}</div>`;
+// Helpers for feature modules (registry.use('ui')). HTML helpers return SafeHtml and escape plain strings (plan §5.9).
+const safeHtml=value=>value instanceof SafeHtml?value:h`${value}`;
+const ATTRIBUTE=/^(?:data-[a-z0-9-]+|aria-[a-z-]+|id|type|title|form|name|value|disabled|hidden)$/;
+registry.provide('ui',{T,esc,
+ icon:(name,cls='')=>trustedHtml(icon(name,cls)),
+ button:(label,action,cls='secondary',attrs={})=>h`<button class="btn ${cls}" data-action="${action}"${Object.entries(attrs||{}).filter(([k,v])=>ATTRIBUTE.test(k)&&v!=null&&v!==false).map(([k,v])=>h` ${k}="${v===true?'':v}"`)}>${label}</button>`,
+ badge:(text,type='neutral')=>h`<span class="badge ${type}">${text}</span>`,
+ modal:(title,body,actions='',large=false)=>modal(String(safeHtml(title)),String(safeHtml(body)),String(safeHtml(actions)),large),
+ closeModal:()=>closeModal(),toast:message=>toast(message),navigate:(page,params)=>navigate(page,params),
+ shell:(content,title,subtitle='',actions='')=>trustedHtml(shell(String(safeHtml(content)),String(safeHtml(title)),String(safeHtml(subtitle)),String(safeHtml(actions)))),
+ mascot:(pose,cls='')=>trustedHtml(mascot(pose,cls)),emptyMascot:()=>trustedHtml(emptyMascot()),
+ render:()=>render(),commit:(...args)=>commit(...args),handleError:(error,form)=>handleError(error,form),getWorkspace:()=>workspace,getState:()=>state,switchTournament:id=>switchTournament(id),clubName:id=>clubName(id)});
 function allCats(){return categories(state.athletes);}
 function selected(){const items=allCats().items;return items.find(c=>c.id===ui.category)||items[0];}
 function ensureDraw(c){return c?state.draws[c.id]||null:null;}
 function toast(message){const el=document.querySelector('#toast');el.textContent=message;el.classList.add('show');clearTimeout(toast.timer);toast.timer=setTimeout(()=>el.classList.remove('show'),4800);}
 function stats(){const s=fingerprintCounts(state.athletes);return `<div class="stats"><div class="stat"><span class="stat-icon">${icon('users')}</span><div><strong>${s.active}</strong><span>${T('Zawodników')}</span></div><small>${T('{n} klubów',{n:s.clubs})}</small></div><div class="stat"><span class="stat-icon">${icon('bracket')}</span><div><strong>${s.categories}</strong><span>${T('Kategorii')}</span></div><small>${T('{n} z min. 3 osobami',{n:s.categories-s.alerts})}</small></div><div class="stat"><span class="stat-icon">${icon('clipboard')}</span><div><strong>${state.athletes.filter(a=>a.presence==='present').length}<em>/${s.athletes}</em></strong><span>${T('Po kontroli')}</span></div><small>${T('Waga i obecność')}</small></div><button class="stat stat-alert" data-action="attention"><span class="stat-icon">${icon('alert')}</span><div><strong>${s.alerts+s.unassigned}</strong><span>${T('Wymagają uwagi')}</span></div><small>${T('Sprawdź')} ${icon('arrow')}</small></button></div>`;}
 function shell(content,title,subtitle,actions=''){
- const user=workspace.user,t=state.tournament,s=fingerprintCounts(state.athletes),club=workspace.clubs.find(c=>c.id===user.clubId);
- const globalNav=[['tournaments','trophy',T('Turnieje')],['database','users',T('Baza zawodników')],...(user.role==='admin'?[['accounts','shield',T('Konta i role')]]:[])];
- const eventNav=t.id?[...(user.role!=='club'?[['overview','grid',T('Przegląd turnieju')]]:[]),['athletes','users',user.role==='club'?T('Zgłoszenia klubu'):T('Zgłoszenia')],...(user.role!=='club'?[['checkin','clipboard',T('Kontrola startowa')],['draws','bracket',T('Drabinki')]]:[])]:[];
- const nav=items=>items.map(([page,i,name])=>`<button class="nav-link ${ui.page===page?'active':''}" data-page="${page}" ${ui.page===page?'aria-current="page"':''}>${icon(i)}<span>${name}</span>${page==='athletes'?'<span class="nav-count">'+s.athletes+'</span>':''}</button>`).join('');
- return `<div class="app-shell"><aside class="sidebar ${ui.menu?'open':''}" aria-label="${T('Nawigacja główna')}"><a href="#tournaments" class="brand" data-page="tournaments" aria-label="${T('MatBravo — turnieje')}">${logo}</a><nav>${nav(globalNav)}</nav><div class="nav-divider"></div><label class="sidebar-label" for="active-tournament">${T('AKTYWNY TURNIEJ')}</label><select id="active-tournament" class="tournament-switch" data-control="tournament">${workspace.tournaments.map(x=>`<option value="${x.id}" ${t.id===x.id?'selected':''}>${esc(x.name)}</option>`).join('')||'<option>'+T('Brak turniejów')+'</option>'}</select><nav>${nav(eventNav)}${t.id&&user.role!=='club'?`<button class="nav-link" data-action="project">${icon('screen')}<span>${T('Ekran hali')}</span>${icon('external','nav-end')}</button>`:''}</nav><div class="sidebar-bottom"><div class="demo-note"><span class="pulse-dot"></span><strong>${isDemo?T('Podgląd demonstracyjny'):T('Połączono z serwerem')}</strong><p>${isDemo?T('Dane i konta testowe w tej przeglądarce.'):T('Wspólna baza zawodników i turniejów.')}</p></div><button class="nav-link" data-page="rules">${icon('settings')}<span>${T('Zasady turnieju')}</span></button><button class="nav-link" data-page="architecture">${icon('info')}<span>${T('O projekcie')}</span></button><div class="profile"><span class="avatar organizer">${initials(club?.name||T('Klub'))}</span><div><strong>${esc(roleName(user.role))}</strong><span>${esc(club?.name||'')}</span></div></div><button class="nav-link compact-nav" data-action="my-account">${icon('settings')}<span>${T('Moje konto')}</span></button><button class="nav-link compact-nav" data-action="logout">${icon('left')}<span>${T('Wyloguj się')}</span></button></div></aside>${ui.menu?'<button class="nav-backdrop" data-action="menu" aria-label="'+T('Zamknij menu')+'"></button>':''}<div class="main-shell"><header class="topbar"><div class="topbar-left"><button class="icon-btn mobile-only" data-action="menu" aria-label="${T('Otwórz menu')}">${icon('menu')}</button><span class="breadcrumb">${['tournaments','database','accounts'].includes(ui.page)?'MatBravo':esc(t.name||'MatBravo')}</span>${icon('right','crumb-arrow')}<span class="breadcrumb current">${title}</span></div><div class="topbar-right">${isDemo?'<span class="demo-badge">DEMO</span>':''}<button class="text-btn" data-action="refresh" aria-label="${T('Odśwież dane')}">${icon('refresh')}<span>${saving?T('Zapisywanie…'):isDemo?T('Zapis lokalny'):T('Dane z serwera')}</span></button>${langSwitch()}<span class="avatar organizer small" title="${esc(roleName(user.role))}">${initials(club?.name||T('Klub'))}</span></div></header><main id="main" class="main"><div class="page-heading"><div><div class="eyebrow">${['tournaments','database','accounts'].includes(ui.page)?T('PRZESTRZEŃ MATBRAVO'):T('CENTRUM TURNIEJU')}</div><h1>${title}</h1><p>${subtitle}</p></div><div class="heading-actions">${actions}</div></div>${content}</main>${footer()}</div></div>`;
+ const user=workspace.user,t=state.tournament,s=fingerprintCounts(state.athletes),club=workspace.clubs.find(c=>c.id===user.clubId),member=user.role==='member';
+ // Registered pages join the menu: global and admin items after the built-in ones, event items in the tournament menu (plan §8.3 point 4).
+ const extra=registry.navItems(user,{tournament:t}),more=nav=>extra.filter(x=>x.nav===nav).map(x=>[x.id,x.icon,esc(x.label),true]);
+ const globalNav=[...(member?[]:[['tournaments','trophy',T('Turnieje')],['database','users',T('Baza zawodników')]]),...(user.role==='admin'?[['accounts','shield',T('Konta i role')]]:[]),...more('global'),...more('admin')];
+ const eventNav=t.id&&!member?[...(user.role!=='club'?[['overview','grid',T('Przegląd turnieju')]]:[]),['athletes','users',user.role==='club'?T('Zgłoszenia klubu'):T('Zgłoszenia')],...(user.role!=='club'?[['checkin','clipboard',T('Kontrola startowa')],['draws','bracket',T('Drabinki')]]:[]),...more('event')]:[];
+ const navBadge=page=>{const n=registry.badge(page);return `<span class="nav-badge" data-nav-badge="${esc(page)}"${n?'':' hidden'}>${registry.badgeText(n)}</span>`;};
+ const nav=items=>items.map(([page,i,name,registered])=>`<button class="nav-link ${ui.page===page?'active':''}" data-page="${esc(page)}" ${ui.page===page?'aria-current="page"':''}>${icon(i)}<span>${name}</span>${page==='athletes'?'<span class="nav-count">'+s.athletes+'</span>':''}${registered?navBadge(page):''}</button>`).join('');
+ const reg=registry.page(ui.page),globalPage=member||['tournaments','database','accounts'].includes(ui.page)||!!reg&&reg.nav!=='event',home=registry.defaultPage(user.role);
+ return `<div class="app-shell"><aside class="sidebar ${ui.menu?'open':''}" aria-label="${T('Nawigacja główna')}"><a href="#${home}" class="brand" data-page="${home}" aria-label="${member?'MatBravo':T('MatBravo — turnieje')}">${logo}</a><nav>${nav(globalNav)}</nav>${member?'':`<div class="nav-divider"></div><label class="sidebar-label" for="active-tournament">${T('AKTYWNY TURNIEJ')}</label><select id="active-tournament" class="tournament-switch" data-control="tournament">${workspace.tournaments.map(x=>`<option value="${x.id}" ${t.id===x.id?'selected':''}>${esc(x.name)}</option>`).join('')||'<option>'+T('Brak turniejów')+'</option>'}</select>`}<nav>${nav(eventNav)}${t.id&&!member&&user.role!=='club'?`<button class="nav-link" data-action="project">${icon('screen')}<span>${T('Ekran hali')}</span>${icon('external','nav-end')}</button>`:''}</nav><div class="sidebar-bottom"><div class="demo-note"><span class="pulse-dot"></span><strong>${isDemo?T('Podgląd demonstracyjny'):T('Połączono z serwerem')}</strong><p>${isDemo?T('Dane i konta testowe w tej przeglądarce.'):T('Wspólna baza zawodników i turniejów.')}</p></div><button class="nav-link" data-page="rules">${icon('settings')}<span>${T('Zasady turnieju')}</span></button><button class="nav-link" data-page="architecture">${icon('info')}<span>${T('O projekcie')}</span></button><div class="profile"><span class="avatar organizer" data-self-avatar>${initials(club?.name||T('Klub'))}</span><div><strong>${esc(roleName(user.role))}</strong><span>${esc(club?.name||'')}</span></div></div><button class="nav-link compact-nav" data-action="my-account">${icon('settings')}<span>${T('Moje konto')}</span></button><button class="nav-link compact-nav" data-action="logout">${icon('left')}<span>${T('Wyloguj się')}</span></button></div></aside>${ui.menu?'<button class="nav-backdrop" data-action="menu" aria-label="'+T('Zamknij menu')+'"></button>':''}<div class="main-shell"><header class="topbar"><div class="topbar-left"><button class="icon-btn mobile-only" data-action="menu" aria-label="${T('Otwórz menu')}">${icon('menu')}</button><span class="breadcrumb">${globalPage?'MatBravo':esc(t.name||'MatBravo')}</span>${icon('right','crumb-arrow')}<span class="breadcrumb current">${title}</span></div><div class="topbar-right">${isDemo?'<span class="demo-badge">DEMO</span>':''}<button class="text-btn" data-action="refresh" aria-label="${T('Odśwież dane')}">${icon('refresh')}<span>${saving?T('Zapisywanie…'):isDemo?T('Zapis lokalny'):T('Dane z serwera')}</span></button>${langSwitch()}<span class="avatar organizer small" title="${esc(roleName(user.role))}">${initials(club?.name||T('Klub'))}</span></div></header><main id="main" class="main"><div class="page-heading"><div><div class="eyebrow">${globalPage?T('PRZESTRZEŃ MATBRAVO'):T('CENTRUM TURNIEJU')}</div><h1>${title}</h1><p>${subtitle}</p></div><div class="heading-actions">${actions}</div></div>${content}</main>${footer()}</div></div>`;
 }
 function roundName(index,total){const remaining=total-index;return remaining===1?T('Finał'):remaining===2?T('Półfinały'):remaining===3?T('Ćwierćfinały'):remaining===4?T('1/8 finału'):remaining===5?T('1/16 finału'):T('1/32 finału');}
 function matchHtml(m,{interactive=true,compact=false}={}){
@@ -78,16 +98,31 @@ function rulesPage(){return shell(`<div class="notice info-notice">${icon('info'
 function architecturePage(){return shell(`<section class="panel architecture-intro">${mascot('master','about-mascot')}<div class="eyebrow">${T('MATBRAVO · WIELE TURNIEJÓW')}</div><h2>${T('Jeden zawodnik. Kolejne turnieje.')}</h2><p>${T('Kartoteka należy do klubu. Zgłoszenie do turnieju jest osobnym rekordem z wiekiem, stopniem, konkurencjami i wagą na dane zawody. Kontrola i wyniki nie zmieniają innych turniejów.')}</p><div class="tech-flow"><span>${T('Baza zawodników')}</span>${icon('arrow')}<span>${T('Zgłoszenia do turniejów')}</span>${icon('arrow')}<span>${T('Kontrola · drabinki · wyniki')}</span></div><a class="btn primary" href="./architecture.html" target="_blank" rel="noopener">${T('Architektura i wdrożenie')} ${icon('external')}</a></section><div class="rules-grid"><section class="panel rule-card"><h2>${T('Konta i role')}</h2><p>${T('Logowanie e-mailem i hasłem. Administrator przydziela role i klub, Edytor prowadzi własne turnieje, Reprezentant zgłasza zawodników swojego klubu.')}</p></section><section class="panel rule-card"><h2>${isDemo?T('Status podglądu Sites'):T('Połączenie z serwerem')}</h2><p>${isDemo?T('W tym podglądzie konta i dane pozostają w tej przeglądarce. Do wspólnej pracy klubów potrzebne jest uruchomienie przygotowanego backendu PHP i bazy MySQL na Waszym hostingu.'):T('Aplikacja korzysta z backendu PHP i bazy MySQL. Uprawnienia są sprawdzane na serwerze przy każdej operacji.')}</p></section></div>`,T('O projekcie'),'MatBravo · MEDUCASE · matbravo.com');}
 function render(){
  if(!workspace){renderPublic();return;}
- syncState();if(location.hash.startsWith('#screen')&&workspace.user.role!=='club'){renderScreen();return;}
- if(location.hash.startsWith('#guest')){ui.page='tournaments';history.replaceState(null,'','#tournaments');}
+ const role=workspace.user.role,member=role==='member';
+ syncState();
+ // A member has no tournament workspace: no hall screen (redirect to the member's start page, plan §8.3 point 15).
+ if(location.hash.startsWith('#screen')){if(member){ui.page=registry.defaultPage(role);history.replaceState(null,'',registry.routeHash(ui.page));}else if(role!=='club'){renderScreen();return;}}
+ if(location.hash.startsWith('#guest')){
+  // A member opens public tournament previews read-only (plan §8.3 point 14); other signed-in roles go to their tournaments.
+  const id=member?guestRouteId():null;
+  if(id){if(guest?.id!==id)fetchGuest(id);guest.memberPreview=true;guest.unlocked=true;promo=null;renderGuest();return;}
+  ui.page=member?registry.defaultPage(role):'tournaments';history.replaceState(null,'',registry.routeHash(ui.page));
+ }
  document.body.classList.remove('projection');
+ if(member&&!registry.allows(registry.page(ui.page),role))ui.page=registry.defaultPage(role);
  if(ui.page==='accounts'&&workspace.user.role!=='admin')ui.page='tournaments';
  if(['overview','checkin','draws','screen'].includes(ui.page)&&workspace.user.role==='club')ui.page='athletes';
  if(['overview','athletes','checkin','draws'].includes(ui.page)&&!state.tournament.id)ui.page='tournaments';
  const pages={tournaments:tournamentsPage,database:databasePage,accounts:accountsPage,draws:drawsPage,overview:overviewPage,athletes:()=>rosterPage(false),checkin:()=>rosterPage(true),rules:rulesPage,architecture:architecturePage};
- document.querySelector('#app').innerHTML=(pages[ui.page]||tournamentsPage)();document.title='MatBravo — '+({tournaments:T('Turnieje'),database:T('Baza zawodników'),accounts:T('Konta i role'),draws:T('Drabinki'),athletes:T('Zgłoszenia'),checkin:T('Kontrola startowa'),overview:T('Przegląd'),rules:T('Zasady turnieju'),architecture:T('O projekcie')}[ui.page]||T('Turnieje'));
+ // Registered pages first (with their roles), then the built-in pages; a member never falls back to the tournaments page.
+ const reg=registry.page(ui.page),own=registry.allows(reg,role);
+ document.querySelector('#app').innerHTML=String(own?reg.render(registry.parseRoute(location.hash).params):member?memberHome():(pages[ui.page]||tournamentsPage)());
+ document.title='MatBravo — '+(own?registry.title(ui.page):member?T('Czat'):({tournaments:T('Turnieje'),database:T('Baza zawodników'),accounts:T('Konta i role'),draws:T('Drabinki'),athletes:T('Zgłoszenia'),checkin:T('Kontrola startowa'),overview:T('Przegląd'),rules:T('Zasady turnieju'),architecture:T('O projekcie')}[ui.page]||T('Turnieje')));
+ registry.emit('painted',{view:'app',page:ui.page});
 }
-function navigate(page){ui.page=page;ui.menu=false;history.replaceState(null,'','#'+page);render();window.scrollTo({top:0});}
+/** A member's start page while no community module provides one (or the server has community features switched off). */
+function memberHome(){return shell(`<section class="panel empty-state">${emptyMascot()}<h3>${T('Funkcje społecznościowe są chwilowo niedostępne.')}</h3><p>${T('Spróbuj ponownie później.')}</p></section>`,T('Czat'),T('Społeczność MatBravo'));}
+function navigate(page,params){ui.page=page;ui.menu=false;history.replaceState(null,'',registry.routeHash(page,params));render();window.scrollTo({top:0});}
 function modal(title,body,actions='',large=false){
  previousFocus=document.activeElement;afterModalClose=null;
  document.querySelector('#modal-root').innerHTML=`<div class="modal-backdrop"><section class="modal ${large?'wide':''}" role="dialog" aria-modal="true" data-revision="${workspace?.revision||0}" aria-labelledby="modal-title" tabindex="-1"><header><h2 id="modal-title">${title}</h2><button class="icon-btn" data-action="close-modal" aria-label="${T('Zamknij okno')}">${icon('close')}</button></header><div class="modal-body">${body}</div>${actions?'<footer class="modal-actions">'+actions+'</footer>':''}</section></div>`;
@@ -158,14 +193,14 @@ function eventFields(events){return `<div class="event-checkboxes">${Object.keys
 function pickerModal(){const t=state.tournament;const list=workspace.profiles.filter(a=>!a.archived&&!t.entries.some(e=>e.profileId===a.id));modal(T('Dodaj zawodnika z bazy'),`<p class="modal-lead">${esc(t.name)} · ${T('{n} dostępnych osób',{n:list.length})}</p><input class="picker-search" id="picker-search" type="search" placeholder="${T('Szukaj zawodnika…')}" aria-label="${T('Szukaj zawodnika w bazie')}"><div class="profile-picker">${list.map(a=>`<button class="picker-row" data-action="register-profile" data-id="${a.id}" data-search="${esc((a.name+' '+clubName(a.clubId)).toLocaleLowerCase('pl'))}"><span class="avatar">${initials(a.name)}</span><span><strong>${esc(a.name)}</strong><small>${esc(clubName(a.clubId))}</small></span>${icon('plus')}</button>`).join('')||'<p class="empty-state">'+T('Wszystkie dostępne osoby są już zgłoszone albo baza jest pusta.')+'</p>'}</div><p class="picker-empty" hidden>${T('Brak pasujących osób.')}</p>`,button(icon('plus')+' '+T('Utwórz nowego zawodnika'),'new-entry')+button(T('Zamknij'),'close-modal'));}
 function entryForm(profileId,update=false){const profile=workspace.profiles.find(p=>p.id===profileId);if(!profile)throw Error('Nie znaleziono zawodnika.');const t=state.tournament;if(!t.id||!canEnter(workspace.user,t))throw Error('Wybierz turniej z otwartymi zapisami.');const current=update?t.entries.find(a=>a.profileId===profileId):null,a=current||profile;const age=profile.birthDate?ageAt(profile.birthDate,t.date):current?.age??'';modal(update?T('Edytuj zgłoszenie'):T('Zgłoś zawodnika'),`<div class="check-athlete"><span class="avatar large">${initials(profile.name)}</span><div><h3>${esc(profile.name)}</h3><p>${esc(clubName(profile.clubId))}</p></div></div><p class="entry-event-name">${icon('trophy')} ${esc(t.name)} · ${formatDate(t.date)}</p><form id="entry-form" data-id="${profileId}" data-update="${update?'yes':''}"><div class="form-grid"><label class="span-two">${T('Wiek w dniu zawodów')}<input name="age" type="number" min="7" max="100" value="${age}" required ${profile.birthDate?'readonly':''}><small>${profile.birthDate?T('Wyliczony z daty urodzenia.'):T('Starsza kartoteka nie ma daty urodzenia. Potwierdź wiek dla tego turnieju.')}</small></label>${measureFields(a)}<fieldset class="span-two"><legend>${T('Konkurencje w tym turnieju')}</legend>${eventFields(a.events)}</fieldset><label class="checkbox-label span-two"><input type="checkbox" name="champion" ${a.champion?'checked':''}> ${T('Mistrz Polski lub Europy')}</label></div><p class="muted small form-note">${T('Waga, stopień, konkurencje i późniejsza kontrola dotyczą wyłącznie tego turnieju.')}</p><div class="form-error" role="alert"></div></form>`,button(T('Anuluj'),'close-modal')+'<button type="submit" class="btn primary" form="entry-form">'+(update?T('Zapisz zgłoszenie'):T('Zgłoś do turnieju'))+'</button>',true);}
 function canEditEntry(a){const u=workspace.user,t=state.tournament,p=workspace.profiles.find(x=>x.id===a.profileId);return canEnter(u,t)&&(managesTournament(u,t)||u.role==='club'&&a.clubId===u.clubId||u.role==='editor'&&p?.createdBy===u.id);}
-function accountsPage(){return shell(`<div class="notice info-notice">${icon('shield')}<p><strong>${T('Role przydziela Administrator.')}</strong> ${T('Reprezentanci widzą tylko kartotekę i zgłoszenia swojego klubu. Konto można zablokować bez usuwania historii.')}</p></div><section class="panel roster-panel"><div class="table-wrap"><table class="roster-table"><thead><tr><th>${T('E-mail')}</th><th>${T('Klub')}</th><th>${T('Rola')}</th><th>${T('Status')}</th><th>${T('Działania')}</th></tr></thead><tbody>${workspace.users.map(u=>`<tr><td data-label="${T('E-mail')}"><strong>${esc(u.email)}</strong>${u.id===workspace.user.id?' <small>'+T('(Ty)')+'</small>':''}</td><td data-label="${T('Klub')}">${esc(clubName(u.clubId))}</td><td data-label="${T('Rola')}">${esc(roleName(u.role))}</td><td data-label="${T('Status')}">${badge(u.active?T('Aktywne'):T('Zablokowane'),u.active?'success':'warning')}</td><td class="row-action">${button(T('Zarządzaj'),'edit-account','small-btn',`data-id="${u.id}"`)}</td></tr>`).join('')}</tbody></table></div></section><div class="role-grid"><article class="panel"><h3>${roleName('admin')}</h3><p>${T('Wszystkie turnieje, kartoteki, zgłoszenia, wyniki oraz konta i role.')}</p></article><article class="panel"><h3>${roleName('editor')}</h3><p>${T('Tworzy i prowadzi własne turnieje, dodaje zawodników i edytuje własne kartoteki. Nie zarządza kontami.')}</p></article><article class="panel"><h3>${roleName('club')}</h3><p>${T('Dodaje i aktualizuje zawodników swojego klubu. Zgłasza ich do istniejących turniejów z otwartymi zapisami.')}</p></article></div>`,T('Konta i role'),T('Prosty dostęp: klub, e-mail, hasło i zakres uprawnień.'),button(icon('plus')+' '+T('Nowe konto'),'new-account','primary'));}
-function accountForm(id){const u=workspace.users.find(u=>u.id===id)||{email:'',clubId:'',role:'club',active:true};modal(id?T('Zarządzaj kontem'):T('Nowe konto'),`<form id="account-form" data-id="${id||''}"><div class="form-grid"><label class="span-two">${T('E-mail')}<input name="email" type="email" required maxlength="254" value="${esc(u.email)}" autocomplete="off"></label><label class="span-two">${T('Klub')}<select name="clubId"><option value="">${T('Nowy klub — wpisz nazwę poniżej')}</option>${workspace.clubs.map(c=>`<option value="${c.id}" ${u.clubId===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select></label><label class="span-two">${T('Nazwa nowego klubu')}<input name="clubName" maxlength="100" placeholder="${T('Wypełnij tylko dla nowego klubu')}"></label><label>${T('Rola')}<select name="role">${Object.keys(ROLES).map(r=>`<option value="${r}" ${u.role===r?'selected':''}>${roleName(r)}</option>`).join('')}</select></label><label>${T('Status')}<select name="active"><option value="yes" ${u.active?'selected':''}>${T('Aktywne')}</option><option value="no" ${!u.active?'selected':''}>${T('Zablokowane')}</option></select></label><label class="span-two">${id?T('Nowe hasło (opcjonalnie)'):T('Hasło')}<input name="password" type="password" autocomplete="new-password" minlength="12" maxlength="72" ${id?'':'required'}><small>${T('Minimum 12 znaków.')} ${id?T('Zmiana hasła kończy poprzednie sesje konta.'):''}</small></label></div><div class="form-error" role="alert"></div>${isDemo?'<p class="muted small form-note">'+T('To konto testowe, dostępne wyłącznie w tej przeglądarce. Użyj hasła przeznaczonego do demonstracji.')+'</p>':''}</form>`,button(T('Anuluj'),'close-modal')+'<button class="btn primary" type="submit" form="account-form">'+(id?T('Zapisz zmiany'):T('Utwórz konto'))+'</button>');}
+function accountsPage(){return shell(`<div class="notice info-notice">${icon('shield')}<p><strong>${T('Role przydziela Administrator.')}</strong> ${T('Reprezentanci widzą tylko kartotekę i zgłoszenia swojego klubu. Konto można zablokować bez usuwania historii.')}</p></div><section class="panel roster-panel"><div class="table-wrap"><table class="roster-table"><thead><tr><th>${T('E-mail')}</th><th>${T('Klub')}</th><th>${T('Rola')}</th><th>${T('Status')}</th><th>${T('Działania')}</th></tr></thead><tbody>${workspace.users.map(u=>`<tr><td data-label="${T('E-mail')}"><strong>${esc(u.email)}</strong>${u.id===workspace.user.id?' <small>'+T('(Ty)')+'</small>':''}</td><td data-label="${T('Klub')}">${esc(clubName(u.clubId))}</td><td data-label="${T('Rola')}">${esc(roleName(u.role))}</td><td data-label="${T('Status')}">${badge(u.active?T('Aktywne'):T('Zablokowane'),u.active?'success':'warning')}<span class="acct-plan-badge" data-billing-badge="${esc(u.id)}"></span></td><td class="row-action">${button(T('Zarządzaj'),'edit-account','small-btn',`data-id="${u.id}"`)}</td></tr>`).join('')}</tbody></table></div></section><div class="role-grid"><article class="panel"><h3>${roleName('admin')}</h3><p>${T('Wszystkie turnieje, kartoteki, zgłoszenia, wyniki oraz konta i role.')}</p></article><article class="panel"><h3>${roleName('editor')}</h3><p>${T('Tworzy i prowadzi własne turnieje, dodaje zawodników i edytuje własne kartoteki. Nie zarządza kontami.')}</p></article><article class="panel"><h3>${roleName('club')}</h3><p>${T('Dodaje i aktualizuje zawodników swojego klubu. Zgłasza ich do istniejących turniejów z otwartymi zapisami.')}</p></article></div>`,T('Konta i role'),T('Prosty dostęp: klub, e-mail, hasło i zakres uprawnień.'),button(icon('plus')+' '+T('Nowe konto'),'new-account','primary'));}
+function accountForm(id){const u=workspace.users.find(u=>u.id===id)||{email:'',clubId:'',role:'club',active:true};modal(id?T('Zarządzaj kontem'):T('Nowe konto'),`<form id="account-form" data-id="${id||''}"><div class="form-grid"><label class="span-two">${T('E-mail')}<input name="email" type="email" required maxlength="254" value="${esc(u.email)}" autocomplete="off"></label><label class="span-two">${T('Klub')}<select name="clubId"><option value="">${T('Nowy klub — wpisz nazwę poniżej')}</option>${workspace.clubs.map(c=>`<option value="${c.id}" ${u.clubId===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select></label><label class="span-two">${T('Nazwa nowego klubu')}<input name="clubName" maxlength="100" placeholder="${T('Wypełnij tylko dla nowego klubu')}"></label><label>${T('Rola')}<select name="role">${Object.keys(ROLES).map(r=>`<option value="${r}" ${u.role===r?'selected':''}>${roleName(r)}</option>`).join('')}</select></label><label>${T('Status')}<select name="active"><option value="yes" ${u.active?'selected':''}>${T('Aktywne')}</option><option value="no" ${!u.active?'selected':''}>${T('Zablokowane')}</option></select></label><label class="span-two">${id?T('Nowe hasło (opcjonalnie)'):T('Hasło')}<input name="password" type="password" autocomplete="new-password" minlength="12" maxlength="72" ${id?'':'required'}><small>${T('Minimum 12 znaków.')} ${id?T('Zmiana hasła kończy poprzednie sesje konta.'):''}</small></label></div><div data-account-billing="${esc(id||'')}"></div><div class="form-error" role="alert"></div>${isDemo?'<p class="muted small form-note">'+T('To konto testowe, dostępne wyłącznie w tej przeglądarce. Użyj hasła przeznaczonego do demonstracji.')+'</p>':''}</form>`,button(T('Anuluj'),'close-modal')+'<button class="btn primary" type="submit" form="account-form">'+(id?T('Zapisz zmiany'):T('Utwórz konto'))+'</button>');}
 function myAccount(){const u=workspace.user;modal(T('Moje konto'),`<div class="account-summary"><strong>${esc(u.email)}</strong><p>${esc(clubName(u.clubId))} · ${roleName(u.role)}</p></div><form id="password-form"><label class="field-label">${T('Obecne hasło')}<input name="currentPassword" type="password" required autocomplete="current-password"></label><label class="field-label form-note">${T('Nowe hasło')}<input name="password" type="password" required minlength="12" maxlength="72" autocomplete="new-password"></label><p class="muted small form-note">${T('Minimum 12 znaków.')} ${T('Pozostałe sesje zostaną wylogowane.')}</p><div class="form-error" role="alert"></div></form>`,button(T('Zamknij'),'close-modal')+'<button class="btn primary" type="submit" form="password-form">'+T('Zmień hasło')+'</button>');}
 function renderLogin(message=''){
  loginMessage=message;afterModalClose=null;
  document.body.classList.remove('projection','print-preview','modal-open');document.querySelector('#modal-root').innerHTML='';
  document.querySelector('#app').innerHTML=`<main class="login-page"><div class="login-lang">${langSwitch()}</div><section class="login-story"><a class="brand" href="#tournaments">${logo}</a><div><span class="login-eyebrow">${T('TWÓJ TURNIEJ. TWÓJ ZESPÓŁ.')}</span><h1>${T('Od zgłoszenia<br>do finału.')}</h1><p>${T('Wspólna baza zawodników, kolejne turnieje i czytelne drabinki. Wszystko w jednym miejscu.')}</p><div class="login-feature">${icon('users')} ${T('Konta klubów i proste zgłoszenia')}</div><div class="login-feature">${icon('trophy')} ${T('Wiele turniejów, osobna historia')}</div><div class="login-feature">${icon('screen')} ${T('Wydruk i ekran hali')}</div></div><span class="login-signature">MATBRAVO · BY MEDUCASE</span></section><section class="login-form-panel"><div class="login-form-content"><span class="eyebrow">${T('WITAJ W MATBRAVO')}</span><h2>${T('Zaloguj się')}</h2><p>${T('Użyj konta otrzymanego od Administratora.')}</p>${isDemo?'<div class="login-demo-note">'+T('Podgląd demonstracyjny · konta i dane tylko w tej przeglądarce.')+'</div>':''}<form id="login-form"><label class="field-label">${T('E-mail')}<input name="email" type="email" autocomplete="username" required placeholder="${T('twoj@klub.pl')}"></label><label class="field-label">${T('Hasło')}<input name="password" type="password" autocomplete="current-password" required></label><div class="form-error" role="alert">${esc(translateMessage(message))}</div><button class="btn primary login-submit" type="submit">${T('Zaloguj się')} ${icon('arrow')}</button></form>${isDemo?`<div class="demo-accounts"><span>${T('Sprawdź przykładową rolę')}</span>${Object.keys(ROLES).map(r=>`<button class="demo-account" data-action="demo-login" data-role="${r}">${icon(r==='admin'?'shield':r==='editor'?'clipboard':'users')}<span>${roleName(r)}</span>${icon('right')}</button>`).join('')}<p>${T('Hasło kont demo:')} <code>MatDrawDemo2026!</code></p></div>`:'<p class="login-help">'+T('Nie masz konta lub nie pamiętasz hasła? Skontaktuj się z Administratorem turnieju.')+'</p>'}</div></section>${upcomingSection()}<div class="login-foot">${footer()}</div></main>`;document.title='MatBravo — '+T('Logowanie');
- loadUpcoming();
+ loadUpcoming();registry.emit('painted',{view:'login',page:'login'});
 }
 // ---- Public side: "Upcoming tournaments" on the login screen, sponsor dialog, read-only guest preview ----
 // Data comes only from Client.upcoming()/Client.publicTournament() (GET, no session); see backend/src/GuestView.php.
@@ -210,6 +245,9 @@ function loadUpcoming(force=false){
 function guestRouteId(){if(!location.hash.startsWith('#guest'))return null;const id=new URLSearchParams(location.hash.split('?')[1]||'').get('t');return id&&/^[A-Za-z0-9_-]{1,40}$/.test(id)?id:null;}
 /** Without a session: the login page, or – for #guest?t=… – the sponsor dialog first and the guest preview only after it is closed. */
 function renderPublic(){
+ // Public pages of feature modules (e.g. #signup, #chat for guests) render themselves (plan §8.3 point 7).
+ const route=registry.parseRoute(location.hash),own=registry.publicPage(route.page);
+ if(own){own.render(route.params);registry.emit('painted',{view:'public',page:route.page});return;}
  const id=guestRouteId();
  if(!id){guest=null;promo=null;renderLogin();return;}
  if(guest?.id===id&&guest.unlocked){renderGuest();return;}
@@ -219,7 +257,7 @@ function fetchGuest(id){
  const known=upcoming.data?.tournaments?.find(t=>t.id===id)||(guest?.id===id?guest.known:null);
  const current=guest={id,known,status:'loading',data:null,unlocked:false,category:null};
  Client.publicTournament(id).then(data=>{current.data=data;current.status='ready';},error=>{current.status='error';current.notFound=error?.status===404;}).finally(()=>{
-  if(guest!==current||workspace)return;
+  if(guest!==current||(workspace&&!guest.memberPreview))return;
   if(promo?.id===id){const next=document.querySelector('.promo-next span');if(next)next.innerHTML=promoNext();}
   if(current.unlocked&&guestRouteId()===id){const refocus=!document.activeElement||document.activeElement===document.body||document.activeElement.id==='guest-title';renderGuest();if(refocus)document.querySelector('#guest-title')?.focus();}
  });
@@ -280,18 +318,20 @@ function renderGuest(){
  document.body.classList.remove('projection','print-preview','modal-open');
  document.querySelector('#app').innerHTML=guestPage();
  const t=guest?.data?.tournament||guest?.known;document.title='MatBravo — '+T('Podgląd gościa')+(t?' · '+t.name:'');
+ registry.emit('painted',{view:'guest',page:'guest',memberPreview:!!guest?.memberPreview});
 }
 function selectGuestCategory(code,focus){if(!guest?.data)return;guest.category=code;ui.round=0;renderGuest();document.querySelector(focus)?.focus();}
-function publicAction(action,el,id){
+async function publicAction(action,el,id){
  if(action==='open-upcoming'&&id)openUpcoming(id);
  else if(action==='close-modal')closeModal();
  else if(action==='promo-login'){afterModalClose=null;closeModal();leaveGuest();}
  else if(action==='guest-login')leaveGuest();
- else if(action==='access-cta'){if(ACCESS.kind==='login')leaveGuest();}
+ else if(action==='access-cta'){if(ACCESS.kind==='login')leaveGuest();else await registry.handle(action,el,id,{public:true});}
  else if(action==='guest-category')selectGuestCategory(el.dataset.code,`.category-card[data-code="${CSS.escape(el.dataset.code)}"]`);
  else if(action==='guest-retry'&&guest){fetchGuest(guest.id);guest.unlocked=true;renderGuest();document.querySelector('#guest-title')?.focus();}
  else if(action==='upcoming-retry')loadUpcoming(true);
  else if(action==='mascot-motion')toggleMascotMotion(el);
+ else await registry.handle(action,el,id,{public:true});
 }
 function syncState(){
  if(!workspace)return;
@@ -312,6 +352,7 @@ async function commit(type,payload,expected=Number(document.querySelector('.moda
 }
 async function handleError(error,form){
  if(error.status===401){workspace=null;closeModal();renderLogin(error.message);return;}
+ if(error.status===402)registry.emit('payment-required',{message:error.message});
  if(error.status===409){try{workspace=await Client.bootstrap();syncState();render();if(form)form.dataset.revision=workspace.revision;const dialog=document.querySelector('.modal');if(dialog)dialog.dataset.revision=workspace.revision;}catch{}}
  const message=translateMessage(error.message),box=form?.querySelector('.form-error')||document.querySelector('.form-error');if(box)box.textContent=message;else toast(message);
 }
@@ -324,10 +365,14 @@ document.addEventListener('click',async event=>{
  const el=event.target.closest('[data-action]');if(!el)return;
  const action=el.dataset.action,id=el.dataset.id;
  try{
-  if(action==='demo-login'){el.disabled=true;const email={admin:'admin',editor:'editor',club:'club'}[el.dataset.role]+'@matdraw.example';workspace=await Client.login(email,'MatDrawDemo2026!');navigate('tournaments');return;}
-  if(!workspace){publicAction(action,el,id);return;}
+  if(action==='demo-login'){el.disabled=true;const email={admin:'admin',editor:'editor',club:'club'}[el.dataset.role]+'@matdraw.example';workspace=await Client.login(email,'MatDrawDemo2026!');navigate(registry.defaultPage(workspace.user.role));registry.emit('login',{user:workspace.user});return;}
+  if(!workspace){await publicAction(action,el,id);return;}
+  if(guest?.memberPreview&&location.hash.startsWith('#guest')&&action.startsWith('guest-')){
+   // A member's tournament preview: guest-login/guest-back return to the member's pages; other guest-* actions are the public ones.
+   if(action==='guest-login'||action==='guest-back'){guest=null;navigate(registry.defaultPage(workspace.user.role));}else await publicAction(action,el,id);return;
+  }
   if(action==='menu'){ui.menu=!ui.menu;render();}
-  else if(action==='logout'){await Client.logout();workspace=null;closeModal();renderLogin();}
+  else if(action==='logout'){await Client.logout();registry.emit('logout');purgeSession();location.replace(location.pathname);}
   else if(action==='refresh'){workspace=await Client.bootstrap();render();toast(T('Dane odświeżone.'));}
   else if(action==='new-tournament')tournamentForm();
   else if(action==='edit-tournament')tournamentForm(id);
@@ -343,7 +388,7 @@ document.addEventListener('click',async event=>{
   else if(action==='confirm-remove-entry'){await commit('entry.remove',{tournamentId:activeId,id});closeModal();render();toast(T('Zgłoszenie wycofane.'));}
   else if(action==='new-account')accountForm();
   else if(action==='edit-account')accountForm(id);
-  else if(action==='my-account')myAccount();
+  else if(action==='my-account'){if(registry.page('profile'))navigate('profile');else myAccount();}
   else if(action==='category'){ui.category=id;ui.round=0;closeModal();navigate('draws');}
   else if(action==='attention')showAttention();
   else if(action==='close-modal')closeModal();
@@ -363,6 +408,7 @@ document.addEventListener('click',async event=>{
   else if(action==='screen-auto'){ui.screenAuto=!ui.screenAuto;renderScreen();}
   else if(action==='fullscreen'){if(!document.fullscreenElement)document.documentElement.requestFullscreen().catch(()=>toast(T('Pełny ekran nie jest dostępny.')));else document.exitFullscreen();}
   else if(action==='exit-screen'){if(document.fullscreenElement)document.exitFullscreen();navigate('draws');}
+  else await registry.handle(action,el,id,{workspace});
  }catch(error){el.disabled=false;await handleError(error);}
 });
 document.addEventListener('change',event=>{
@@ -374,7 +420,7 @@ document.addEventListener('change',event=>{
  else if(control==='round'){ui.round=Number(el.value);render();}
  else if(control==='roster-filter'){ui.rosterFilter=el.value;render();}
  else if(control==='screen-part'){ui.screenPart=Number(el.value);renderScreen();}
- else if(control==='guest-category'&&!workspace)selectGuestCategory(el.value,'#guest-category-select');
+ else if(control==='guest-category'&&(!workspace||guest?.memberPreview))selectGuestCategory(el.value,'#guest-category-select');
  else if(control==='screen-category'){ui.screenPart=0;location.hash='screen?tournament='+encodeURIComponent(activeId)+'&category='+encodeURIComponent(el.value);}
 });
 function filterRender(id){const input=document.querySelector('#'+id),start=input?.selectionStart;render();const next=document.querySelector('#'+id);if(next){next.focus();try{next.setSelectionRange(start,start);}catch{}}}
@@ -385,23 +431,27 @@ document.addEventListener('input',event=>{
  if(el.closest('#check-form'))updateImpact();
 });
 document.addEventListener('submit',async event=>{
+ // Reserved form ids handled here; forms of feature modules use the acct-, chat- and mod- prefixes (plan §8.3 point 8).
  const ids=['login-form','tournament-form','profile-form','entry-form','account-form','password-form','check-form','print-form'];
  if(!ids.includes(event.target.id))return;event.preventDefault();
  const form=event.target,f=new FormData(form),submit=event.submitter,revision=Number(form.dataset.revision||workspace?.revision);
+ let type=null,payload=null,result=null;const save=async(t,p)=>{type=t;payload=p;return result=await commit(t,p,revision);};
  if(submit?.disabled)return;if(submit)submit.disabled=true;
  const errorBox=form.querySelector('.form-error');if(errorBox)errorBox.textContent='';
  try{
-  if(form.id==='login-form'){workspace=await Client.login(f.get('email'),f.get('password'));navigate('tournaments');return;}
+  if(form.id==='login-form'){workspace=await Client.login(f.get('email'),f.get('password'));navigate(registry.defaultPage(workspace.user.role));registry.emit('login',{user:workspace.user});return;}
   if(form.id==='print-form'){doPrint(f.get('scope'),f.get('format'));return;}
-  if(form.id==='tournament-form'){const result=await commit('tournament.save',{id:form.dataset.id||undefined,name:f.get('name'),city:f.get('city'),date:f.get('date'),status:f.get('status'),mat:f.get('mat')},revision);activeId=result.id;sessionStorage.setItem('matdraw.activeTournament',activeId);}
+  if(form.id==='tournament-form'){await save('tournament.save',{id:form.dataset.id||undefined,name:f.get('name'),city:f.get('city'),date:f.get('date'),status:f.get('status'),mat:f.get('mat')});activeId=result.id;sessionStorage.setItem('matdraw.activeTournament',activeId);}
   else if(form.id==='profile-form'){
    const p={id:form.dataset.id||undefined,name:f.get('name'),clubId:f.get('clubId')||workspace.user.clubId,birthDate:f.get('birthDate'),sex:f.get('sex'),...entryPayload(f)};
    if(form.dataset.register==='yes')p.registration={tournamentId:activeId,...entryPayload(f)};
-   await commit('profile.save',p,revision);
-  }else if(form.id==='entry-form')await commit('entry.save',{tournamentId:activeId,profileId:form.dataset.id,update:form.dataset.update==='yes',...entryPayload(f)},revision);
-  else if(form.id==='account-form')await commit('account.save',{id:form.dataset.id||undefined,email:f.get('email'),clubId:f.get('clubId'),clubName:f.get('clubName'),role:f.get('role'),active:f.get('active')==='yes',password:f.get('password')||undefined},revision);
-  else if(form.id==='password-form')await commit('account.password',{id:workspace.user.id,currentPassword:f.get('currentPassword'),password:f.get('password')},revision);
-  else if(form.id==='check-form')await commit('checkin.save',{tournamentId:activeId,id:form.dataset.id,presence:f.get('presence'),actualWeight:f.get('actualWeight')},revision);
+   await save('profile.save',p);
+  }else if(form.id==='entry-form')await save('entry.save',{tournamentId:activeId,profileId:form.dataset.id,update:form.dataset.update==='yes',...entryPayload(f)});
+  else if(form.id==='account-form')await save('account.save',{id:form.dataset.id||undefined,email:f.get('email'),clubId:f.get('clubId'),clubName:f.get('clubName'),role:f.get('role'),active:f.get('active')==='yes',password:f.get('password')||undefined});
+  else if(form.id==='password-form')await save('account.password',{id:workspace.user.id,currentPassword:f.get('currentPassword'),password:f.get('password')});
+  else if(form.id==='check-form')await save('checkin.save',{tournamentId:activeId,id:form.dataset.id,presence:f.get('presence'),actualWeight:f.get('actualWeight')});
+  // Modules react while the form is still in the page (e.g. account billing fields); passwords are never passed on.
+  const {password:_p,currentPassword:_c,...shared}=payload||{};registry.emit('saved',{form:form.id,type,payload:shared,result,element:form});
   closeModal();render();toast(T('Zapisano zmiany.'));
  }catch(error){await handleError(error,form);}finally{if(submit?.isConnected)submit.disabled=false;}
 });
@@ -411,10 +461,12 @@ document.addEventListener('keydown',event=>{
  if(event.key==='Tab'){const focusable=[...modalEl.querySelectorAll('button:not([disabled]),input:not([disabled]),select:not([disabled]),a[href]')],first=focusable[0],last=focusable.at(-1),inside=focusable.includes(document.activeElement);if(event.shiftKey&&(document.activeElement===first||!inside)){event.preventDefault();last?.focus();}else if(!event.shiftKey&&(document.activeElement===last||!inside)){event.preventDefault();first?.focus();}}
 });
 window.addEventListener('storage',async e=>{if(e.key===LANGUAGE_KEY&&LANGUAGES.includes(e.newValue)){setLanguage(e.newValue,{persist:false});return;}if(!workspace||e.key!==Client.dataKey)return;try{workspace=await Client.bootstrap();if(!document.querySelector('.modal'))render();}catch(error){await handleError(error);}});
-window.addEventListener('hashchange',()=>{if(!location.hash.startsWith('#screen'))ui.page=location.hash.slice(1)||'tournaments';render();});
+/** Page from the hash (registry.parseRoute: query in params, #czat normalized to #chat); #screen and #guest keep their own handling. */
+function routePage(){const route=registry.parseRoute(location.hash);if(route.alias)history.replaceState(null,'',registry.routeHash(route.page,route.params));return route.page||'tournaments';}
+window.addEventListener('hashchange',()=>{if(!location.hash.startsWith('#screen'))ui.page=routePage();render();});
 setInterval(()=>{const el=document.querySelector('#arena-time');if(el)el.textContent=new Date().toLocaleTimeString(locale(),{hour:'2-digit',minute:'2-digit',timeZone:'Europe/Warsaw'});},30000);
-setInterval(async()=>{if(workspace&&location.hash.startsWith('#screen')){try{workspace=await Client.bootstrap();syncState();if(ui.screenAuto){const d=ensureDraw(selected());if(d&&d.size>8)ui.screenPart=(ui.screenPart+1)%(d.size/8+1);}renderScreen();}catch(error){await handleError(error);}}},15000);
-ui.page=location.hash.startsWith('#screen')?'draws':location.hash.slice(1)||'tournaments';
+setInterval(async()=>{if(workspace&&workspace.user.role!=='member'&&location.hash.startsWith('#screen')){try{workspace=await Client.bootstrap();syncState();if(ui.screenAuto){const d=ensureDraw(selected());if(d&&d.size>8)ui.screenPart=(ui.screenPart+1)%(d.size/8+1);}renderScreen();}catch(error){await handleError(error);}}},15000);
+ui.page=location.hash.startsWith('#screen')?'draws':routePage();
 // Language: static page texts now, and a re-render (keeping page state and typed login data) whenever it changes.
 function applyStaticTexts(){const skip=document.querySelector('.skip-link');if(skip)skip.textContent=T('Przejdź do treści');document.querySelector('meta[name="description"]')?.setAttribute('content',T('Zgłoszenia, kontrola startowa i czytelne drabinki taekwondo. MatBravo — cały turniej w jednym miejscu.'));}
 function rerenderLanguage(){
@@ -422,12 +474,15 @@ function rerenderLanguage(){
  const focused=!!document.activeElement?.closest?.('.lang-switch');
  if(!ready){const loading=document.querySelector('.app-loading');if(loading)loading.textContent=T('Uruchamianie MatBravo…');return;}
  if(!workspace&&guestRouteId()&&guest?.unlocked)renderGuest();
+ else if(!workspace&&registry.publicPage(registry.parseRoute(location.hash).page)){registry.emit('language',{lang:getLanguage()});return;}
  else if(!workspace){const form=document.querySelector('#login-form'),typed=form&&{email:form.elements.email.value,password:form.elements.password.value},reopen=promo?.id;renderLogin(loginMessage);const next=document.querySelector('#login-form');if(next&&typed){next.elements.email.value=typed.email;next.elements.password.value=typed.password;}if(reopen)showPromo(reopen);}
- else if(location.hash.startsWith('#screen')&&workspace.user.role!=='club')renderScreen();
+ else if(location.hash.startsWith('#screen')&&!['club','member'].includes(workspace.user.role))renderScreen();
  else{render();if(document.body.classList.contains('print-preview')&&ui.print)doPrint(ui.print.scope,ui.print.format);}
  if(focused)document.querySelector(`.lang-switch [data-set-lang="${getLanguage()}"]`)?.focus();
+ registry.emit('language',{lang:getLanguage()});
 }
 onLanguageChange(rerenderLanguage);
 applyStaticTexts();document.title=T('MatBravo — drabinki turniejowe taekwondo');
 document.querySelector('#app').innerHTML='<div class="app-loading">'+T('Uruchamianie MatBravo…')+'</div>';
 try{workspace=await Client.init();ready=true;render();}catch(error){ready=true;renderLogin(error.message);}
+registry.emit('ready',{workspace});
