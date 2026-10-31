@@ -116,8 +116,15 @@ test('Config: defaults are merged and unsafe switch combinations are refused',{s
   [{...on,billing_address_collection:'never'},BILL],
   [{signup_enabled:true},SIGN],[{...on,billing_enforce:true,signup_enabled:true},SIGN],[{...on,billing_enforce:true,signup_enabled:true,...SUPPORT},'valid'],
   [{...on,billing_enforce:true,signup_enabled:true,support_email:'not an address'},SIGN],
+  // §6.10 matrix: a free beta only without billing; an invite token alone only with enforced payments (test window).
   [{signup_enabled:true,signup_free_beta:true,...SUPPORT},'valid'],[{signup_enabled:true,signup_free_beta:true},SIGN],
-  [{signup_invite_token:'short-token'},SIGN],[{signup_invite_token:'x'.repeat(24)},SIGN],[{signup_invite_token:'x'.repeat(24),...SUPPORT},'valid'],[{signup_invite_token:''},'valid'],
+  [{...on,signup_enabled:true,signup_free_beta:true,...SUPPORT},SIGN],[{...on,billing_enforce:true,signup_enabled:true,signup_free_beta:true,...SUPPORT},'valid'],
+  [{...on,signup_enabled:true,...SUPPORT},SIGN],
+  [{...on,billing_enforce:true,signup_invite_token:'short-token',...SUPPORT},SIGN],[{...on,billing_enforce:true,signup_invite_token:'x'.repeat(24)},SIGN],
+  [{...on,billing_enforce:true,signup_invite_token:'x'.repeat(24),...SUPPORT},'valid'],[{...on,billing_enforce:true,billing_mode:'live',stripe_secret_key:'rk_live_abc',signup_invite_token:'x'.repeat(24),...SUPPORT},'valid'],
+  [{signup_invite_token:'x'.repeat(24),...SUPPORT},SIGN],[{...on,signup_invite_token:'x'.repeat(24),...SUPPORT},SIGN],[{signup_invite_token:'x'.repeat(24),signup_free_beta:true,...SUPPORT},SIGN],
+  [{signup_enabled:true,signup_free_beta:true,signup_invite_token:'x'.repeat(24),...SUPPORT},'valid'],[{...on,billing_enforce:true,signup_enabled:true,signup_invite_token:'x'.repeat(24),...SUPPORT},'valid'],
+  [{signup_invite_token:''},'valid'],[{signup_invite_token:null},'valid'],
  ];
  const out=bridge({job:'config',cases:cases.map(c=>c[0])});
  cases.forEach(([input,expected],i)=>assert.deepEqual(out[i],expected==='valid'?{ok:'valid'}:{error:expected},JSON.stringify(input)));

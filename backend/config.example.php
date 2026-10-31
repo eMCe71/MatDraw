@@ -32,11 +32,12 @@ return [
  'session_dir' => null,
 
  // --- Accounts and sign-up -------------------------------------------------------------------------------------
- // Self-service sign-up. Requires billing_enforce=true (unless signup_free_beta) and support_email.
+ // Self-service sign-up. Requires billing_enforce=true (or signup_free_beta with billing_enabled=false) and support_email.
  'signup_enabled' => false,
- // Owner's test window: sign-up only through #signup?invite=<token> (at least 24 characters; needs support_email).
+ // Owner's test window: sign-up only through #signup?invite=<token> (at least 24 characters; with signup_enabled=false
+ // it needs billing_enforce=true, so invitees do not get free full access; needs support_email).
  'signup_invite_token' => null,
- // Explicit permission to open sign-up without enforced payments (a free beta).
+ // Explicit permission to open sign-up without enforced payments (a free beta; only with billing_enabled=false).
  'signup_free_beta' => false,
  // Help address shown at "Forgot your password?"; the Admin answers password requests only to the account's address.
  'support_email' => null,

@@ -51,11 +51,15 @@ final class Config {
    if(!in_array($c['billing_address_collection'],['auto','required'],true))$bad();
   }
   $signup=fn()=>throw new \RuntimeException('Invalid signup configuration.');
-  $token=$c['signup_invite_token'];if($token!==null&&$token!==''&&(!is_string($token)||strlen($token)<24))$signup();
-  // Self-service sign-up only together with enforced payments, unless the owner explicitly runs a free beta (P16).
-  if(!empty($c['signup_enabled'])&&empty($c['billing_enforce'])&&empty($c['signup_free_beta']))$signup();
+  $token=$c['signup_invite_token'];$tokenSet=$token!==null&&$token!=='';$signupOn=!empty($c['signup_enabled']);$enforced=!empty($c['billing_enforce']);
+  if($tokenSet&&(!is_string($token)||strlen($token)<24))$signup();
+  // Only the rows of the §6.10 matrix. Sign-up: with enforced payments (start), or as an explicit free beta without
+  // billing (P16). An invite token alone (sign-up off): only the owner's test window with enforced payments, else an
+  // invitee would get free full access ('open') while the owner believes payments are being tested.
+  if($signupOn&&!$enforced&&(empty($c['signup_free_beta'])||!empty($c['billing_enabled'])))$signup();
+  if(!$signupOn&&$tokenSet&&!$enforced)$signup();
   // Without e-mail the support address is the only way back into an account (§3.10): a start gate for sign-up and invites.
-  if((!empty($c['signup_enabled'])||($token!==null&&$token!==''))&&(!is_string($c['support_email'])||!filter_var($c['support_email'],FILTER_VALIDATE_EMAIL)))$signup();
+  if(($signupOn||$tokenSet)&&(!is_string($c['support_email'])||!filter_var($c['support_email'],FILTER_VALIDATE_EMAIL)))$signup();
  }
  /** https:// always; http:// only with allow_insecure_http and a loopback host (the Stripe stub in tests). */
  public static function apiBaseAllowed(mixed $base,bool $insecure):bool {
