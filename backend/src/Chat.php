@@ -275,8 +275,15 @@ final class Chat {
   if(mb_strlen($s)>self::BODY_MAX)throw new AppError('Wiadomość może mieć najwyżej 1000 znaków.',422);
   return $s;
  }
- /** cont (§5.3): the previous message of the channel is visible, by the same author and less than 5 minutes older. */
- public static function cont(?array $prev,string $userId,int $nowMs):int{return $prev&&$prev['user_id']===$userId&&$prev['state']==='visible'&&$nowMs-(int)$prev['created_ms']<self::CONT_MS?1:0;}
+ /**
+  * cont (§5.3): the previous message of the channel is visible, by the same author, less than 5 minutes older and of the
+  * same UTC day. The day matters for guests: their variant g is keyed by the UTC day (ChatGuestView), and c=1 across
+  * midnight would tell them that today's variant is yesterday's one of the same person, linking the days.
+  */
+ public static function cont(?array $prev,string $userId,int $nowMs):int {
+  return $prev&&$prev['user_id']===$userId&&$prev['state']==='visible'&&$nowMs-(int)$prev['created_ms']<self::CONT_MS
+   &&intdiv((int)$prev['created_ms'],86400000)===intdiv($nowMs,86400000)?1:0;
+ }
  /**
   * Seconds until the next message is allowed (0 = now), from the sender's last day {day_n, day_first, last_ms, minute_n,
   * minute_first} and the limits {gap s, perMin, perDay} (pure).

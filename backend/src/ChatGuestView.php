@@ -7,7 +7,8 @@ namespace MatDraw;
  * A message is exactly {id, r, t, g, c, b}; a tombstone is exactly {id, r, t, g, x}:
  *   id  message id (display order)            r  rev of its last change (polling cursor)
  *   t   time in epoch milliseconds            b  the text (public by product decision, requirement 3)
- *   c   1 = same author as the previous visible message, less than 5 minutes earlier (computed when it was written)
+ *   c   1 = same author as the previous visible message, less than 5 minutes earlier and of the same UTC day (computed
+ *       when it was written; never across the UTC midnight that changes g)
  *   g   decoration variant 0–4 of the placeholder avatar and name bar
  *   x   tombstone kind: author (deleted by its author), mod (deleted by a moderator), review (hidden pending review)
  * Never sent here: names, initials, usernames, public_id, internal user ids, e-mails, avatars, countries, sports, clubs,
