@@ -78,6 +78,7 @@
 .chat-msg{display:grid;grid-template-columns:36px minmax(0,1fr);column-gap:11px;padding:7px 8px;margin:0 -8px;border-radius:10px;position:relative}
 .chat-msg:hover,.chat-msg:focus-within{background:#f5f8fc}
 .chat-msg:focus{outline:2px solid #0072bc;outline-offset:-2px}
+.chat-msg>.chat-meta,.chat-msg>.chat-text,.chat-msg>.chat-tomb,.chat-msg>.chat-state{grid-column:2}
 .chat-msg.cont{padding-top:1px}
 .chat-msg.cont>.chat-ava,.chat-msg.cont>.ghost-ava,.chat-msg.cont>.chat-meta{display:none}
 .chat-msg.cont>:not(.chat-actions){grid-column:2}

@@ -308,7 +308,7 @@ const matchesPhone=()=>{try{return matchMedia('(max-width:650px)').matches;}catc
 /** Picks the channel of a view from its route, the remembered choice or the default rules. */
 function choose(v){
  if(v.key&&S.channels.has(v.key)&&!S.channels.get(v.key).gone)return;
- const me=getMe(),stored=local.get(LAST),fallback=()=>slugKey(defaultSlug({stored,me,lang:getLanguage()}))||S.lobby[0]||null;
+ const me=getMe(),stored=local.get(LAST),fallback=()=>{v.auto=!stored&&!me&&signedIn();return slugKey(defaultSlug({stored,me,lang:getLanguage()}))||S.lobby[0]||null;};
  if(v.kind==='tournament'){v.key=keyOfTid(v.tid);if(!v.key)v.missing=true;return;}
  if(v.kind==='home'){v.key=(S.homeSlug&&slugKey(S.homeSlug))||fallback();return;}
  if(v.kind==='strip'){v.key=fallback();return;}
@@ -319,13 +319,12 @@ function choose(v){
  v.missing=false;
 }
 function open(v,key){
- if(!key||v.key===key)return;
+ if(!key||v.key===key)return;v.auto=false;
  saveScroll(v);
  v.key=key;v.divider=undefined;v.nodes.clear();v.pinned=true;v.unseen=0;v.foot=null;v.missing=false;
  const c=S.channels.get(key);
  if(c?.kind==='lobby'){local.set(LAST,c.slug);if(v.kind==='home')S.homeSlug=c.slug;}
  if(v.kind==='page'){S.pageKey=key;if(registry.parseRoute(location.hash).page==='chat'){try{history.replaceState(null,'',registry.routeHash('chat',routeOf(c)));}catch{}}}
- registry.emit('chat:active',{channel:c?.slug||c?.tid||key});
  frame(v);paint(v,{open:true});announce();S.transport?.poke();
 }
 
@@ -802,7 +801,7 @@ function ensureGlobal(){
  });
  d.addEventListener('input',event=>{
   const t=event.target;if(!t.matches?.('textarea[data-chat-input]'))return;const v=viewOf(t);if(!v)return;
-  grow(t);count(v,t);clearTimeout(t.saveTimer);t.saveTimer=setTimeout(()=>session.set(draftKey(v.key),t.value),300);S.transport?.interact();
+  grow(t);count(v,t);clearTimeout(t.saveTimer);t.saveTimer=setTimeout(()=>session.set(draftKey(v.key),t.value),300);S.touchedAt=Date.now();S.transport?.interact();
  });
  d.addEventListener('keydown',event=>{
   const t=event.target;
@@ -819,15 +818,20 @@ function ensureGlobal(){
    const next=arts[Math.max(0,Math.min(arts.length-1,i+(event.key==='PageDown'?1:-1)))];if(next){event.preventDefault();next.focus();}
   }
  });
- d.addEventListener('scroll',event=>{const log=event.target;if(!log?.classList?.contains('chat-log'))return;const v=viewOf(log);if(v){onScroll(v);S.transport?.interact();}},true);
- const interact=event=>{if(event.target.closest?.('[data-chat-mount]'))S.transport?.interact();};
- d.addEventListener('pointerdown',interact,{passive:true});d.addEventListener('keydown',interact);d.addEventListener('wheel',interact,{passive:true});d.addEventListener('focusin',interact);
+ // Scrolling itself is not interaction (new messages scroll the log); wheel, touch, keys and pointer are.
+ d.addEventListener('scroll',event=>{const log=event.target;if(!log?.classList?.contains('chat-log'))return;const v=viewOf(log);if(v)onScroll(v);},true);
+ const interact=event=>{if(event.target.closest?.('[data-chat-mount]')){S.touchedAt=Date.now();S.transport?.interact();}};
+ // Engagement for the PWA install card (pwa.js counts 10 s ticks): the chat is on screen and was used within the last minute.
+ setInterval(()=>{if(d.visibilityState!=='hidden'&&Date.now()-(S.touchedAt||0)<60000&&liveViews().some(v=>v.kind!=='strip'&&v.visible))registry.emit('chat:active',{});},10000);
+ d.addEventListener('pointerdown',interact,{passive:true});d.addEventListener('keydown',interact);d.addEventListener('wheel',interact,{passive:true});d.addEventListener('touchmove',interact,{passive:true});d.addEventListener('focusin',interact);
  d.addEventListener('visibilitychange',()=>{for(const v of liveViews()){v.hiddenTab=d.visibilityState==='hidden';if(!v.hiddenTab)scheduleRead(v,S.channels.get(v.key));}announce();});
  globalThis.addEventListener?.('online',()=>{flushQueue();paintAll(false);});
  globalThis.addEventListener?.('offline',()=>paintAll(false));
  minuteTimer=setInterval(()=>{for(const time of d.querySelectorAll('.chat-time[data-ts]'))time.textContent=timeLabel(Number(time.dataset.ts));},60000);
  try{matchMedia('(max-width:650px)').addEventListener('change',()=>{for(const v of liveViews())if(v.kind==='home')paint(v);announce();});}catch{}
- onMe(()=>{baseline();if(S.mode&&S.mode!==mode()){transport();paintAll(true);ensureLists(true);}else{for(const v of liveViews()){v.foot=null;paint(v);}}counters();});
+ onMe(me=>{baseline();
+  // A signed-in view that picked its channel before me arrived picks again by sport and country (plan §5.1).
+  if(me)for(const v of liveViews())if(v.auto&&(v.kind==='page'||v.kind==='strip')){v.auto=false;const before=v.key;v.key=null;choose(v);const k=v.key;v.key=before;if(k&&k!==before)open(v,k);}if(S.mode&&S.mode!==mode()){transport();paintAll(true);ensureLists(true);}else{for(const v of liveViews()){v.foot=null;paint(v);}}counters();});
 }
 
 // ——— Entry points used by chat-boot.js ———
