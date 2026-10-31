@@ -100,12 +100,13 @@ function render(){
  if(!workspace){renderPublic();return;}
  const role=workspace.user.role,member=role==='member';
  syncState();
+ if(guest?.memberPreview&&!location.hash.startsWith('#guest'))guest=null;// leaving a member preview (its back button is a data-page link) drops it, so the next visit loads fresh data
  // A member has no tournament workspace: no hall screen (redirect to the member's start page, plan §8.3 point 15).
  if(location.hash.startsWith('#screen')){if(member){ui.page=registry.defaultPage(role);history.replaceState(null,'',registry.routeHash(ui.page));}else if(role!=='club'){renderScreen();return;}}
  if(location.hash.startsWith('#guest')){
   // A member opens public tournament previews read-only (plan §8.3 point 14); other signed-in roles go to their tournaments.
   const id=member?guestRouteId():null;
-  if(id){if(guest?.id!==id)fetchGuest(id);guest.memberPreview=true;guest.unlocked=true;guest.tab=guestTabFromHash();promo=null;renderGuest();return;}
+  if(id){if(guest?.id!==id)fetchGuest(id);guest.memberPreview=true;guest.unlocked=true;promo=null;renderGuest();return;}
   ui.page=member?registry.defaultPage(role):'tournaments';history.replaceState(null,'',registry.routeHash(ui.page));
  }
  document.body.classList.remove('projection');
@@ -242,6 +243,8 @@ function paintUpcoming(){
  const el=document.querySelector('[data-upcoming]');if(!el)return;
  const hadFocus=el.contains(document.activeElement);el.innerHTML=upcomingBody();el.setAttribute('aria-busy',String(upcoming.loading&&!upcoming.data));
  if(hadFocus)el.querySelector('button')?.focus();
+ // The list is replaced here (first load, retry, 5-minute refresh): feature modules refill [data-chat-count] after this event, not after `painted`.
+ if(upcoming.data?.tournaments?.length)registry.emit('upcoming-painted',{view:'login',tournaments:upcoming.data.tournaments.map(t=>t.id)});
 }
 /** Loads the public list once and refreshes it after 5 minutes. Failures stay quiet: the login form never depends on it. */
 function loadUpcoming(force=false){
@@ -257,14 +260,14 @@ function renderPublic(message=''){
  if(own){own.render(route.params);registry.emit('painted',{view:'public',page:route.page});return;}
  const id=guestRouteId();
  if(!id){guest=null;promo=null;renderLogin(message);return;}
- if(guest?.id===id&&guest.unlocked){guest.tab=guestTabFromHash();renderGuest();return;}
+ if(guest?.id===id&&guest.unlocked){renderGuest();return;}
  renderLogin(message);showPromo(id);
 }
 /** Tab of the guest preview from the URL: #guest?t=<id>&tab=chat opens the tournament chat. */
 const guestTabFromHash=()=>new URLSearchParams(location.hash.split('?')[1]||'').get('tab')==='chat'?'chat':'cats';
 function fetchGuest(id){
  const known=upcoming.data?.tournaments?.find(t=>t.id===id)||(guest?.id===id?guest.known:null);
- const current=guest={id,known,status:'loading',data:null,unlocked:false,category:null,tab:guestTabFromHash(),memberPreview:workspace?.user?.role==='member'};
+ const current=guest={id,known,status:'loading',data:null,unlocked:false,category:null,memberPreview:workspace?.user?.role==='member'};
  Client.publicTournament(id).then(data=>{current.data=data;current.status='ready';},error=>{current.status='error';current.notFound=error?.status===404;}).finally(()=>{
   if(guest!==current||(workspace&&!guest.memberPreview))return;
   if(promo?.id===id){const next=document.querySelector('.promo-next span');if(next)next.innerHTML=promoNext();}
@@ -318,6 +321,7 @@ const guestTabs=g=>`<div class="guest-tabs" role="tablist" aria-label="${T('Podg
 const guestChatPanel=g=>`<div class="guest-chat" data-chat-mount="tournament" data-tournament-id="${esc(g.id)}" aria-labelledby="guest-tab-chat" aria-busy="true"><div class="home-skeleton" aria-hidden="true">${'<div><i></i><span></span></div>'.repeat(4)}</div><p class="sr-only">${T('Wczytywanie czatu…')}</p></div>`;
 function guestPage(){
  const g=guest,d=g?.data,t=d?.tournament||g?.known,preview=!!g?.memberPreview;
+ if(g)g.tab=guestTabFromHash();// the URL is the single source of the tab (switchGuestTab writes it before it renders)
  const heading=t?`<div class="page-heading guest-heading"><div><div class="eyebrow">${T('PODGLĄD GOŚCIA · TYLKO DO ODCZYTU')}</div><h1 id="guest-title" tabindex="-1">${esc(t.name)}</h1><p class="guest-when"><span>${icon('calendar')}${esc(longDate(t.date))}</span><span>${icon('pin')}${esc(t.city)}</span></p></div><div class="heading-actions">${badge(statusName(t.status),t.status==='open'?'teal':t.status==='finished'?'neutral':'warning')}</div></div>`:`<h1 id="guest-title" class="sr-only" tabindex="-1">${T('Podgląd gościa')}</h1>`;
  let content;
  if(d){const s=d.summary;content=`<div class="stats guest-stats">${[['users',s.entries,T('Zgłoszenia')],['shield',s.clubs,T('Kluby')],['grid',s.categories,T('Kategorie')],['bracket',s.brackets,T('Drabinki')]].map(([i,n,label])=>`<div class="stat"><span class="stat-icon">${icon(i)}</span><div><strong>${Number(n)||0}</strong><span>${label}</span></div></div>`).join('')}</div>${preview?'':accessCard()}${guestCategories(d)}`;}

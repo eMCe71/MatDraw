@@ -34,6 +34,7 @@ test('tournaments page and guest preview carry the chat mount points',()=>{
 test('the grid covers the plan\'s breakpoints and the print stylesheet hides the chat',()=>{
  for(const s of ['minmax(340px,388px) minmax(460px,1fr) clamp(400px,30vw,480px)','minmax(560px,760px) 520px','"story auth" "chat auth" "upcoming foot"','"story" "auth" "chat" "upcoming" "foot"','min-height:560px;max-height:900px','height:calc(100dvh - 48px)','--mascot-h:196px'])assert.ok(css.includes(s),s);
  assert.match(css,/@media print\{[^}]*\.home-centre/);
+ assert.match(readFileSync(root+'styles.css','utf8'),/@media print\{[^@]*#app,[^}]*display:none!important/,'the app shell (home page, guest preview) is never part of a printout: prints go through #print-root');
 });
 
 // ---- browser checks ----
@@ -51,7 +52,7 @@ test('home page in a browser: layout, skip links, phone sign-in button, known de
  const open=async(width,height,init)=>{const ctx=await browser.newContext({viewport:{width,height},locale:'pl-PL'});if(init)await ctx.addInitScript(init);const page=await ctx.newPage();page.on('pageerror',e=>errors.push(e.message));page.on('console',m=>{if(m.type()==='error')errors.push(m.text());});await page.goto(url);await page.waitForSelector('.login-page');return {ctx,page};};
  try{
   // no horizontal scroll; sign-in form on the right at desktop
-  for(const [w,h] of [[1440,900],[1024,800],[390,844],[360,740]]){
+  for(const [w,h] of [[1440,900],[1024,800],[390,844],[360,740],[340,740],[320,740]]){
    const {ctx,page}=await open(w,h);
    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth-document.documentElement.clientWidth),0,'horizontal overflow at '+w);
    const order=await page.evaluate(()=>[...document.querySelector('.login-page').children].map(e=>e.className.split(' ')[0]));
@@ -69,6 +70,7 @@ test('home page in a browser: layout, skip links, phone sign-in button, known de
     await page.fill('#login-form [name=email]','a@b.pl');await page.fill('#login-form [name=password]','x');await page.click('[data-set-lang="en"]');
     assert.deepEqual(await page.evaluate(()=>[document.querySelector('#login-form [name=email]').value,document.querySelector('#login-form [name=password]').value,document.querySelector('.home-chat h2').textContent]),['a@b.pl','x','MatBravo chat']);
    }
+   if(w<=390){const r=await page.evaluate(()=>[document.querySelector('.login-story .brand-logo').getBoundingClientRect().right,document.querySelector('.login-lang').getBoundingClientRect().left]);assert.ok(r[0]<=r[1]-4,'logo runs under the language switch / sign-in button at '+w+': '+r);}
    if(w===390){
     assert.ok(await page.isVisible('.login-jump'),'sign-in button in the phone hero');
     await page.click('.login-jump');await page.waitForTimeout(800);
@@ -81,6 +83,17 @@ test('home page in a browser: layout, skip links, phone sign-in button, known de
   {const {ctx,page}=await open(390,844,()=>{try{localStorage.setItem('matdraw.knownDevice','1');}catch{}});
    await page.waitForSelector('.login-page.known-device');
    const y=await page.evaluate(()=>[document.querySelector('.home-chat').getBoundingClientRect().top,document.querySelector('.login-form-panel').getBoundingClientRect().top]);assert.ok(y[1]<y[0],'known device: sign-in above the chat');await ctx.close();}
+  // very wide screens: the content of the left column stays 400px wide, right-aligned against the chat (no 1200px card)
+  for(const [w,h] of [[1920,1080],[2560,1300]]){
+   const {ctx,page}=await open(w,h);await page.waitForSelector('.upcoming-item');
+   const r=await page.evaluate(()=>{const c=document.querySelector('.upcoming-card').getBoundingClientRect(),h=document.querySelector('.home-centre').getBoundingClientRect();return {card:c.width,gap:h.left-c.right,ov:document.documentElement.scrollWidth-document.documentElement.clientWidth};});
+   assert.ok(r.card<=400&&r.card>=300&&r.gap>=0&&r.gap<=60&&r.ov===0,w+' '+JSON.stringify(r));await ctx.close();
+  }
+  // the module event after the list is (re)painted: the placeholders exist when it fires
+  {const ctx=await browser.newContext({viewport:{width:1440,height:900},locale:'pl-PL'});
+   await ctx.route('**/registry.js',async route=>{const res=await route.fetch(),body=await res.text();await route.fulfill({response:res,body:body+"\n;globalThis.__up=[];on('upcoming-painted',d=>globalThis.__up.push([document.querySelectorAll('.upcoming-item [data-chat-count]').length,d.tournaments.length]));"});});
+   const page=await ctx.newPage();page.on('pageerror',e=>errors.push(e.message));await page.goto(url);await page.waitForSelector('.upcoming-item');
+   const seen=await page.evaluate(()=>globalThis.__up);assert.ok(seen.length>=1&&seen.every(([spans,n])=>n>=1&&spans===n),'upcoming-painted '+JSON.stringify(seen));await ctx.close();}
   // upcoming list placeholder, promo, preview tabs
   {const {ctx,page}=await open(1440,900);
    await page.waitForSelector('.upcoming-item');assert.ok(await page.locator('.upcoming-item .upcoming-chat[data-chat-count]').count()>=1);
@@ -102,6 +115,10 @@ test('home page in a browser: layout, skip links, phone sign-in button, known de
    assert.deepEqual(await page.evaluate(()=>[!!document.querySelector('.promo'),!!document.querySelector('.access-card'),document.querySelector('.guest-login').dataset.page,document.querySelector('.guest-login').textContent.trim()]),[false,false,'chat','Back']);
    await page.locator('.category-card').nth(1).click();await page.click('#guest-tab-chat');assert.ok(await page.locator('[data-chat-mount="tournament"]').count()===1);
    await page.click('#guest-tab-cats');await page.click('.guest-login');await page.waitForFunction(()=>location.hash==='#chat');
+   // "Wróć" (a data-page link) drops the preview: the next visit loads fresh data
+   await page.evaluate(()=>{const db=JSON.parse(localStorage.getItem('matdraw.workspace.v2'));db.tournaments[0].name='Zmieniona nazwa';localStorage.setItem('matdraw.workspace.v2',JSON.stringify(db));});
+   await page.evaluate(i=>{location.hash='#guest?t='+i;},id);await page.waitForSelector('.guest-tabs');
+   assert.equal(await page.locator('#guest-title').innerText(),'Zmieniona nazwa','stale preview after Wróć');
    await ctx.close();}
   assert.deepEqual(errors,[]);
  }finally{await browser.close();server.close();}

@@ -100,8 +100,8 @@
 .home-skips button{background:#fff;color:#00448a;padding:12px 14px;border-radius:6px;font-size:13px;font-weight:650;box-shadow:0 6px 20px #0b1a334d}
 .home-skips button:focus-visible{outline:2px solid #0072bc;outline-offset:2px}
 .login-jump{display:none}
-/* Very wide screens: the headline column takes the extra width. */
-@media(min-width:1650px){.login-page{grid-template-columns:minmax(400px,1fr) minmax(560px,760px) 520px}.login-form-panel{padding-inline:56px}.login-foot{padding-inline:56px}}
+/* Very wide screens (plan: 400px minmax(560px,760px) 520px): the left column keeps the navy fill but its content stays 400px wide, right-aligned against the chat. */
+@media(min-width:1650px){.login-page{grid-template-columns:minmax(400px,1fr) minmax(560px,760px) 520px}.login-story,.login-page .login-upcoming{padding-left:max(52px,calc(100% - 400px))}.login-form-panel{padding-inline:56px}.login-foot{padding-inline:56px}}
 /* Features switched off (chat-boot hides the card): two columns, story | sign-in. */
 @media(min-width:1200px){.login-page:has(>.home-centre[hidden]){grid-template-columns:minmax(0,1fr) clamp(440px,35vw,680px);grid-template-areas:"story auth" "upcoming auth" "upcoming foot"}}
 @media(max-width:1199px){
@@ -165,6 +165,14 @@
  .login-jump{padding:6px 10px}
  .home-centre{padding-inline:10px}
  .guest-tab{padding:0 8px;gap:6px;font-size:12px}
+}
+/* 320-360px (WCAG 1.4.10): the language switch and the sign-in button take about 150px, so the logo gives way instead of running under them. */
+@media(max-width:360px){
+ .login-story>.brand{max-width:calc(100% - 150px)}
+ .login-page .login-story .brand-logo{height:auto;width:156px;max-width:100%}
+ .login-lang{right:10px;gap:4px}
+ .login-lang .lang-switch button{min-width:26px;padding:0 4px}
+ .login-jump{padding:6px 8px;font-size:12px}
 }
 /* Sponsor pop-up (content in promo.js). Inline SVG only: the CSP allows no external images or fonts. */
 .promo-backdrop{background:#0a1a33b8}
