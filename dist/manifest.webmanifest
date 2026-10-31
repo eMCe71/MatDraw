@@ -1,16 +1,26 @@
 {
+ "id": "/",
  "name": "MatBravo",
  "short_name": "MatBravo",
- "description": "Zgłoszenia, kontrola startowa i czytelne drabinki taekwondo.",
+ "description": "Czat sportów walki i drabinki turniejowe taekwondo: zgłoszenia, kontrola startowa, wyniki.",
  "lang": "pl",
- "start_url": "./",
+ "dir": "ltr",
+ "start_url": "./?source=pwa",
  "scope": "./",
  "display": "standalone",
+ "display_override": ["standalone", "minimal-ui"],
  "background_color": "#EFF8FF",
  "theme_color": "#00448A",
+ "categories": ["sports", "social"],
+ "prefer_related_applications": false,
  "icons": [
   {"src": "brand/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any"},
   {"src": "brand/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any"},
+  {"src": "brand/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable"},
   {"src": "brand/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable"}
+ ],
+ "shortcuts": [
+  {"name": "Czat", "short_name": "Czat", "url": "./?source=shortcut#chat", "icons": [{"src": "brand/shortcut-chat-96.png", "sizes": "96x96", "type": "image/png"}]},
+  {"name": "Turnieje", "short_name": "Turnieje", "url": "./?source=shortcut#tournaments", "icons": [{"src": "brand/shortcut-tournaments-96.png", "sizes": "96x96", "type": "image/png"}]}
  ]
 }

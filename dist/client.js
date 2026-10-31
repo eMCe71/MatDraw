@@ -1,6 +1,7 @@
 import {CONFIG} from './runtime-config.js';
 import {initialWorkspace,execute,publicWorkspace,DomainError} from './workspace.js';
 import {guestUpcoming,guestTournament,warsawToday} from './guest-view.js';
+import {emit} from './registry.js';
 const KEY='matdraw.workspace.v2',SESSION='matdraw.session.v2';
 export const isDemo=CONFIG.mode==='demo';
 let db=null,session=null,csrf='',authVersion=null,demoQueue=Promise.resolve();
@@ -11,7 +12,33 @@ async function credentials(user,password){validatePassword(password);user.passwo
 const save=()=>localStorage.setItem(KEY,JSON.stringify(db));
 function read(){const raw=localStorage.getItem(KEY);if(raw)db=JSON.parse(raw);}
 function me(){const u=db?.users.find(u=>u.id===session&&u.active&&u.authVersion===authVersion);if(!u)throw new DomainError('Zaloguj się ponownie.',401);return u;}
-async function api(route,method='GET',data){let response;try{response=await fetch(CONFIG.apiBase+'?route='+encodeURIComponent(route),{method,credentials:'same-origin',headers:{Accept:'application/json',...(method!=='GET'?{'Content-Type':'application/json','X-CSRF-Token':csrf}:{})},...(data?{body:JSON.stringify(data)}:{})});}catch{throw new Error('Brak połączenia z serwerem. Zapis nie został potwierdzony.');}let result;try{result=await response.json();}catch{throw new Error('Serwer nie zwrócił odpowiedzi MatBravo. Sprawdź konfigurację PHP.');}if(result.csrf)csrf=result.csrf;if(!response.ok)throw new DomainError(result.error||'Nie udało się wykonać operacji.',response.status);return result;}
+/** Version of the client contract (plan §4.1, §8.4): sent as X-MatBravo-Client with every API request. A server that needs a newer
+ * client answers 409 {code:'client_outdated'}; the registry then emits 'client-outdated' (pwa.js applies the update). */
+export const CLIENT_API=1;
+const CLIENT_HEADER={'X-MatBravo-Client':String(CLIENT_API)};
+export const apiUrl=params=>CONFIG.apiBase+'?'+new URLSearchParams(typeof params==='string'?{route:params}:params);
+/** Error from an API JSON body: message and status as before, plus every other field (retry, until, code, portal…) in error.data. */
+function failure(result,status){
+ const {error,csrf:_,...data}=result&&typeof result==='object'?result:{};
+ const out=error?new DomainError(error,status):new DomainError('Nie udało się wykonać operacji.',status);out.data=data;if(data.code)out.code=data.code;
+ if(status===409&&data.code==='client_outdated')emit('client-outdated',{message:out.message});
+ return out;
+}
+async function call(params,{method='GET',body,contentType,signal}={}){
+ const write=method!=='GET'&&method!=='HEAD',headers={Accept:'application/json',...CLIENT_HEADER,...(write?{'Content-Type':contentType||'application/json','X-CSRF-Token':csrf}:{})};
+ let response;try{response=await fetch(apiUrl(params),{method,credentials:'same-origin',headers,...(write&&body!==undefined?{body:contentType?body:JSON.stringify(body)}:{}),...(signal?{signal}:{})});}
+ catch(error){if(signal?.aborted)throw error;throw new Error('Brak połączenia z serwerem. Zapis nie został potwierdzony.');}
+ if(response.status===204)return null;
+ let result;try{result=await response.json();}catch{throw new Error('Serwer nie zwrócił odpowiedzi MatBravo. Sprawdź konfigurację PHP.');}
+ if(result?.csrf)csrf=result.csrf;if(!response.ok)throw failure(result,response.status);return result;
+}
+async function api(route,method='GET',data){return call({route},{method,body:data});}
+/** Session request for feature routes (plan §8.4). route is a route name or a params object with route (GET query: ids, cursors).
+ * JSON body by default; contentType sends body as raw bytes (avatar upload). 204 gives null. The demo has no server. */
+export async function request(route,{method='GET',body,contentType,signal}={}){
+ if(isDemo)throw new Error('Ta funkcja jest niedostępna w wersji demonstracyjnej.');
+ return call(typeof route==='string'?{route}:route,{method,body,contentType,signal});
+}
 export async function init(){
  if(!isDemo){const s=await api('session');return s.user?await bootstrap():null;}
  read();if(!db){let old;try{old=JSON.parse(localStorage.getItem('matdraw.demo.v1')||'null');}catch{}db=initialWorkspace(old);for(const u of db.users)await credentials(u,'MatDrawDemo2026!');save();}
@@ -47,13 +74,24 @@ export async function command(type,payload,expectedRevision){
 export const dataKey=KEY;
 // Public guest data (login screen list and read-only preview): GET only, without cookies or CSRF.
 // The demo serves the same projection (dist/guest-view.js) from this browser's demo data.
-async function publicApi(params){
- const controller=typeof AbortController==='function'?new AbortController():null,timer=controller&&setTimeout(()=>controller.abort(),8000);
+async function publicFetch(params,{signal,timeout=8000}={}){
+ const controller=typeof AbortController==='function'?new AbortController():null,timer=controller&&setTimeout(()=>controller.abort(),timeout);
+ const stop=()=>controller?.abort();if(signal){if(signal.aborted)stop();else signal.addEventListener('abort',stop,{once:true});}
  try{
-  let response;try{response=await fetch(CONFIG.apiBase+'?'+new URLSearchParams(params),{method:'GET',credentials:'omit',headers:{Accept:'application/json'},signal:controller?.signal});}catch{throw new Error('Brak połączenia z serwerem.');}
+  let response;try{response=await fetch(apiUrl(params),{method:'GET',credentials:'omit',headers:{Accept:'application/json',...CLIENT_HEADER},signal:controller?.signal});}
+  catch(error){if(signal?.aborted)throw error;throw new Error('Brak połączenia z serwerem.');}
+  if(response.status===204)return {status:204,data:null};
   let result;try{result=await response.json();}catch{throw new Error('Serwer nie zwrócił odpowiedzi MatBravo. Sprawdź konfigurację PHP.');}
-  if(!response.ok)throw new DomainError(result.error||'Nie udało się wykonać operacji.',response.status);return result;
- }finally{clearTimeout(timer);}
+  if(response.status===409&&result?.code==='client_outdated')throw failure(result,409);
+  return {status:response.status,data:result};
+ }finally{clearTimeout(timer);signal?.removeEventListener?.('abort',stop);}
+}
+async function publicApi(params){const {status,data}=await publicFetch(params);if(status<200||status>299)throw failure(data,status);return data;}
+/** Public GET without cookies (plan §8.4): {status,data} for every HTTP answer (204 gives data null), so callers can read 429/503.
+ * Network failure, timeout (default 8 s) and non-JSON answers throw; an aborted signal rethrows the AbortError. */
+export async function publicGet(params,options={}){
+ if(isDemo){if(params?.route==='public-config')return {status:200,data:{signup:false,billing:false,avatars:false,support:null}};throw new Error('Ta funkcja jest niedostępna w wersji demonstracyjnej.');}
+ return publicFetch(params,options);
 }
 const demoTournaments=()=>{read();return db?.tournaments||[];};
 export async function upcoming(){

@@ -1,8 +1,33 @@
 /* MatBravo interface language (PL / EN).
- * Gettext style: the Polish text in the code is the key and the Polish output; English lives in i18n-en.js.
+ * Gettext style: the Polish text in the code is the key and the Polish output; English lives in i18n-en.js and dist/i18n/*-en.js.
  * A missing English entry falls back to the Polish key, so Polish behaviour does not depend on this module.
  * Rule-engine labels and server messages stay Polish in data/API and are translated only for display. */
-import EN from './i18n-en.js';
+import BASE from './i18n-en.js';
+import SHELL from './i18n/shell-en.js';
+import ACCOUNTS from './i18n/accounts-en.js';
+import CHAT from './i18n/chat-en.js';
+import MODERATION from './i18n/moderation-en.js';
+import MEMBERS from './i18n/members-en.js';
+import BILLING from './i18n/billing-en.js';
+import HOME from './i18n/home-en.js';
+import PWA from './i18n/pwa-en.js';
+
+const same=(a,b)=>a===b||(a&&b&&typeof a==='object'&&typeof b==='object'&&JSON.stringify(a)===JSON.stringify(b));
+/** Merges per-feature dictionaries, first one wins. A key repeated with a different value is not fatal (one phrase must not stop
+ * the app); it is listed in collisions, which the tests require to be empty. */
+export function mergeDictionaries(sources){
+ const dictionary={},collisions=[],origin={};
+ for(const [name,dict] of sources)for(const [key,value] of Object.entries(dict||{})){
+  if(!Object.hasOwn(dictionary,key)){dictionary[key]=value;origin[key]=name;}
+  else if(!same(dictionary[key],value))collisions.push({key,kept:origin[key],ignored:name});
+ }
+ return {dictionary,collisions};
+}
+export const DICTIONARY_SOURCES=[['i18n-en.js',BASE],['i18n/shell-en.js',SHELL],['i18n/accounts-en.js',ACCOUNTS],['i18n/chat-en.js',CHAT],['i18n/moderation-en.js',MODERATION],['i18n/members-en.js',MEMBERS],['i18n/billing-en.js',BILLING],['i18n/home-en.js',HOME],['i18n/pwa-en.js',PWA]];
+const merged=mergeDictionaries(DICTIONARY_SOURCES);
+/** All English entries (i18n-en.js and dist/i18n/*-en.js). */
+export const DICTIONARY=merged.dictionary;
+export const collisions=merged.collisions;
 
 export const LANGUAGES=['pl','en'];
 export const STORAGE_KEY='matdraw.language';
@@ -37,11 +62,11 @@ export function setLanguage(lang,{persist=true}={}){
 }
 
 const fill=(text,params)=>params?String(text).replace(/\{(\w+)\}/g,(m,k)=>Object.hasOwn(params,k)?String(params[k]):m):String(text);
-export const hasTranslation=key=>Object.hasOwn(EN,key);
+export const hasTranslation=key=>Object.hasOwn(DICTIONARY,key);
 /** t('Polish text {n}',{n}) – English entries may be a string, {one,other} (chosen by params.n) or a function. */
 export function t(key,params){
- if(current==='pl'||!Object.hasOwn(EN,key))return fill(key,params);
- const entry=EN[key];
+ if(current==='pl'||!Object.hasOwn(DICTIONARY,key))return fill(key,params);
+ const entry=DICTIONARY[key];
  if(typeof entry==='function')return String(entry(params||{}));
  if(entry&&typeof entry==='object')return fill(params?.n===1?entry.one:entry.other,params);
  return fill(entry,params);
@@ -57,11 +82,11 @@ export const gradeLabel=(grade,type)=>current==='pl'?grade+' '+gradeName(type):o
 export function ruleLabel(text){
  if(current==='pl'||text==null)return text;
  const s=String(text);let m;
- if(Object.hasOwn(EN,s))return t(s);
+ if(Object.hasOwn(DICTIONARY,s))return t(s);
  if((m=s.match(/^(do|powyżej) (\d+(?:[.,]\d+)?) (kg|cm)$/)))return t(m[1]==='do'?'do {value} {unit}':'powyżej {value} {unit}',{value:m[2],unit:m[3]});
  if((m=s.match(/^(\d+)–(\d+) Cup$/)))return ordinal(+m[1])+'–'+ordinal(+m[2])+' '+gradeName('cup');
  if((m=s.match(/^(\d+) (Dan|Cup)$/)))return gradeLabel(+m[1],m[2].toLowerCase());
- if((m=s.match(/^(.+) (\d+–\d+|\d+\+) lat$/))&&Object.hasOwn(EN,m[1]))return t('{group} {range} lat',{group:t(m[1]),range:m[2]});
+ if((m=s.match(/^(.+) (\d+–\d+|\d+\+) lat$/))&&Object.hasOwn(DICTIONARY,m[1]))return t('{group} {range} lat',{group:t(m[1]),range:m[2]});
  return s;
 }
 /** Category subtitles and titles joined with " · " (e.g. "Seniorzy · mężczyźni · do 63 kg"). */
@@ -81,7 +106,7 @@ const TEMPLATES=[
 export function translateMessage(message){
  if(current==='pl'||message==null)return message;
  const s=String(message);
- if(Object.hasOwn(EN,s))return t(s);
+ if(Object.hasOwn(DICTIONARY,s))return t(s);
  for(const {key,names,convert,re} of TEMPLATES){const m=s.match(re);if(!m)continue;const params={};names.forEach((name,i)=>{params[name]=convert[name]?convert[name](m[i+1]):m[i+1];});return t(key,params);}
  return s;
 }

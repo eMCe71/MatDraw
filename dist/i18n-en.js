@@ -677,5 +677,11 @@ export default {
  'Nie znaleziono zawodnika.':'Athlete not found.',
  'Wybierz turniej z otwartymi zapisami.':'Choose a tournament with open registration.',
  'Turniej nie jest dostępny.':'This tournament is not available.',
- 'Brak połączenia z serwerem.':'No connection to the server.'
+ 'Brak połączenia z serwerem.':'No connection to the server.',
+ // Server messages of the API core (backend-api: index.php, Routes): payment gate, maintenance, client version, chat switch.
+ 'Ta funkcja wymaga aktywnej subskrypcji.':'This feature requires an active subscription.',
+ 'Trwa przerwa techniczna. Spróbuj ponownie za kilka minut.':'Maintenance in progress. Try again in a few minutes.',
+ 'Dostępna jest nowa wersja MatBravo. Odśwież stronę.':'A new version of MatBravo is available. Refresh the page.',
+ 'Czat jest chwilowo wyłączony. Spróbuj później.':'The chat is temporarily switched off. Try again later.',
+ 'Nieobsługiwany format danych.':'Unsupported data format.'
 };

@@ -1,3 +1,5 @@
+-- Zamrożona baza = wersja 1; zmiany tylko przez backend/migrations (backend/src/Migrator.php, backend/bin/migrate.php).
+-- Frozen baseline = version 1: new tables and columns go to backend/migrations, never into this file.
 CREATE TABLE IF NOT EXISTS app_meta (
  id TINYINT PRIMARY KEY,
  revision BIGINT NOT NULL DEFAULT 0,
