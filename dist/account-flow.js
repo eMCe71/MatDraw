@@ -369,7 +369,16 @@ async function savePassword(form){
  const el=form.elements,current=el.currentPassword.value,password=el.password.value,m=getMe(),must=!!m?.profile?.mustChangePassword;
  Client.validatePassword(password);
  if(m?.user?.role==='member'){await Client.request('member-password',{method:'POST',body:{currentPassword:current,password}});await loadMe({force:true});}
- else{try{await ui().commit('account.password',{id:workspace().user.id,currentPassword:current,password});}catch(error){error.app=true;throw error;}}
+ else{
+  // account.password reads no workspace data, so a revision conflict (anyone saved anything since this page was drawn, constant on a
+  // tournament day) is retried once with the fresh revision instead of failing.
+  const body={id:workspace().user.id,currentPassword:current,password};
+  try{await ui().commit('account.password',body);}
+  catch(error){
+   if(error?.status!==409||error.code==='client_outdated'){error.app=true;throw error;}
+   try{const fresh=await Client.bootstrap();await ui().commit('account.password',body,Number(fresh?.revision));}catch(again){again.app=true;throw again;}
+  }
+ }
  form.reset();form.removeAttribute('data-dirty');ui()?.toast?.(T('Hasło zostało zmienione. Pozostałe sesje zostały wylogowane.'));
  if(must)goChat();else repaint();
 }
@@ -470,8 +479,17 @@ async function removePhoto(form){
  if(Client.isDemo)saveDemoProfile({avatar:null});else{await Client.request('avatar-delete',{method:'POST',body:{}});await loadMe({force:true});}
  repaint();ui()?.toast?.(T('Usunięto zdjęcie.'));
 }
-function failed(error,form){
- if(error?.app||error?.status===401||error?.status===402){ui()?.handleError?.(error,form);return;}
+async function failed(error,form){
+ if(error?.app||error?.status===401||error?.status===402){
+  // handleError may re-render the page (409: fresh workspace): the message and what was typed then go to the new form of the same id.
+  const id=form?.id,typed=id&&form.elements?[...form.elements].filter(el=>el.name&&el.type!=='file'&&el.type!=='checkbox'&&el.type!=='radio'&&el.value).map(el=>[el.name,el.value]):[];
+  await ui()?.handleError?.(error,form);
+  if(!id||form.isConnected||error?.status===401)return;
+  const live=document.getElementById(id);if(!live)return;
+  for(const [name,value] of typed){const el=live.elements?.[name];if(el&&!el.value)el.value=value;}
+  const box=live.querySelector('.form-error');if(box)box.textContent=message(error);
+  return;
+ }
  const box=form?.querySelector('.form-error'),text=message(error);if(box)box.textContent=text;else ui()?.toast?.(text);
 }
 async function onSubmit(event){
@@ -487,10 +505,11 @@ async function onSubmit(event){
   else if(form.id==='acct-delete-form')await deleteAccount(form);
  }catch(error){
   if(form.id==='acct-signup-2'||form.id==='acct-signup-1')S.signup.error=message(error);
-  failed(error,document.getElementById(form.id)||form);
+  await failed(error,document.getElementById(form.id)||form);
  }finally{
   // A disabled button drops the focus to <body>; when the form stays (an error, the deletion's second step) it goes back to the button.
   if(submit?.isConnected){submit.disabled=false;const a=document.activeElement;if(!a||a===document.body)submit.focus();}
+  else{const a=document.activeElement;if(!a||a===document.body)document.getElementById(form.id)?.querySelector('[type="submit"]')?.focus();}// the page was re-rendered
  }
 }
 function onInput(event){
@@ -531,7 +550,7 @@ async function onClick(event){
   else if(act==='photo-remove'){el.disabled=true;await removePhoto(form);}
   else if(act==='install'){await registry.use('pwa')?.install?.();repaint();}
   else if(act==='delete-open')openDelete();
- }catch(error){if(el.isConnected)el.disabled=false;failed(error,form||el.closest('section'));}
+ }catch(error){if(el.isConnected)el.disabled=false;await failed(error,form||el.closest('section'));}
 }
 function onKey(event){
  const tab=event.target.closest?.('.acct-tab');if(!tab||event.altKey||event.ctrlKey||event.metaKey||!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;

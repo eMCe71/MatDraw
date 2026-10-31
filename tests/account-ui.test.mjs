@@ -433,6 +433,32 @@ test('PHP build in a browser: sign-up, Checkout and return, portal, cancel, prof
   fixture('billing',{userId:created.id,exempt_until:now-2*86400});await page.reload();await page.waitForSelector('.acct-banner');assert.match(await page.textContent('.acct-banner'),/Karencja do/);
   await page.click('.acct-banner [data-acct-act="plan"]');await page.waitForSelector('.acct-plan');assert.equal(await page.locator('.acct-banner').count(),0,'no banner on the plan page');
   await ctx.close();
+
+  // Staff password on #profile while someone else saves (final review F3): account.password reads no workspace data, so a revision
+  // conflict is retried once with the fresh revision; a conflict that persists is shown in the form, with what was typed kept.
+  const pwEmail='e2e.pw.'+Date.now()+'@example.test';
+  const pwUser=await admin.cmd('account.save',{email:pwEmail,clubId,role:'editor',active:true,password:'EditorForTests2026!'});
+  fixture('billing',{userId:pwUser.id,billing_exempt:1,exempt_reason:'e2e'});
+  ({ctx,page}=await context(1440,900));
+  await page.goto(app);await page.fill('#login-form [name="email"]',pwEmail);await page.fill('#login-form [name="password"]','EditorForTests2026!');
+  await page.click('#login-form button[type="submit"]');await page.waitForSelector('.app-shell');
+  await page.goto(app+'#profile?tab=security');await page.waitForSelector('#acct-password-form');
+  await admin.load();await admin.cmd('account.save',{email:'e2e.bump.'+Date.now()+'@example.test',clubId,role:'editor',active:true,password:'EditorForTests2026!'});
+  const statuses=[];const onCommand=r=>{if(r.url().includes('route=command'))statuses.push(r.status());};page.on('response',onCommand);
+  await page.fill('#acct-password-form [name="currentPassword"]','EditorForTests2026!');await page.fill('#acct-password-form [name="password"]','Zielona-Herbata-2029');
+  await page.click('#acct-password-form button[type="submit"]');await page.waitForFunction(()=>document.querySelector('#toast')?.textContent.includes('Hasło zostało zmienione'),null,{timeout:20000});
+  assert.deepEqual(statuses,[409,200],'the stale revision is retried once');page.off('response',onCommand);
+  const old=new Client();await old.req('session');assert.notEqual((await old.req('login',{email:pwEmail,password:'EditorForTests2026!'})).status,200,'the old password no longer works');
+  // Every command answers 409: the message is visible in the (re-rendered) form and the typed values stay.
+  const isCommand=u=>new URL(u).searchParams.get('route')==='command';
+  await page.route(isCommand,route=>route.fulfill({status:409,contentType:'application/json',body:JSON.stringify({error:'Dane zmieniły się w innej sesji. Odśwież widok i ponów zapis.'})}));
+  await page.fill('#acct-password-form [name="currentPassword"]','Zielona-Herbata-2029');await page.fill('#acct-password-form [name="password"]','Czerwona-Herbata-2030');
+  await page.click('#acct-password-form button[type="submit"]');
+  await page.waitForFunction(()=>document.querySelector('#acct-password-form .form-error')?.textContent.trim().length>0,null,{timeout:20000});
+  assert.match(await page.textContent('#acct-password-form .form-error'),/Dane zmieniły się/);
+  assert.equal(await page.inputValue('#acct-password-form [name="password"]'),'Czerwona-Herbata-2030','typed values kept');
+  await page.unroute(isCommand);
+  await ctx.close();
   assert.deepEqual(errors,[]);
  }finally{await browser.close();}
 });
