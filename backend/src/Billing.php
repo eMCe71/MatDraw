@@ -255,6 +255,14 @@ final class Billing {
  /** Epoch of 00:00 Europe/Warsaw of a YYYY-MM-DD date (422 'Podaj poprawną datę.' otherwise). */
  public static function dayStart(mixed $date):int{return (new \DateTimeImmutable(Domain::date($date).' 00:00:00',new \DateTimeZone('Europe/Warsaw')))->getTimestamp();}
  private static function today():int{return (new \DateTimeImmutable('today',new \DateTimeZone('Europe/Warsaw')))->getTimestamp();}
+ /**
+  * Earliest 'requireFrom' date of the grandfathered scope: 00:00 Europe/Warsaw 14 calendar days after the day of $now
+  * (as the Admin form counts). today()+14*86400 would be an hour late across the spring clock change and refuse it.
+  */
+ public static function grandfatheredMin(?int $now=null):int {
+  $tz=new \DateTimeZone('Europe/Warsaw');
+  return (new \DateTimeImmutable('@'.($now??time())))->setTimezone($tz)->setTime(0,0)->modify('+14 days')->getTimestamp();
+ }
  /** Plan badges of every staff account (admin-billing?list=staff), computed as if payments were enforced. */
  public static function adminList(PDO $pdo,array $c):array {
   $now=time();$cfg=['billing_enforce'=>true]+$c;$out=[];
@@ -301,7 +309,7 @@ final class Billing {
  public static function adminAction(PDO $pdo,array $c,array $admin,array $b):array {
   $action=$b['action']??null;$now=time();$actor=$admin['id'];
   if($action==='requireFrom'&&($b['scope']??null)==='grandfathered'){
-   $from=self::dayStart($b['date']??null);if($from<self::today()+14*86400)throw new AppError('Płatność można wymagać od daty co najmniej 14 dni od dziś.',422);
+   $from=self::dayStart($b['date']??null);if($from<self::grandfatheredMin())throw new AppError('Płatność można wymagać od daty co najmniej 14 dni od dziś.',422);
    $pdo->beginTransaction();
    try{
     $pdo->prepare("INSERT INTO billing_audit (user_id,actor,action,detail,created_at) SELECT user_id,?,'exempt.requireFrom',?,? FROM billing_accounts WHERE billing_exempt=1 AND exempt_reason='grandfathered' AND deleted_at IS NULL")->execute([$actor,'from='.date('Y-m-d',$from).' scope=grandfathered',$now]);
