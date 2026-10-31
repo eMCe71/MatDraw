@@ -1,9 +1,9 @@
 // PL/EN interface: language detection, dictionary coverage and display-time translation of rules and server messages.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {readFileSync} from 'node:fs';
+import {readFileSync,readdirSync,existsSync} from 'node:fs';
 import vm from 'node:vm';
-import EN from '../dist/i18n-en.js';
+import {DICTIONARY as EN,collisions,DICTIONARY_SOURCES} from '../dist/i18n.js';
 import {detectLanguage,resolveLanguage,setLanguage,getLanguage,t,ruleLabel,ruleText,translateMessage,formatNumber,gradeLabel,locale,STORAGE_KEY} from '../dist/i18n.js';
 import {EVENTS,RULE_ISSUES,classify,eligibility} from '../dist/engine.js';
 import {ROLES,STATUSES} from '../dist/workspace.js';
@@ -18,6 +18,15 @@ const english=fn=>{const before=getLanguage();setLanguage('en',{persist:false});
 const polish=fn=>{const before=getLanguage();setLanguage('pl',{persist:false});try{return fn();}finally{setLanguage(before,{persist:false});}};
 // Proper names that legitimately keep Polish letters in English text.
 const NAMES=/Bogusław/g;
+const list=dir=>existsSync(new URL('../'+dir,import.meta.url))?readdirSync(new URL('../'+dir,import.meta.url)).sort():[];
+// Interface modules scanned for T('…') keys, thrown messages and stray Polish (plan §8.6): every dist/*.js except the rules engine,
+// domain/demo data, dictionaries, boot scripts, the service worker, the registry (no texts) and data-only modules.
+const NOT_UI=new Set(['engine.js','workspace.js','guest-view.js','lang-boot.js','runtime-config.js','sw.js','registry.js','profile-data.js','chat-demo.js']);
+const UI_MODULES=list('dist').filter(f=>f.endsWith('.js')&&!/^i18n/.test(f)&&!NOT_UI.has(f)).map(f=>'dist/'+f);
+// promo.js holds the advertisement and the access offer as Polish data shown through T(); the promotional test below covers it.
+const DATA_MODULES=new Set(['dist/promo.js']);
+const PHP_MESSAGE_FILES=[...['backend/src','backend/routes','backend/jobs'].flatMap(dir=>list(dir).filter(f=>f.endsWith('.php')).map(f=>dir+'/'+f)),'backend/public/api/index.php'];
+const stripTexts=code=>code.replace(new RegExp("\\b[tT]\\(\\s*"+literal,'g'),'T(').replace(new RegExp("\\b(?:Error|DomainError)\\(\\s*"+literal,'g'),'Error(').replace(/Język \/ Language/g,'');
 
 test('browser language: Polish preference gives PL, anything else gives EN',()=>{
  for(const value of ['pl','pl-PL','PL-pl','pl_PL',' pl-PL ',['pl-PL','en-US'],['pl'],[undefined,'','pl']])assert.equal(detectLanguage(value),'pl',JSON.stringify(value));
@@ -43,9 +52,16 @@ test('lang-boot.js (early <html lang>) follows the same rule as i18n.js',()=>{
  assert.equal(html.lang,'pl','falls back to navigator.language and survives blocked storage');
 });
 
+test('the interface modules are found and the per-feature dictionaries merge without collisions',()=>{
+ for(const file of ['dist/app.js','dist/architecture.js','dist/client.js','dist/me.js'])assert.ok(UI_MODULES.includes(file),file);
+ for(const file of ['dist/registry.js','dist/engine.js','dist/i18n.js','dist/i18n-en.js'])assert.ok(!UI_MODULES.includes(file),file);
+ assert.deepEqual(DICTIONARY_SOURCES.map(([name])=>name),['i18n-en.js',...['shell','accounts','chat','moderation','members','billing','home','pwa'].map(f=>'i18n/'+f+'-en.js')]);
+ assert.deepEqual(collisions,[],'the same key with different English text in two dictionaries');
+ assert.ok(PHP_MESSAGE_FILES.includes('backend/src/Domain.php')&&PHP_MESSAGE_FILES.includes('backend/public/api/index.php'));
+});
 test('every T()/t() key used in the interface has an English entry with the same placeholders',()=>{
  const used=new Map();
- for(const file of ['dist/app.js','dist/architecture.js','dist/client.js'])for(const key of all(read(file),"\\b[tT]\\(\\s*"+literal))used.set(key,file);
+ for(const file of UI_MODULES)for(const key of all(read(file),"\\b[tT]\\(\\s*"+literal))used.set(key,file);
  assert.ok(used.size>300,'expected the whole UI to be wrapped, found '+used.size);
  const missing=[...used.keys()].filter(k=>!Object.hasOwn(EN,k));
  assert.deepEqual(missing,[],'missing English entries');
@@ -58,10 +74,8 @@ test('every T()/t() key used in the interface has an English entry with the same
   }
  }
 });
-test('no visible Polish text in app.js outside T() (thrown messages are translated when shown)',()=>{
- let code=read('dist/app.js');
- code=code.replace(new RegExp("\\bT\\(\\s*"+literal,'g'),'T(').replace(new RegExp("\\bError\\("+literal,'g'),'Error(').replace(/Język \/ Language/g,'');
- const left=code.split('\n').filter(line=>POLISH_LETTERS.test(line));
+test('no visible Polish text in interface modules outside T() (thrown messages are translated when shown)',()=>{
+ const left=UI_MODULES.filter(file=>!DATA_MODULES.has(file)).flatMap(file=>stripTexts(read(file)).split('\n').filter(line=>POLISH_LETTERS.test(line)).map(line=>file+': '+line.trim().slice(0,160)));
  assert.deepEqual(left,[]);
 });
 test('Polish output is the key itself (unchanged behaviour); English uses plural forms',()=>{
@@ -103,12 +117,13 @@ test('every category the engine can produce is fully translated, and its id stay
 }));
 
 test('every message the PHP API, the demo adapter and the rules engine can send has an English translation',()=>english(()=>{
- const php=['backend/src/Domain.php','backend/src/Rules.php','backend/src/Auth.php','backend/public/api/index.php'].map(read).join('\n');
- const js={engine:read('dist/engine.js'),workspace:read('dist/workspace.js'),client:read('dist/client.js'),app:read('dist/app.js')};
+ // PHP: every source, route and job file (plan §8.6 point 4); JS: Error/DomainError messages of every interface module (point 5).
+ const php=PHP_MESSAGE_FILES.map(read).join('\n');
+ const js={engine:read('dist/engine.js'),workspace:read('dist/workspace.js'),ui:UI_MODULES.map(read).join('\n')};
  const messages=new Set([
-  ...all(php,"new AppError\\("+literal+"\\s*[,)]"),...all(php,"'error'=>"+literal),...all(read('backend/src/Rules.php'),"return "+literal+";"),...all(read('backend/src/Rules.php'),"\\['error'=>"+literal),
+  ...all(php,"new (?:AppError|ApiError)\\("+literal+"\\s*[,)]"),...all(php,"'error'=>"+literal),...all(read('backend/src/Rules.php'),"return "+literal+";"),...all(read('backend/src/Rules.php'),"\\['error'=>"+literal),
   ...all(js.engine,"Error\\("+literal+"\\)"),...all(js.engine,"return "+literal+";"),...all(js.engine,"\\{error:"+literal+"\\}"),
-  ...all(js.workspace,"fail\\("+literal+"\\s*[,)]"),...all(js.client,"(?:Error|DomainError)\\("+literal+"\\s*[,)]"),...all(js.app,"throw Error\\("+literal+"\\)")
+  ...all(js.workspace,"fail\\("+literal+"\\s*[,)]"),...all(js.ui,"\\b(?:Error|DomainError)\\(\\s*"+literal+"\\s*[,)]")
  ]);
  assert.ok(messages.size>80,'messages found: '+messages.size);
  // Messages built from a template and a field/entity label.
