@@ -155,9 +155,15 @@ final class Chat {
   foreach($q['ch'] as $id=>$rev)if($rev===0&&$ch[$id]==='same')$ch[$id]='initial';
   return ['ch'=>$ch,'heads'=>$heads,'none'=>$none];
  }
- /** One poll (public-chat with $viewer null, chat-feed otherwise); null = 204. */
+ /**
+  * One poll (public-chat with $viewer null, chat-feed otherwise); null = 204. A hosting report (e) counts once per
+  * reporter (the address bucket of a guest, the account of a signed-in person), status and hour: the route is public
+  * and cookie-less, and the Admin acts on these figures (DEPLOY-PL.md), so a script repeating e=50:503 adds 50, not
+  * 50 per request.
+  */
  public static function feed(PDO $pdo,array $c,array $q,?array $viewer,int $nowMs):?array {
-  if($q['e'])ChatSettings::report($pdo,$q['e'][0],$q['e'][1],intdiv($nowMs,1000));
+  if($q['e']&&RateLimit::hit($pdo,$c['app_key'],'chat-health-'.$q['e'][1],$viewer!==null?'u:'.$viewer['id']:'ip:'.ClientIp::bucket($c),1,3600,intdiv($nowMs,1000))===0)
+   ChatSettings::report($pdo,$q['e'][0],$q['e'][1],intdiv($nowMs,1000));
   $channels=self::channelRows($pdo,array_values(array_unique([...array_keys($q['ch']),...array_keys($q['h'])])));
   $tours=self::tournamentRows($pdo,$channels);$settings=ChatSettings::get($pdo);$today=self::today();$grace=$settings['data']['graceDays'];
   $state=[];$tour=fn(array $row):?array=>$row['tournament_id']!==null?$tours[$row['tournament_id']]??null:null;

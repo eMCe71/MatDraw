@@ -160,6 +160,14 @@ test('polling: 204 without changes (also with h), COUNT only after knownLast cha
  assert.equal((await get('public-chat',{ch:`${id}:106`,cv:String(v),e:'3:429'})).status,204,'the report rides on a normal poll');
  assert.equal((await get('chat-feed',{e:'2:0',cv:String(v)},C.m2.cookie)).status,204);
  assert.deepEqual([count(429)-h429,count(0)-h0],[3,2]);
+ // One report per reporter (the address of a guest, the account of a signed-in person), status and hour: a script
+ // repeating e=50:503 on the public route cannot inflate the figures the runbook acts on.
+ const h503=count(503);
+ for(let i=0;i<5;i++)assert.equal((await get('public-chat',{ch:`${id}:106`,cv:String(v),e:'50:503'})).status,204);
+ assert.equal((await get('public-chat',{ch:`${id}:106`,cv:String(v),e:'9:429'})).status,204);
+ assert.deepEqual([count(503)-h503,count(429)-h429],[50,3],'only the first report of this address per status counts this hour');
+ for(let i=0;i<3;i++)assert.equal((await get('chat-feed',{e:'4:503',cv:String(v)},C.m3.cookie)).status,204);
+ assert.equal(count(503)-h503,54,'another account is another reporter, once');
  for(const q of [{ch:'1:x'},{ch:`${id}:5`,before:'10'},{e:'51:429'},{e:'2:404'},{h:Array.from({length:31},(_,i)=>`${i+1}:0:0`).join(',')},{ch:Array.from({length:7},(_,i)=>`${i+1}:0`).join(',')}]){
   error(await get('public-chat',q),400,'Niepoprawne zapytanie czatu.');error(await get('chat-feed',q,C.m2.cookie),400,'Niepoprawne zapytanie czatu.');
  }
