@@ -177,7 +177,7 @@ function panelView(){
  return h`${err}${queueView(data,S,kind==='history')}`;
 }
 function tabsView(){
- if(S.demo)return '';
+ if(S.demo)return h``;
  const count=tab=>tab==='reports'?(S.data.reports?.total??registry.badge('moderation')):tab==='muted'?S.data.muted?.items?.length:null;
  return h`${TABS.map(tab=>h`<button type="button" role="tab" id="mod-tab-${tab}" class="mod-tab" data-mod="tab" data-tab="${tab}" aria-selected="${String(tab===S.tab)}" aria-controls="mod-panel" tabindex="${tab===S.tab?0:-1}">${tabLabel(tab)}${count(tab)?h` <span class="mod-tab-count">${count(tab)}</span>`:''}</button>`)}`;
 }

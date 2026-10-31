@@ -27,7 +27,7 @@ function failure(result,status){
 async function call(params,{method='GET',body,contentType,signal}={}){
  const write=method!=='GET'&&method!=='HEAD',headers={Accept:'application/json',...CLIENT_HEADER,...(write?{'Content-Type':contentType||'application/json','X-CSRF-Token':csrf}:{})};
  let response;try{response=await fetch(apiUrl(params),{method,credentials:'same-origin',headers,...(write&&body!==undefined?{body:contentType?body:JSON.stringify(body)}:{}),...(signal?{signal}:{})});}
- catch(error){if(signal?.aborted)throw error;throw new Error('Brak połączenia z serwerem. Zapis nie został potwierdzony.');}
+ catch(error){if(signal?.aborted)throw error;throw write?new Error('Brak połączenia z serwerem. Zapis nie został potwierdzony.'):new Error('Brak połączenia z serwerem.');}
  if(response.status===204)return null;
  let result;try{result=await response.json();}catch{throw new Error('Serwer nie zwrócił odpowiedzi MatBravo. Sprawdź konfigurację PHP.');}
  if(result?.csrf)csrf=result.csrf;if(!response.ok)throw failure(result,response.status);return result;

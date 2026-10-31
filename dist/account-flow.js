@@ -381,7 +381,7 @@ async function deleteAccount(form){
  try{await Client.request('account-delete',{method:'POST',body:d.confirmEnd?{password,endSubscription:true}:{password}});}
  catch(error){
   if(error?.status===409&&error.data?.confirmEnd){
-   d.password=password;d.confirmEnd=true;const box=form.querySelector('.acct-delete-end');box.hidden=false;
+   d.password=password;d.confirmEnd=true;const box=form.querySelector('.acct-delete-end');box.hidden=false;box.setAttribute('role','alert');
    setHtml(box,h`${icon('alert')}<p><strong>${message(error)}</strong> ${T('Potwierdź jeszcze raz, aby usunąć konto i zakończyć subskrypcję.')}</p>`);
    const submit=document.querySelector('#modal-root button[form="acct-delete-form"]');if(submit)submit.textContent=T('Usuń konto i zakończ subskrypcję');
    field.closest('label').hidden=true;return;
@@ -480,7 +480,10 @@ async function onSubmit(event){
  }catch(error){
   if(form.id==='acct-signup-2'||form.id==='acct-signup-1')S.signup.error=message(error);
   failed(error,document.getElementById(form.id)||form);
- }finally{if(submit?.isConnected)submit.disabled=false;}
+ }finally{
+  // A disabled button drops the focus to <body>; when the form stays (an error, the deletion's second step) it goes back to the button.
+  if(submit?.isConnected){submit.disabled=false;const a=document.activeElement;if(!a||a===document.body)submit.focus();}
+ }
 }
 function onInput(event){
  const t=event.target,form=t.closest?.('form');if(!form?.id?.startsWith('acct-'))return;

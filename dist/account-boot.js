@@ -130,15 +130,20 @@ export function avatarSrc(profile,size=64){
  if(/^data:image\/(?:webp|jpeg|png);base64,[A-Za-z0-9+/=]+$/.test(v))return v;
  return /^[0-9a-f]{12}$/.test(v)&&/^[A-Za-z0-9]{6,32}$/.test(profile.publicId||'')?Client.apiUrl({route:'avatar',id:profile.publicId,v,s:size>64?256:64}):null;
 }
+/** Initials of a member's own name for the shell avatar (the shell itself only knows staff clubs and would show "K" for "Klub"). */
+export function selfInitials(me){
+ const p=me?.profile;if(me?.user?.role!=='member'||!p)return '';
+ return ((String(p.firstName||'').trim()[0]||'')+(String(p.lastName||'').trim()[0]||'')).toLocaleUpperCase();
+}
 function paintSelf(){
- const src=avatarSrc(getMe()?.profile,64);
+ const me=getMe(),src=avatarSrc(me?.profile,64),own=selfInitials(me);
  for(const el of document.querySelectorAll('[data-self-avatar]')){
   if(el.dataset.acctInitials===undefined)el.dataset.acctInitials=el.textContent;
-  const img=el.querySelector('img.acct-self-img');
-  if(!src){if(img){el.textContent=el.dataset.acctInitials;}continue;}
+  const img=el.querySelector('img.acct-self-img'),fallback=own||el.dataset.acctInitials||'';
+  if(!src){if(img||el.textContent!==fallback)el.textContent=fallback;continue;}
   if(img?.getAttribute('src')===src)continue;
   const next=document.createElement('img');next.className='acct-self-img';next.alt='';next.width=34;next.height=34;next.decoding='async';
-  next.addEventListener('error',()=>{el.textContent=el.dataset.acctInitials||'';},{once:true});next.src=src;el.replaceChildren(next);
+  next.addEventListener('error',()=>{el.textContent=fallback;},{once:true});next.src=src;el.replaceChildren(next);
  }
 }
 /** §3.10: with a temporary password every page except #profile?tab=security leads there. */
