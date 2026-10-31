@@ -7,6 +7,7 @@ import EN from '../dist/i18n-en.js';
 import {detectLanguage,resolveLanguage,setLanguage,getLanguage,t,ruleLabel,ruleText,translateMessage,formatNumber,gradeLabel,locale,STORAGE_KEY} from '../dist/i18n.js';
 import {EVENTS,RULE_ISSUES,classify,eligibility} from '../dist/engine.js';
 import {ROLES,STATUSES} from '../dist/workspace.js';
+import {AD,ACCESS} from '../dist/promo.js';
 
 const read=file=>readFileSync(new URL('../'+file,import.meta.url),'utf8');
 const literal="'((?:[^'\\\\]|\\\\.)*)'";
@@ -132,4 +133,15 @@ test('activity entries stored in Polish by PHP and the demo adapter are translat
  }
  assert.equal(translateMessage('Zapisano losowanie: Układy formalne · Seniorki · kobiety · 1 Dan'),'Draw saved: Patterns · Seniors · female · 1st Dan');
  assert.equal(translateMessage('Zgłoszono: Łukasz Żak'),'Entered: Łukasz Żak','names are kept');
+}));
+
+test('promotional texts (dist/promo.js: advertisement and login/access offer) all have English entries',()=>english(()=>{
+ const strings=[];
+ const walk=(value,key)=>{if(['kind','brand','icon'].includes(key))return;if(typeof value==='string')strings.push(value);else if(value&&typeof value==='object')for(const [k,v] of Object.entries(value))walk(v,Array.isArray(value)?key:k);};
+ walk(AD);walk(ACCESS);
+ assert.ok(strings.length>=20,'texts found: '+strings.length);
+ const missing=strings.filter(s=>!Object.hasOwn(EN,s));assert.deepEqual(missing,[]);
+ for(const s of strings){const out=t(s);assert.notEqual(out,s);assert.ok(!POLISH_LETTERS.test(out),out);}
+ assert.match(t(AD.disclaimer),/fictional/,'the advertisement says the brand is fictional in both languages');
+ assert.match(AD.disclaimer,/fikcyjn/);
 }));

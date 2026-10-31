@@ -26,6 +26,15 @@ const paths={
  mail:'<rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 6 9 7 9-7"/>',
  shield:'<path d="m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6l8-3Z"/><path d="m8 12 3 3 5-5"/>',
  expand:'<path d="M8 3H3v5M16 3h5v5M3 16v5h5M21 16v5h-5"/>',
- leaf:'<path d="M20 3C7 2 2 9 6 16s17 1 14-13ZM4 21 16 8"/>'
+ leaf:'<path d="M20 3C7 2 2 9 6 16s17 1 14-13ZM4 21 16 8"/>',
+ calendar:'<rect x="3" y="5" width="18" height="16" rx="2.5"/><path d="M3 10h18M8 3v4M16 3v4"/><path d="M7.5 14h.01M12 14h.01M16.5 14h.01M7.5 17.5h.01M12 17.5h.01"/>',
+ pin:'<path d="M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21Z"/><circle cx="12" cy="9.5" r="2.5"/>',
+ eye:'<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/>',
+ lock:'<rect x="4" y="10" width="16" height="11" rx="2.5"/><path d="M8 10V7a4 4 0 0 1 8 0v3M12 14.5v2.5"/>',
+ sparkle:'<path d="M12 3c.6 4.3 1.7 5.4 6 6-4.3.6-5.4 1.7-6 6-.6-4.3-1.7-5.4-6-6 4.3-.6 5.4-1.7 6-6ZM18.5 15c.3 1.7.8 2.2 2.5 2.5-1.7.3-2.2.8-2.5 2.5-.3-1.7-.8-2.2-2.5-2.5 1.7-.3 2.2-.8 2.5-2.5Z"/>',
+ dobok:'<path d="M9 3 4.6 5.2a1.5 1.5 0 0 0-.8 1.1L3 11.5l3 .8V21h12v-8.7l3-.8-.8-5.2a1.5 1.5 0 0 0-.8-1.1L15 3l-3 5.5L9 3Z"/><path d="M12 8.5V21M6 15.5h12M11 15.5 9.5 19M13 15.5l1.5 3.5"/>',
+ glove:'<path d="M8 12V7.5A3.5 3.5 0 0 1 11.5 4h2A3.5 3.5 0 0 1 17 7.5V13a6 6 0 0 1-6 6h-.5A3.5 3.5 0 0 1 7 15.5"/><path d="M8 12H6.5a1.5 1.5 0 0 0 0 3H10a2 2 0 0 0 0-4H8.5M9 19v2h7v-3"/>',
+ foot:'<path d="M8 3h5v8.5l5.6 2.4A2.3 2.3 0 0 1 20 16v2H9.5A4.5 4.5 0 0 1 5 13.5V6a3 3 0 0 1 3-3Z"/><path d="M5 21h15M13 7h-3"/>',
+ helmet:'<path d="M4 13a8 8 0 0 1 16 0v3.5a2.5 2.5 0 0 1-2.5 2.5H15v-6H9v6H6.5A2.5 2.5 0 0 1 4 16.5V13Z"/><path d="M8 9h8"/>'
 };
 export function icon(n,cls=''){return `<svg class="icon ${cls}" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[n]||paths.info}</svg>`;}

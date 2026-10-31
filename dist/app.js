@@ -3,6 +3,8 @@ import {icon} from './icons.js';
 import * as Client from './client.js';
 import {ROLES,STATUSES,ageAt,managesTournament,managesProfile,canEnter} from './workspace.js';
 import {t as T,LANGUAGES,STORAGE_KEY as LANGUAGE_KEY,getLanguage,setLanguage,onLanguageChange,locale,formatNumber,gradeName,gradeLabel,ruleLabel,ruleText,translateMessage} from './i18n.js';
+import {warsawToday} from './guest-view.js';
+import {AD,ACCESS} from './promo.js';
 const isDemo=Client.isDemo;
 const eventName=key=>ruleLabel(EVENTS[key]),roleName=role=>T(ROLES[role]),statusName=status=>T(STATUSES[status]);
 const plural=(n,one,few,many)=>n===1?one:n%10>=2&&n%10<=4&&(n%100<12||n%100>14)?few:many;
@@ -10,6 +12,9 @@ let workspace=null,state={tournament:{},athletes:[],draws:{},activity:[]},saving
 let activeId=sessionStorage.getItem('matdraw.activeTournament');
 const ui={page:'tournaments',category:null,search:'',event:'all',filter:'all',rosterSearch:'',rosterFilter:'all',round:0,menu:false,screenPart:0,screenAuto:false,databaseSearch:'',tournamentSearch:'',showArchive:false};
 let previousFocus=null,loginMessage='',ready=false;
+// Public side (no session): upcoming list on the login screen, the sponsor dialog and the read-only guest preview.
+let afterModalClose=null,promo=null,guest=null;
+const upcoming={data:null,error:false,loading:false,at:0};
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const athlete=id=>state.athletes.find(a=>a.id===id);
 const short=n=>n.split(' ').map((p,i)=>i===0?p:p).join(' ');
@@ -65,8 +70,9 @@ function rosterPage(checkin=false){const user=workspace.user,t=state.tournament,
 function rulesPage(){return shell(`<div class="notice info-notice">${icon('info')}<p>${T('Reguły na podstawie dokumentu trenera Bogusława. Poniższe niejasności pozostają otwarte — prototyp nie nadaje im statusu zatwierdzonego regulaminu.')}</p></div><div class="rules-grid">${RULE_ISSUES.map((r,i)=>`<section class="panel rule-card"><div class="rule-number">${String(i+1).padStart(2,'0')}</div>${badge(T('Do potwierdzenia'),'warning')}<h2>${T(r.title)}</h2><p>${T(r.detail)}</p></section>`).join('')}</div><section class="panel rule-summary"><h2>${T('Ustalone w specyfikacji')}</h2><ul><li>${T('Minimum 3 zawodników w kategorii.')}</li><li>${T('Unikanie pierwszych walk pomiędzy zawodnikami tego samego klubu, gdy jest to możliwe.')}</li><li>${T('Pierwszeństwo wolnego losu dla mistrzów Polski i Europy, gdy jest dostępny.')}</li><li>${T('Układy i walki: drabinka. Techniki specjalne i testy siły: lista startowa.')}</li><li>${T('Zmiana obecności dotyczy wszystkich startów zawodnika.')}</li><li>${T('Na wydruku: pełna nazwa konkurencji, grupa wieku, płeć oraz stopień lub limit.')}</li></ul></section>`,T('Zasady turnieju'),T('Czytelne reguły. Widoczne miejsca wymagające decyzji.'));}
 function architecturePage(){return shell(`<section class="panel architecture-intro"><div class="eyebrow">${T('MATBRAVO · WIELE TURNIEJÓW')}</div><h2>${T('Jeden zawodnik. Kolejne turnieje.')}</h2><p>${T('Kartoteka należy do klubu. Zgłoszenie do turnieju jest osobnym rekordem z wiekiem, stopniem, konkurencjami i wagą na dane zawody. Kontrola i wyniki nie zmieniają innych turniejów.')}</p><div class="tech-flow"><span>${T('Baza zawodników')}</span>${icon('arrow')}<span>${T('Zgłoszenia do turniejów')}</span>${icon('arrow')}<span>${T('Kontrola · drabinki · wyniki')}</span></div><a class="btn primary" href="./architecture.html" target="_blank" rel="noopener">${T('Architektura i wdrożenie')} ${icon('external')}</a></section><div class="rules-grid"><section class="panel rule-card"><h2>${T('Konta i role')}</h2><p>${T('Logowanie e-mailem i hasłem. Administrator przydziela role i klub, Edytor prowadzi własne turnieje, Reprezentant zgłasza zawodników swojego klubu.')}</p></section><section class="panel rule-card"><h2>${isDemo?T('Status podglądu Sites'):T('Połączenie z serwerem')}</h2><p>${isDemo?T('W tym podglądzie konta i dane pozostają w tej przeglądarce. Do wspólnej pracy klubów potrzebne jest uruchomienie przygotowanego backendu PHP i bazy MySQL na Waszym hostingu.'):T('Aplikacja korzysta z backendu PHP i bazy MySQL. Uprawnienia są sprawdzane na serwerze przy każdej operacji.')}</p></section></div>`,T('O projekcie'),'MatBravo · MEDUCASE · matbravo.com');}
 function render(){
- if(!workspace){renderLogin();return;}
+ if(!workspace){renderPublic();return;}
  syncState();if(location.hash.startsWith('#screen')&&workspace.user.role!=='club'){renderScreen();return;}
+ if(location.hash.startsWith('#guest')){ui.page='tournaments';history.replaceState(null,'','#tournaments');}
  document.body.classList.remove('projection');
  if(ui.page==='accounts'&&workspace.user.role!=='admin')ui.page='tournaments';
  if(['overview','checkin','draws','screen'].includes(ui.page)&&workspace.user.role==='club')ui.page='athletes';
@@ -76,11 +82,11 @@ function render(){
 }
 function navigate(page){ui.page=page;ui.menu=false;history.replaceState(null,'','#'+page);render();window.scrollTo({top:0});}
 function modal(title,body,actions='',large=false){
- previousFocus=document.activeElement;
+ previousFocus=document.activeElement;afterModalClose=null;
  document.querySelector('#modal-root').innerHTML=`<div class="modal-backdrop"><section class="modal ${large?'wide':''}" role="dialog" aria-modal="true" data-revision="${workspace?.revision||0}" aria-labelledby="modal-title" tabindex="-1"><header><h2 id="modal-title">${title}</h2><button class="icon-btn" data-action="close-modal" aria-label="${T('Zamknij okno')}">${icon('close')}</button></header><div class="modal-body">${body}</div>${actions?'<footer class="modal-actions">'+actions+'</footer>':''}</section></div>`;
  document.body.classList.add('modal-open');const form=document.querySelector('.modal form');if(form&&workspace)form.dataset.revision=workspace.revision;document.querySelector('.modal input,.modal select,.modal button')?.focus();
 }
-function closeModal(){document.querySelector('#modal-root').innerHTML='';document.body.classList.remove('modal-open');if(previousFocus?.isConnected)previousFocus.focus();}
+function closeModal(){const after=afterModalClose;afterModalClose=null;document.querySelector('#modal-root').innerHTML='';document.body.classList.remove('modal-open');if(after)after();else if(previousFocus?.isConnected)previousFocus.focus();}
 function showAttention(){const {items,unassigned}=allCats();modal(T('Zgłoszenia wymagające uwagi'),`<p class="modal-lead">${T('Te starty wymagają decyzji przed losowaniem.')}</p>${items.filter(c=>c.underfilled).map(c=>`<button class="attention-row" data-action="category" data-id="${esc(c.id)}"><span class="attention-count">${c.athletes.length}</span><div><strong>${esc(ruleText(c.title))}</strong><small>${esc(ruleText(c.subtitle))}</small></div>${icon('right')}</button>`).join('')}${unassigned.map(x=>`<div class="attention-row"><span class="attention-count">!</span><div><strong>${esc(x.athlete.name)} · ${eventName(x.event)}</strong><small>${esc(translateMessage(x.reason))}</small></div></div>`).join('')}`,button(T('Zasady turnieju'),'rules')+button(T('Rozumiem'),'close-modal','primary'));}
 function matchModal(id){
  const c=selected(),d=ensureDraw(c),m=resolveDraw(d).flat().find(m=>m.id===id);if(!m)return;
@@ -149,9 +155,125 @@ function accountsPage(){return shell(`<div class="notice info-notice">${icon('sh
 function accountForm(id){const u=workspace.users.find(u=>u.id===id)||{email:'',clubId:'',role:'club',active:true};modal(id?T('Zarządzaj kontem'):T('Nowe konto'),`<form id="account-form" data-id="${id||''}"><div class="form-grid"><label class="span-two">${T('E-mail')}<input name="email" type="email" required maxlength="254" value="${esc(u.email)}" autocomplete="off"></label><label class="span-two">${T('Klub')}<select name="clubId"><option value="">${T('Nowy klub — wpisz nazwę poniżej')}</option>${workspace.clubs.map(c=>`<option value="${c.id}" ${u.clubId===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select></label><label class="span-two">${T('Nazwa nowego klubu')}<input name="clubName" maxlength="100" placeholder="${T('Wypełnij tylko dla nowego klubu')}"></label><label>${T('Rola')}<select name="role">${Object.keys(ROLES).map(r=>`<option value="${r}" ${u.role===r?'selected':''}>${roleName(r)}</option>`).join('')}</select></label><label>${T('Status')}<select name="active"><option value="yes" ${u.active?'selected':''}>${T('Aktywne')}</option><option value="no" ${!u.active?'selected':''}>${T('Zablokowane')}</option></select></label><label class="span-two">${id?T('Nowe hasło (opcjonalnie)'):T('Hasło')}<input name="password" type="password" autocomplete="new-password" minlength="12" maxlength="72" ${id?'':'required'}><small>${T('Minimum 12 znaków.')} ${id?T('Zmiana hasła kończy poprzednie sesje konta.'):''}</small></label></div><div class="form-error" role="alert"></div>${isDemo?'<p class="muted small form-note">'+T('To konto testowe, dostępne wyłącznie w tej przeglądarce. Użyj hasła przeznaczonego do demonstracji.')+'</p>':''}</form>`,button(T('Anuluj'),'close-modal')+'<button class="btn primary" type="submit" form="account-form">'+(id?T('Zapisz zmiany'):T('Utwórz konto'))+'</button>');}
 function myAccount(){const u=workspace.user;modal(T('Moje konto'),`<div class="account-summary"><strong>${esc(u.email)}</strong><p>${esc(clubName(u.clubId))} · ${roleName(u.role)}</p></div><form id="password-form"><label class="field-label">${T('Obecne hasło')}<input name="currentPassword" type="password" required autocomplete="current-password"></label><label class="field-label form-note">${T('Nowe hasło')}<input name="password" type="password" required minlength="12" maxlength="72" autocomplete="new-password"></label><p class="muted small form-note">${T('Minimum 12 znaków.')} ${T('Pozostałe sesje zostaną wylogowane.')}</p><div class="form-error" role="alert"></div></form>`,button(T('Zamknij'),'close-modal')+'<button class="btn primary" type="submit" form="password-form">'+T('Zmień hasło')+'</button>');}
 function renderLogin(message=''){
- loginMessage=message;
+ loginMessage=message;afterModalClose=null;
  document.body.classList.remove('projection','print-preview','modal-open');document.querySelector('#modal-root').innerHTML='';
- document.querySelector('#app').innerHTML=`<main class="login-page"><div class="login-lang">${langSwitch()}</div><section class="login-story"><a class="brand" href="#tournaments">${logo}</a><div><span class="login-eyebrow">${T('TWÓJ TURNIEJ. TWÓJ ZESPÓŁ.')}</span><h1>${T('Od zgłoszenia<br>do finału.')}</h1><p>${T('Wspólna baza zawodników, kolejne turnieje i czytelne drabinki. Wszystko w jednym miejscu.')}</p><div class="login-feature">${icon('users')} ${T('Konta klubów i proste zgłoszenia')}</div><div class="login-feature">${icon('trophy')} ${T('Wiele turniejów, osobna historia')}</div><div class="login-feature">${icon('screen')} ${T('Wydruk i ekran hali')}</div></div><span class="login-signature">MATBRAVO · BY MEDUCASE</span></section><section class="login-form-panel"><div class="login-form-content"><span class="eyebrow">${T('WITAJ W MATBRAVO')}</span><h2>${T('Zaloguj się')}</h2><p>${T('Użyj konta otrzymanego od Administratora.')}</p>${isDemo?'<div class="login-demo-note">'+T('Podgląd demonstracyjny · konta i dane tylko w tej przeglądarce.')+'</div>':''}<form id="login-form"><label class="field-label">${T('E-mail')}<input name="email" type="email" autocomplete="username" required placeholder="${T('twoj@klub.pl')}"></label><label class="field-label">${T('Hasło')}<input name="password" type="password" autocomplete="current-password" required></label><div class="form-error" role="alert">${esc(translateMessage(message))}</div><button class="btn primary login-submit" type="submit">${T('Zaloguj się')} ${icon('arrow')}</button></form>${isDemo?`<div class="demo-accounts"><span>${T('Sprawdź przykładową rolę')}</span>${Object.keys(ROLES).map(r=>`<button class="demo-account" data-action="demo-login" data-role="${r}">${icon(r==='admin'?'shield':r==='editor'?'clipboard':'users')}<span>${roleName(r)}</span>${icon('right')}</button>`).join('')}<p>${T('Hasło kont demo:')} <code>MatDrawDemo2026!</code></p></div>`:'<p class="login-help">'+T('Nie masz konta lub nie pamiętasz hasła? Skontaktuj się z Administratorem turnieju.')+'</p>'}</div>${footer()}</section></main>`;document.title='MatBravo — '+T('Logowanie');
+ document.querySelector('#app').innerHTML=`<main class="login-page"><div class="login-lang">${langSwitch()}</div><section class="login-story"><a class="brand" href="#tournaments">${logo}</a><div><span class="login-eyebrow">${T('TWÓJ TURNIEJ. TWÓJ ZESPÓŁ.')}</span><h1>${T('Od zgłoszenia<br>do finału.')}</h1><p>${T('Wspólna baza zawodników, kolejne turnieje i czytelne drabinki. Wszystko w jednym miejscu.')}</p><div class="login-feature">${icon('users')} ${T('Konta klubów i proste zgłoszenia')}</div><div class="login-feature">${icon('trophy')} ${T('Wiele turniejów, osobna historia')}</div><div class="login-feature">${icon('screen')} ${T('Wydruk i ekran hali')}</div></div><span class="login-signature">MATBRAVO · BY MEDUCASE</span></section><section class="login-form-panel"><div class="login-form-content"><span class="eyebrow">${T('WITAJ W MATBRAVO')}</span><h2>${T('Zaloguj się')}</h2><p>${T('Użyj konta otrzymanego od Administratora.')}</p>${isDemo?'<div class="login-demo-note">'+T('Podgląd demonstracyjny · konta i dane tylko w tej przeglądarce.')+'</div>':''}<form id="login-form"><label class="field-label">${T('E-mail')}<input name="email" type="email" autocomplete="username" required placeholder="${T('twoj@klub.pl')}"></label><label class="field-label">${T('Hasło')}<input name="password" type="password" autocomplete="current-password" required></label><div class="form-error" role="alert">${esc(translateMessage(message))}</div><button class="btn primary login-submit" type="submit">${T('Zaloguj się')} ${icon('arrow')}</button></form>${isDemo?`<div class="demo-accounts"><span>${T('Sprawdź przykładową rolę')}</span>${Object.keys(ROLES).map(r=>`<button class="demo-account" data-action="demo-login" data-role="${r}">${icon(r==='admin'?'shield':r==='editor'?'clipboard':'users')}<span>${roleName(r)}</span>${icon('right')}</button>`).join('')}<p>${T('Hasło kont demo:')} <code>MatDrawDemo2026!</code></p></div>`:'<p class="login-help">'+T('Nie masz konta lub nie pamiętasz hasła? Skontaktuj się z Administratorem turnieju.')+'</p>'}</div></section>${upcomingSection()}<div class="login-foot">${footer()}</div></main>`;document.title='MatBravo — '+T('Logowanie');
+ loadUpcoming();
+}
+// ---- Public side: "Upcoming tournaments" on the login screen, sponsor dialog, read-only guest preview ----
+// Data comes only from Client.upcoming()/Client.publicTournament() (GET, no session); see backend/src/GuestView.php.
+const dateAt=date=>new Date(date+'T12:00:00');
+const shortDate=date=>dateAt(date).toLocaleDateString(locale(),{weekday:'short',day:'numeric',month:'short',year:'numeric'});
+const longDate=date=>dateAt(date).toLocaleDateString(locale(),{weekday:'long',day:'numeric',month:'long',year:'numeric'});
+function relativeDay(date){try{const days=Math.round((Date.parse(date+'T00:00:00Z')-Date.parse(warsawToday()+'T00:00:00Z'))/864e5);return days<=31?new Intl.RelativeTimeFormat(locale(),{numeric:'auto'}).format(days,'day'):new Intl.RelativeTimeFormat(locale(),{numeric:'always'}).format(Math.round(days/30.44),'month');}catch{return '';}}
+function upcomingItem(t,i){
+ const d=dateAt(t.date),when=relativeDay(t.date);
+ return `<li><button type="button" class="upcoming-item${i===0?' is-next':''}" data-action="open-upcoming" data-id="${esc(t.id)}" aria-describedby="upcoming-hint"><span class="upcoming-date" aria-hidden="true"><small>${esc(d.toLocaleDateString(locale(),{month:'short'}).replace('.',''))}</small><strong>${d.getDate()}</strong></span><span class="upcoming-text">${i===0?`<span class="upcoming-next">${T('Najbliższy')}${when?' · '+esc(when):''}</span>`:''}<strong class="upcoming-name">${esc(t.name)}</strong><span class="upcoming-meta"><span>${icon('pin')}${esc(t.city)}</span><time datetime="${esc(t.date)}">${esc(shortDate(t.date))}</time></span></span>${icon('right','upcoming-arrow')}</button></li>`;
+}
+function upcomingBody(){
+ const items=upcoming.data?.tournaments;
+ if(items?.length)return `<ol class="upcoming-list">${items.map(upcomingItem).join('')}</ol><p class="upcoming-hint" id="upcoming-hint">${icon('eye')}<span>${T('Wybierz turniej, aby zobaczyć podgląd tylko do odczytu.')}</span></p>`;
+ if(items)return `<div class="upcoming-empty">${icon('calendar')}<strong>${T('Brak zaplanowanych turniejów')}</strong><p>${T('Nowe zawody pojawią się tutaj, gdy organizator je opublikuje.')}</p></div>`;
+ if(upcoming.error)return `<div class="upcoming-empty quiet"><p>${T('Terminarz jest chwilowo niedostępny.')}</p><button type="button" class="upcoming-retry" data-action="upcoming-retry">${icon('refresh')}<span>${T('Spróbuj ponownie')}</span></button></div>`;
+ return `<div class="upcoming-skeleton" aria-hidden="true"><span></span><span></span><span></span></div><p class="sr-only">${T('Wczytywanie turniejów…')}</p>`;
+}
+const upcomingSection=()=>`<section class="login-upcoming" aria-labelledby="upcoming-title"><div class="upcoming-card"><div class="upcoming-head"><span class="upcoming-icon">${icon('calendar')}</span><div><h2 id="upcoming-title">${T('Najbliższe turnieje')}</h2><p>${T('Terminarz otwarty dla wszystkich')}</p></div></div><div class="upcoming-body" data-upcoming aria-busy="${upcoming.loading&&!upcoming.data}">${upcomingBody()}</div></div></section>`;
+function paintUpcoming(){
+ const el=document.querySelector('[data-upcoming]');if(!el)return;
+ const hadFocus=el.contains(document.activeElement);el.innerHTML=upcomingBody();el.setAttribute('aria-busy',String(upcoming.loading&&!upcoming.data));
+ if(hadFocus)el.querySelector('button')?.focus();
+}
+/** Loads the public list once and refreshes it after 5 minutes. Failures stay quiet: the login form never depends on it. */
+function loadUpcoming(force=false){
+ if(upcoming.loading||(!force&&upcoming.data&&Date.now()-upcoming.at<300000))return;
+ upcoming.loading=true;upcoming.error=false;if(force)paintUpcoming();
+ Client.upcoming().then(r=>{upcoming.data={tournaments:Array.isArray(r?.tournaments)?r.tournaments:[]};},()=>{upcoming.error=true;}).finally(()=>{upcoming.loading=false;upcoming.at=Date.now();paintUpcoming();});
+}
+function guestRouteId(){if(!location.hash.startsWith('#guest'))return null;const id=new URLSearchParams(location.hash.split('?')[1]||'').get('t');return id&&/^[A-Za-z0-9_-]{1,40}$/.test(id)?id:null;}
+/** Without a session: the login page, or – for #guest?t=… – the sponsor dialog first and the guest preview only after it is closed. */
+function renderPublic(){
+ const id=guestRouteId();
+ if(!id){guest=null;promo=null;renderLogin();return;}
+ if(guest?.id===id&&guest.unlocked){renderGuest();return;}
+ renderLogin();showPromo(id);
+}
+function fetchGuest(id){
+ const known=upcoming.data?.tournaments?.find(t=>t.id===id)||(guest?.id===id?guest.known:null);
+ const current=guest={id,known,status:'loading',data:null,unlocked:false,category:null};
+ Client.publicTournament(id).then(data=>{current.data=data;current.status='ready';},error=>{current.status='error';current.notFound=error?.status===404;}).finally(()=>{
+  if(guest!==current||workspace)return;
+  if(promo?.id===id){const next=document.querySelector('.promo-next span');if(next)next.innerHTML=promoNext();}
+  if(current.unlocked&&guestRouteId()===id){const refocus=!document.activeElement||document.activeElement===document.body||document.activeElement.id==='guest-title';renderGuest();if(refocus)document.querySelector('#guest-title')?.focus();}
+ });
+}
+const promoTournament=()=>guest?.data?.tournament||guest?.known||null;
+const promoNext=()=>{const t=promoTournament();return t?T('Dalej: podgląd turnieju {name}',{name:'<strong>'+esc(t.name)+'</strong>'}):T('Dalej: podgląd turnieju');};
+// Inline illustration (the CSP allows no external images): a dobok with a black belt on concentric mat rings.
+const promoArt=`<svg class="promo-art" viewBox="0 0 300 300" focusable="false" aria-hidden="true"><circle cx="150" cy="150" r="134" fill="none" stroke="#fff" stroke-opacity=".07" stroke-width="2"/><circle cx="150" cy="150" r="104" fill="none" stroke="#00aeef" stroke-opacity=".45" stroke-width="2" stroke-dasharray="3 9"/><circle cx="150" cy="150" r="72" fill="#00aeef" fill-opacity=".12"/><path d="M114 70 84 83c-7 3-11 8-12 15l-10 52 26 7v77h124v-77l26-7-10-52c-1-7-5-12-12-15l-30-13-36 56-36-56Z" fill="#fff"/><path d="m114 70 36 56 36-56" fill="none" stroke="#c7d9ec" stroke-width="6" stroke-linejoin="round"/><path d="M150 126v108" stroke="#dbe6f2" stroke-width="2"/><path d="M62 150l26 7M238 150l-26 7" stroke="#dbe6f2" stroke-width="2"/><rect x="88" y="176" width="124" height="15" rx="3" fill="#0b1a33"/><path d="m145 189-15 34 11 3 14-35Zm10 0 15 33-10 4-13-35Z" fill="#0b1a33"/><rect x="140" y="172" width="20" height="23" rx="5" fill="#0b1a33" stroke="#1d3a66" stroke-width="2"/><path d="M220 60l4 10 10 4-10 4-4 10-4-10-10-4 10-4Z" fill="#65c8ec"/><path d="M70 214l3 7 7 3-7 3-3 7-3-7-7-3 7-3Z" fill="#65c8ec" fill-opacity=".7"/></svg>`;
+function promoHtml(){
+ return `<div class="modal-backdrop promo-backdrop"><section class="modal promo" role="dialog" aria-modal="true" aria-labelledby="promo-kind promo-title" aria-describedby="promo-text promo-note" tabindex="-1"><button type="button" class="promo-close" data-action="close-modal" aria-label="${T('Zamknij reklamę i przejdź do podglądu')}" title="${T('Zamknij reklamę i przejdź do podglądu')}">${icon('close')}</button><span class="promo-kind" id="promo-kind">${esc(T(AD.label))}</span><div class="promo-visual" aria-hidden="true">${promoArt}<span class="promo-brand">${esc(AD.brand)}</span><span class="promo-tagline">${esc(T(AD.tagline))}</span></div><div class="promo-main"><div class="promo-body"><span class="promo-eyebrow">${esc(AD.brand)} · ${esc(T(AD.eyebrow))}</span><h2 id="promo-title">${esc(T(AD.headline))}</h2><p id="promo-text">${esc(T(AD.text))}</p><ul class="promo-products">${AD.products.map(p=>`<li><span class="promo-product-icon">${icon(p.icon)}</span><span><strong>${esc(T(p.title))}</strong><small>${esc(T(p.text))}</small></span></li>`).join('')}</ul><div class="promo-offer">${icon('sparkle')}<span>${esc(T(AD.offer))}</span><em>${esc(T(AD.cta))}</em></div><p class="promo-disclaimer" id="promo-note">${esc(T(AD.disclaimer))}</p></div><footer class="promo-foot"><p class="promo-next">${icon('eye')}<span>${promoNext()}</span></p><div class="promo-actions"><button type="button" class="btn secondary" data-action="promo-login">${icon('lock')} ${T('Zaloguj się')}</button><button type="button" class="btn primary" data-action="close-modal">${T('Zamknij i zobacz turniej')} ${icon('arrow')}</button></div></footer></div></section></div>`;
+}
+/** Sponsor dialog. Closing it (button, × or Esc) is the only way into the guest preview of that tournament. */
+function showPromo(id){
+ if(guest?.id!==id||guest.status==='error')fetchGuest(id);
+ promo={id};previousFocus=document.activeElement;
+ document.querySelector('#modal-root').innerHTML=promoHtml();afterModalClose=()=>enterGuest(id);
+ document.body.classList.add('modal-open');document.querySelector('.modal.promo')?.focus();
+}
+function openUpcoming(id){history.pushState(null,'','#guest?t='+encodeURIComponent(id));showPromo(id);}
+function enterGuest(id){promo=null;if(guest?.id!==id)fetchGuest(id);guest.unlocked=true;ui.round=0;renderGuest();document.querySelector('#guest-title')?.focus();}
+function leaveGuest(){guest=null;promo=null;afterModalClose=null;if(location.hash)history.replaceState(null,'',location.pathname+location.search);renderLogin();document.querySelector('#login-form input[name="email"]')?.focus();}
+const guestStates=()=>({finished:[T('Zakończona'),'success'],progress:[T('W toku'),'teal'],drawn:[T('Gotowa do rozegrania'),'teal'],pending:[T('Przed losowaniem'),'neutral'],underfilled:[T('Wymaga decyzji'),'warning'],list:[T('Lista startowa'),'neutral']});
+const guestBadge=c=>{const states=guestStates(),[label,type]=states[c.state]||states.pending;return badge(label,type);};
+const guestGrade=c=>c.event!=='forms'&&c.gradeType!=='all'?' · '+gradeName(c.gradeType):'';
+function guestCard(c,selected){
+ const [age,sex,...band]=String(c.subtitle).split(' · ');
+ return `<button type="button" class="category-card ${selected?'selected':''}" data-action="guest-category" data-code="${esc(c.code)}" aria-pressed="${selected}"><span class="cat-card-top"><span>${esc(c.code)}${c.bracket?icon('bracket','guest-card-bracket'):''}</span>${c.state==='underfilled'?badge(T('{n} os.',{n:Number(c.athletes)||0}),'warning'):c.state==='finished'?badge(T('Zakończona'),'success'):'<span class="category-number">'+T('{n} os.',{n:Number(c.athletes)||0})+'</span>'}</span><strong>${esc(ruleLabel(c.title))}</strong><span class="cat-sub">${esc(ruleLabel(age))} · ${esc(ruleLabel(sex))}</span><span class="cat-band">${esc(ruleLabel(band.join(' · ')))}${guestGrade(c)}</span></button>`;
+}
+function guestDetail(c){
+ const head=`<div class="draw-header"><div><div class="draw-eyebrow"><span class="category-code">${esc(c.code)}</span>${guestBadge(c)}</div><h2>${esc(ruleText(c.title))}</h2><p>${esc(ruleText(c.subtitle))}${guestGrade(c)}</p></div><div class="draw-meta"><span>${icon('users')} ${T('{n} zawodników',{n:Number(c.athletes)||0})}</span></div></div>`;
+ if(!c.bracket){
+  const [i,title,text]=c.state==='list'?['clipboard',T('Lista startowa'),T('Kolejność startów i wyniki konkurencji punktowej widzą zalogowani użytkownicy.')]:c.state==='underfilled'?['users',T('Kategoria czeka na decyzję organizatora.'),T('Do losowania potrzebne są co najmniej 3 osoby.')]:['bracket',T('Losowanie jeszcze się nie odbyło.'),T('Drabinka pojawi się tutaj, gdy organizator zapisze losowanie.')];
+  return head+`<div class="empty-state guest-state"><div class="empty-illustration">${icon(i)}</div><h3>${title}</h3><p>${text}</p></div>`;
+ }
+ // Public brackets carry initials and club only; slot positions become local ids for the shared bracket renderer.
+ const ref=i=>'s'+i,draw={size:Number(c.bracket.size),slots:c.bracket.slots.map((p,i)=>p?ref(i):null),results:Object.fromEntries(Object.entries(c.bracket.results||{}).map(([m,i])=>[m,ref(i)]))};
+ state={tournament:guest.data.tournament,athletes:c.bracket.slots.flatMap((p,i)=>p?[{id:ref(i),name:p.initials,club:p.club}]:[]),draws:{},activity:[]};
+ const winner=athlete(resolveDraw(draw).at(-1)[0].winner);
+ return head+`<div class="draw-subbar"><span>${icon('bracket')} ${T('System pucharowy · {n} miejsc',{n:draw.size})}</span><span>${icon('eye')} ${T('Tylko do odczytu')}</span></div>${bracketHtml(draw,false)}<div class="draw-footnote"><span>${icon('lock')}${T('Zawodnicy oznaczeni inicjałami. Pełne imiona i nazwiska widzą zalogowani użytkownicy.')}</span></div>${winner?`<div class="winner-banner">${icon('trophy')}<div><small>${T('ZWYCIĘZCA KATEGORII')}</small><strong>${esc(winner.name)} <span class="guest-winner-club">${esc(winner.club)}</span></strong></div>${badge(T('Finał zakończony'),'success')}</div>`:''}`;
+}
+function guestCategories(d){
+ const cats=d.categories||[];
+ if(!cats.length)return `<section class="panel empty-state guest-empty"><div class="empty-illustration">${icon('grid')}</div><h3>${T('Kategorie pojawią się po pierwszych zgłoszeniach.')}</h3><p>${T('Organizator zbiera jeszcze zgłoszenia do tego turnieju.')}</p></section>`;
+ const c=cats.find(x=>x.code===guest.category)||cats.find(x=>x.bracket)||cats[0];guest.category=c.code;
+ return `<div class="guest-section-head"><h2>${T('Kategorie i drabinki')}</h2><span>${T('{n} kategorii',{n:cats.length})}</span></div><div class="draw-workspace guest-workspace"><aside class="category-panel" aria-label="${T('Kategorie')}"><div class="category-list">${cats.map(x=>guestCard(x,x.code===c.code)).join('')}</div></aside><section class="draw-panel"><div class="mobile-category"><label for="guest-category-select">${T('Wybierz kategorię')}</label><select id="guest-category-select" data-control="guest-category">${cats.map(x=>`<option value="${esc(x.code)}" ${x.code===c.code?'selected':''}>${esc(x.code)} · ${esc(ruleText(x.title))} · ${esc(ruleText(x.subtitle))} (${Number(x.athletes)||0})</option>`).join('')}</select></div>${guestDetail(c)}</section></div>`;
+}
+const accessCard=()=>`<aside class="access-card" aria-labelledby="access-title"><span class="access-icon">${icon('lock')}</span><div class="access-copy"><span class="access-eyebrow">${esc(T(ACCESS.eyebrow))}</span><h2 id="access-title">${esc(T(ACCESS.title))}</h2><p>${esc(T(ACCESS.text))}</p></div><ul class="access-benefits">${ACCESS.benefits.map(b=>`<li>${icon('check')}<span>${esc(T(b))}</span></li>`).join('')}</ul><div class="access-action"><button type="button" class="btn access-cta" data-action="access-cta">${esc(T(ACCESS.cta))} ${icon('arrow')}</button><small>${esc(T(ACCESS.note))}</small></div></aside>`;
+function guestPage(){
+ const g=guest,d=g?.data,t=d?.tournament||g?.known;
+ const heading=t?`<div class="page-heading guest-heading"><div><div class="eyebrow">${T('PODGLĄD GOŚCIA · TYLKO DO ODCZYTU')}</div><h1 id="guest-title" tabindex="-1">${esc(t.name)}</h1><p class="guest-when"><span>${icon('calendar')}${esc(longDate(t.date))}</span><span>${icon('pin')}${esc(t.city)}</span></p></div><div class="heading-actions">${badge(statusName(t.status),t.status==='open'?'teal':t.status==='finished'?'neutral':'warning')}</div></div>`:`<h1 id="guest-title" class="sr-only" tabindex="-1">${T('Podgląd gościa')}</h1>`;
+ let content;
+ if(d){const s=d.summary;content=`<div class="stats guest-stats">${[['users',s.entries,T('Zgłoszenia')],['shield',s.clubs,T('Kluby')],['grid',s.categories,T('Kategorie')],['bracket',s.brackets,T('Drabinki')]].map(([i,n,label])=>`<div class="stat"><span class="stat-icon">${icon(i)}</span><div><strong>${Number(n)||0}</strong><span>${label}</span></div></div>`).join('')}</div>${accessCard()}${guestCategories(d)}`;}
+ else if(g?.status==='error')content=`<section class="panel empty-state guest-empty"><div class="empty-illustration">${icon('alert')}</div><h3>${g.notFound?T('Ten turniej nie jest już dostępny w podglądzie.'):T('Nie udało się wczytać podglądu.')}</h3><p>${g.notFound?T('Organizator mógł go ukryć albo termin już minął.'):T('Sprawdź połączenie i spróbuj ponownie.')}</p><div class="guest-error-actions">${g.notFound?'':button(icon('refresh')+' '+T('Spróbuj ponownie'),'guest-retry')}${button(T('Wróć do logowania'),'guest-login','primary')}</div></section>`;
+ else content=`<div class="guest-loading" role="status"><span class="guest-spinner" aria-hidden="true"></span>${T('Wczytywanie podglądu…')}</div>`;
+ return `<div class="guest-shell"><header class="guest-bar"><div class="guest-bar-inner"><button type="button" class="brand guest-brand" data-action="guest-login" aria-label="${T('MatBravo — wróć do logowania')}">${logo}</button><span class="guest-pill">${icon('eye')}<span>${T('Podgląd gościa')}</span></span><div class="guest-bar-actions">${langSwitch()}<button type="button" class="btn guest-login" data-action="guest-login">${icon('lock')}<span>${T('Zaloguj się')}</span></button></div></div></header><main id="main" class="guest-main">${heading}${content}</main>${footer()}</div>`;
+}
+/** Read-only page: no forms and no write actions; the click handler accepts only the public actions below without a session. */
+function renderGuest(){
+ document.body.classList.remove('projection','print-preview','modal-open');
+ document.querySelector('#app').innerHTML=guestPage();
+ const t=guest?.data?.tournament||guest?.known;document.title='MatBravo — '+T('Podgląd gościa')+(t?' · '+t.name:'');
+}
+function selectGuestCategory(code,focus){if(!guest?.data)return;guest.category=code;ui.round=0;renderGuest();document.querySelector(focus)?.focus();}
+function publicAction(action,el,id){
+ if(action==='open-upcoming'&&id)openUpcoming(id);
+ else if(action==='close-modal')closeModal();
+ else if(action==='promo-login'){afterModalClose=null;closeModal();leaveGuest();}
+ else if(action==='guest-login')leaveGuest();
+ else if(action==='access-cta'){if(ACCESS.kind==='login')leaveGuest();}
+ else if(action==='guest-category')selectGuestCategory(el.dataset.code,`.category-card[data-code="${CSS.escape(el.dataset.code)}"]`);
+ else if(action==='guest-retry'&&guest){fetchGuest(guest.id);guest.unlocked=true;renderGuest();document.querySelector('#guest-title')?.focus();}
+ else if(action==='upcoming-retry')loadUpcoming(true);
 }
 function syncState(){
  if(!workspace)return;
@@ -185,7 +307,7 @@ document.addEventListener('click',async event=>{
  const action=el.dataset.action,id=el.dataset.id;
  try{
   if(action==='demo-login'){el.disabled=true;const email={admin:'admin',editor:'editor',club:'club'}[el.dataset.role]+'@matdraw.example';workspace=await Client.login(email,'MatDrawDemo2026!');navigate('tournaments');return;}
-  if(!workspace)return;
+  if(!workspace){publicAction(action,el,id);return;}
   if(action==='menu'){ui.menu=!ui.menu;render();}
   else if(action==='logout'){await Client.logout();workspace=null;closeModal();renderLogin();}
   else if(action==='refresh'){workspace=await Client.bootstrap();render();toast(T('Dane odświeżone.'));}
@@ -234,6 +356,7 @@ document.addEventListener('change',event=>{
  else if(control==='round'){ui.round=Number(el.value);render();}
  else if(control==='roster-filter'){ui.rosterFilter=el.value;render();}
  else if(control==='screen-part'){ui.screenPart=Number(el.value);renderScreen();}
+ else if(control==='guest-category'&&!workspace)selectGuestCategory(el.value,'#guest-category-select');
  else if(control==='screen-category'){ui.screenPart=0;location.hash='screen?tournament='+encodeURIComponent(activeId)+'&category='+encodeURIComponent(el.value);}
 });
 function filterRender(id){const input=document.querySelector('#'+id),start=input?.selectionStart;render();const next=document.querySelector('#'+id);if(next){next.focus();try{next.setSelectionRange(start,start);}catch{}}}
@@ -267,7 +390,7 @@ document.addEventListener('submit',async event=>{
 document.addEventListener('keydown',event=>{
  const modalEl=document.querySelector('.modal');if(!modalEl)return;
  if(event.key==='Escape'){event.preventDefault();closeModal();}
- if(event.key==='Tab'){const focusable=[...modalEl.querySelectorAll('button:not([disabled]),input:not([disabled]),select:not([disabled]),a[href]')],first=focusable[0],last=focusable.at(-1);if(event.shiftKey&&document.activeElement===first){event.preventDefault();last?.focus();}else if(!event.shiftKey&&document.activeElement===last){event.preventDefault();first?.focus();}}
+ if(event.key==='Tab'){const focusable=[...modalEl.querySelectorAll('button:not([disabled]),input:not([disabled]),select:not([disabled]),a[href]')],first=focusable[0],last=focusable.at(-1),inside=focusable.includes(document.activeElement);if(event.shiftKey&&(document.activeElement===first||!inside)){event.preventDefault();last?.focus();}else if(!event.shiftKey&&(document.activeElement===last||!inside)){event.preventDefault();first?.focus();}}
 });
 window.addEventListener('storage',async e=>{if(e.key===LANGUAGE_KEY&&LANGUAGES.includes(e.newValue)){setLanguage(e.newValue,{persist:false});return;}if(!workspace||e.key!==Client.dataKey)return;try{workspace=await Client.bootstrap();if(!document.querySelector('.modal'))render();}catch(error){await handleError(error);}});
 window.addEventListener('hashchange',()=>{if(!location.hash.startsWith('#screen'))ui.page=location.hash.slice(1)||'tournaments';render();});
@@ -280,7 +403,8 @@ function rerenderLanguage(){
  applyStaticTexts();
  const focused=!!document.activeElement?.closest?.('.lang-switch');
  if(!ready){const loading=document.querySelector('.app-loading');if(loading)loading.textContent=T('Uruchamianie MatBravo…');return;}
- if(!workspace){const form=document.querySelector('#login-form'),typed=form&&{email:form.elements.email.value,password:form.elements.password.value};renderLogin(loginMessage);const next=document.querySelector('#login-form');if(next&&typed){next.elements.email.value=typed.email;next.elements.password.value=typed.password;}}
+ if(!workspace&&guestRouteId()&&guest?.unlocked)renderGuest();
+ else if(!workspace){const form=document.querySelector('#login-form'),typed=form&&{email:form.elements.email.value,password:form.elements.password.value},reopen=promo?.id;renderLogin(loginMessage);const next=document.querySelector('#login-form');if(next&&typed){next.elements.email.value=typed.email;next.elements.password.value=typed.password;}if(reopen)showPromo(reopen);}
  else if(location.hash.startsWith('#screen')&&workspace.user.role!=='club')renderScreen();
  else{render();if(document.body.classList.contains('print-preview')&&ui.print)doPrint(ui.print.scope,ui.print.format);}
  if(focused)document.querySelector(`.lang-switch [data-set-lang="${getLanguage()}"]`)?.focus();
