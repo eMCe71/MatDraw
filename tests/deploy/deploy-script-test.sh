@@ -70,12 +70,14 @@ mkdir -p "$base/releases" "$shared" "$site"; chmod 700 "$shared"
  "$app" "mysql:host=$dbhost;port=$dbport;dbname=$dbn;charset=utf8mb4" "md_$port" "$pass" "$(openssl rand -hex 32)" > "$shared/config.php"
 chmod 600 "$shared/config.php"; export MATDRAW_CONFIG=$shared/config.php
 release(){ mkdir -p "$base/releases/$1"; cp -a "$work/build/matdraw-php/public" "$work/build/matdraw-php/backend" "$base/releases/$1/"; }
+# The test's own migrations (a broken one, a probe) take the next free id after the shipped ones.
+next=$(( $("$php" -r 'require $argv[1];echo MatDraw\Migrator::target($argv[2]);' "$work/build/matdraw-php/backend/src/Migrator.php" "$work/build/matdraw-php/backend/migrations") + 1 )); nn=$(printf '%04d' "$next")
 R0=20250101000000-old0000 R1=20260101000001-new1111 R2=20260101000002-bad2222 R3=20260101000003-nob3333
 release "$R1"; release "$R0"; rm -rf "$base/releases/$R0/backend/migrations" "$base/releases/$R0/backend/bin/migrate.php"
 ln -s "$shared/config.php" "$base/releases/$R0/backend/config.php"
 release "$R2"; echo r2 > "$base/releases/$R2/public/r2-marker.txt"
-printf '%s\n' '<?php' "return ['id'=>5,'name'=>'broken','destructive'=>false,'up'=>function(MatDraw\\Migrator \$m):void{throw new RuntimeException('Celowo błędna migracja testowa.');}];" > "$base/releases/$R2/backend/migrations/0005_broken.php"
-release "$R3"; printf '%s\n' '<?php' "return ['id'=>5,'name'=>'probe','destructive'=>false,'up'=>function(MatDraw\\Migrator \$m):void{\$m->exec('CREATE TABLE IF NOT EXISTS zz_deploy_probe (id INT PRIMARY KEY) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci');}];" > "$base/releases/$R3/backend/migrations/0005_probe.php"
+printf '%s\n' '<?php' "return ['id'=>$next,'name'=>'broken','destructive'=>false,'up'=>function(MatDraw\\Migrator \$m):void{throw new RuntimeException('Celowo błędna migracja testowa.');}];" > "$base/releases/$R2/backend/migrations/${nn}_broken.php"
+release "$R3"; printf '%s\n' '<?php' "return ['id'=>$next,'name'=>'probe','destructive'=>false,'up'=>function(MatDraw\\Migrator \$m):void{\$m->exec('CREATE TABLE IF NOT EXISTS zz_deploy_probe (id INT PRIMARY KEY) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci');}];" > "$base/releases/$R3/backend/migrations/${nn}_probe.php"
 printf '%s\n' '<?php' 'fwrite(STDERR,"dump.php disabled by the test\n");exit(1);' > "$base/releases/$R3/backend/bin/dump.php"
 # Data hash (same method as the http-compat job): per table the sorted SHA-1 of every row's values. --save stores the
 # column lists (without app_meta.schema_version, which a migration advances), --cols hashes only those columns (old rows
@@ -195,7 +197,7 @@ mkdir "$work/nodump"; for b in mysqldump mariadb-dump; do printf '#!/bin/sh\nech
 run 'migrate without a possible copy' env PATH="$work/nodump:$PATH" bash "$repo/scripts/deploy-remote.sh" migrate "$base" "$docroot" "$R3"
 ok 'a migration without a database copy is refused' '[[ $rc != 0 && $(q1 "SELECT schema_version FROM app_meta") == "$target" ]] && grep -q "Brak kopii bazy" <<<"$out"'
 run 'migrate with ALLOW_NO_BACKUP=1' env PATH="$work/nodump:$PATH" ALLOW_NO_BACKUP=1 bash "$repo/scripts/deploy-remote.sh" migrate "$base" "$docroot" "$R3"
-ok 'ALLOW_NO_BACKUP=1 migrates without a copy' '[[ $rc == 0 && $(q1 "SELECT schema_version FROM app_meta") == 5 ]] && grep -q "ALLOW_NO_BACKUP=1" <<<"$out"'
+ok 'ALLOW_NO_BACKUP=1 migrates without a copy' '[[ $rc == 0 && $(q1 "SELECT schema_version FROM app_meta") == "$next" ]] && grep -q "ALLOW_NO_BACKUP=1" <<<"$out"'
 
 # --- an empty database: the installer hint, no copy, no error ---
 $root -e "DROP DATABASE IF EXISTS \`$rdb\`; CREATE DATABASE \`$rdb\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
@@ -206,7 +208,7 @@ cp -p "$work/config.keep" "$shared/config.php"
 
 # --- server-check (read-only) ---
 run server-check remote server-check
-ok 'server-check reports the database rights, schema and copies' '[[ $rc == 0 ]] && grep -q "Prawo bazy ALTER: tak" <<<"$out" && grep -q "Prawo bazy CREATE: tak" <<<"$out" && grep -q "Prawo bazy REFERENCES: tak" <<<"$out" && grep -q "Schemat bazy: v5" <<<"$out" && grep -q "Najnowsza kopia db-\*.sql.gz: db-" <<<"$out" && grep -q "Stripe:" <<<"$out"'
+ok 'server-check reports the database rights, schema and copies' '[[ $rc == 0 ]] && grep -q "Prawo bazy ALTER: tak" <<<"$out" && grep -q "Prawo bazy CREATE: tak" <<<"$out" && grep -q "Prawo bazy REFERENCES: tak" <<<"$out" && grep -q "Schemat bazy: v$next" <<<"$out" && grep -q "Najnowsza kopia db-\*.sql.gz: db-" <<<"$out" && grep -q "Stripe:" <<<"$out"'
 # A hardened account (db_migrate): no CREATE/ALTER/REFERENCES here although it has CREATE TEMPORARY TABLES and ALL
 # PRIVILEGES on another database; the grant names this database by an escaped pattern (`a\_b`.*, as phpMyAdmin writes it).
 hpass=$(openssl rand -hex 12); hg=; edb=${dbn//_/\\_}
@@ -215,7 +217,7 @@ for h in "${uhosts[@]}"; do hg+="CREATE USER IF NOT EXISTS 'md_${port}h'@'$h' ID
 $root -e "$hg FLUSH PRIVILEGES;"
 "$php" -r '$c=require $argv[1];$c["db_migrate"]=["dsn"=>$c["db"]["dsn"],"user"=>$argv[2],"password"=>$argv[3]];echo "<?php\nreturn ",var_export($c,true),";\n";' "$work/config.keep" "md_${port}h" "$hpass" > "$shared/config.php"
 run 'server-check (hardened account)' remote server-check
-ok 'server-check counts only the exact rights on this database' '[[ $rc == 0 ]] && grep -q "Prawo bazy CREATE: NIE" <<<"$out" && grep -q "Prawo bazy ALTER: NIE" <<<"$out" && grep -q "Prawo bazy REFERENCES: NIE" <<<"$out" && grep -q "Prawo bazy INDEX: tak" <<<"$out" && grep -q "Schemat bazy: v5" <<<"$out"'
+ok 'server-check counts only the exact rights on this database' '[[ $rc == 0 ]] && grep -q "Prawo bazy CREATE: NIE" <<<"$out" && grep -q "Prawo bazy ALTER: NIE" <<<"$out" && grep -q "Prawo bazy REFERENCES: NIE" <<<"$out" && grep -q "Prawo bazy INDEX: tak" <<<"$out" && grep -q "Schemat bazy: v$next" <<<"$out"'
 cp -p "$work/config.keep" "$shared/config.php"
 
 echo "DEPLOY_SCRIPT_TEST: $n steps, $fails failed (work dir: $work)"

@@ -42,8 +42,10 @@ final class Repository {
  private function load():array {
   $db=['schemaVersion'=>2,'revision'=>(int)$this->pdo->query('SELECT revision FROM app_meta WHERE id=1')->fetchColumn(),'clubs'=>[],'users'=>[],'profiles'=>[],'tournaments'=>[]];
   $db['clubs']=$this->pdo->query('SELECT id,name FROM clubs ORDER BY name,id')->fetchAll();
-  // Members (community accounts, plan §3.3) never enter the workspace: Domain and the JS workspace see staff only.
-  foreach($this->pdo->query("SELECT * FROM users WHERE role<>'member' ORDER BY email,id") as $u)$db['users'][]=['id'=>$u['id'],'clubId'=>$u['club_id'],'email'=>$u['email'],'role'=>$u['role'],'active'=>(bool)$u['active'],'passwordHash'=>$u['password_hash'],'authVersion'=>(int)$u['auth_version']];
+  // Members (community accounts, plan §3.3) never enter the workspace: Domain and the JS workspace see staff only. The
+  // staff roles are listed (not role<>'member', which MySQL/MariaDB cannot read through an ENUM index): with the
+  // users_role index (migration 0005) this is a range read of the staff rows, whatever the number of members.
+  foreach($this->pdo->query("SELECT * FROM users WHERE role IN ('admin','editor','club') ORDER BY email,id") as $u)$db['users'][]=['id'=>$u['id'],'clubId'=>$u['club_id'],'email'=>$u['email'],'role'=>$u['role'],'active'=>(bool)$u['active'],'passwordHash'=>$u['password_hash'],'authVersion'=>(int)$u['auth_version']];
   foreach($this->pdo->query('SELECT * FROM profiles ORDER BY id') as $a)$db['profiles'][]=array_replace(self::decode($a['data']),['id'=>$a['id'],'clubId'=>$a['club_id'],'createdBy'=>$a['created_by'],'archived'=>(bool)$a['archived']]);
   $index=[];
   foreach($this->pdo->query('SELECT * FROM tournaments ORDER BY event_date,id') as $t){$index[$t['id']]=count($db['tournaments']);$db['tournaments'][]=['id'=>$t['id'],'createdBy'=>$t['created_by'],'name'=>$t['name'],'city'=>$t['city'],'date'=>$t['event_date'],'mat'=>$t['mat'],'status'=>$t['status'],'activity'=>self::decode($t['activity']),'entries'=>[],'draws'=>[]];}

@@ -54,6 +54,14 @@ test('0002 matches plan §2.3: conditional ALTERs, privacy defaults, floor on me
  assert.match(m,/'floor'=>fn\(PDO \$pdo\):bool=>\(bool\)\$pdo->query\("SELECT 1 FROM users WHERE role='member' LIMIT 1"\)->fetchColumn\(\)/);
 });
 
+test('0005 is additive and needs no floor: the staff index through addIndex, read by the Repository query',()=>{
+ const m5=parsed.find(x=>x.id===5);assert.ok(m5);
+ assert.equal(m5.destructive,false);assert.ok(!/'floor'\s*=>/.test(m5.code),'an index never needs a newer release, so no floor');
+ assert.match(m5.code,/\$m->addIndex\('users','users_role','role'\)/);assert.equal((m5.code.match(/\$m->/g)||[]).length,1,'0005 only adds the index');
+ // The Repository query reads staff by the index: role IN (…), not role<>'member' (an ENUM index cannot serve <>).
+ assert.match(readFileSync('backend/src/Repository.php','utf8'),/SELECT \* FROM users WHERE role IN \('admin','editor','club'\) ORDER BY email,id/);
+});
+
 test('PHP loads every migration with the declared shape and Migrator::target() is the highest id',{skip:!process.env.PHP_BIN},()=>{
  const code=`require 'backend/src/Migrator.php';$out=[];foreach(MatDraw\\Migrator::files('${dir}') as $id=>$f){$m=require $f;$out[]=[$id,$m['id'],$m['name'],$m['destructive'],is_callable($m['up']),!isset($m['floor'])||is_callable($m['floor'])];}echo json_encode(['list'=>$out,'target'=>MatDraw\\Migrator::target('${dir}'),'none'=>MatDraw\\Migrator::target('backend/no-such-dir')]);`;
  const r=spawnSync(process.env.PHP_BIN,['-r',code],{encoding:'utf8'});assert.equal(r.status,0,r.stderr||r.stdout);const out=JSON.parse(r.stdout);

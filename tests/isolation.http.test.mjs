@@ -4,7 +4,7 @@
 import test,{before} from 'node:test';
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
-import {closeSync,existsSync,mkdirSync,mkdtempSync,openSync,readdirSync,statSync,unlinkSync,utimesSync,writeFileSync} from 'node:fs';
+import {closeSync,existsSync,mkdirSync,mkdtempSync,openSync,readFileSync,readdirSync,statSync,unlinkSync,utimesSync,writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -98,6 +98,14 @@ test('migrations from empty and from version 1, rollback floor, dump.php --auto 
   assert.deepEqual(sql('return $pdo->query("SELECT COLUMN_TYPE,IS_NULLABLE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=\'users\' AND COLUMN_NAME IN (\'role\',\'club_id\') ORDER BY COLUMN_NAME")->fetchAll(PDO::FETCH_NUM);',env),[['varchar(40)','YES'],["enum('admin','editor','club','member')",'NO']]);
   assert.equal(sql('return $pdo->query("SELECT COLUMN_DEFAULT FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=\'user_profiles\' AND COLUMN_NAME=\'name_display\'")->fetchColumn();',env).replace(/'/g,''),'initial');
   const hash=sql(HASH,env),twice=run('migrate.php',[],env);assert.equal(twice.code,0,twice.err);assert.match(twice.out,/^Schemat aktualny/);assert.deepEqual(sql(HASH,env),hash,'second run changes nothing');
+  // 0005: the workspace reads staff through the users_role index, not by scanning every member (10 000 here, removed after).
+  const staffQuery=readFileSync(path.join(backend,'src','Repository.php'),'utf8').match(/"(SELECT \* FROM users WHERE [^"]+)"/)[1];
+  const digits='(SELECT 0 d UNION ALL SELECT 1 UNION ALL SELECT 2 UNION ALL SELECT 3 UNION ALL SELECT 4 UNION ALL SELECT 5 UNION ALL SELECT 6 UNION ALL SELECT 7 UNION ALL SELECT 8 UNION ALL SELECT 9)';
+  sql('$pdo->exec("INSERT INTO users (id,club_id,email,role,active,password_hash,auth_version) SELECT CONCAT(\'perf\',a.d,b.d,c.d,e.d),NULL,CONCAT(\'perf\',a.d,b.d,c.d,e.d,\'@aux.example\'),\'member\',1,\'x\',1 FROM ".$in." a,".$in." b,".$in." c,".$in." e");$pdo->query("ANALYZE TABLE users")->fetchAll();return true;',env,JSON.stringify(digits));
+  const plan=sql('return $pdo->query("EXPLAIN ".$in)->fetch(PDO::FETCH_ASSOC);',env,JSON.stringify(staffQuery));
+  assert.equal(plan.key,'users_role',`${staffQuery}: ${JSON.stringify(plan)}`);assert.equal(plan.type,'range');
+  assert.deepEqual(sql('return $pdo->query($in)->fetchAll(PDO::FETCH_COLUMN);',env,JSON.stringify(staffQuery.replace('SELECT *','SELECT id'))),['u1','u2'],'staff only, members never');
+  sql('$pdo->exec("DELETE FROM users WHERE id LIKE \'perf%\'");return true;',env);
  }
  // Rollback floor: 1 while no member exists, 2 (migration 0002) as soon as one does.
  const members=sql('return (int)$pdo->query("SELECT COUNT(*) FROM users WHERE role=\'member\'")->fetchColumn();',env);
