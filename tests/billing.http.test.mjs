@@ -326,6 +326,14 @@ test('circuit breaker: a network error in the background pauses background syncs
  fixture('jobs-reset');const cron=cli('cron.php',['--job=billing-due']);assert.match(cron.out,/^billing-due: stripe down \d+s$/m);
  t=Date.now();const s=await p.c.req('billing-sync',{});assert.equal(s.status,200,'interactive calls ignore the breaker');assert.equal((await since(t,'GET',/^\/v1\/subscriptions$/)).length,1);
  fixture('billing-kv',{set:{stripe_down_until:null}});
+ // The lazy sync of me (run after the response through Jobs::afterSent; php -S cannot send early, so it is called here):
+ // only when next_sync_at is due and the last sync is older than billing_sync_min_interval.
+ await stub({op:'subscription',id:p.sub,status:'past_due',current_period_start:now()-D,event:false});
+ fixture('billing',{userId:p.id,next_sync_at:now()-1,last_synced_at:now()-60});t=Date.now();run('lazy',{userId:p.id});
+ assert.deepEqual(await since(t),[],'synced a minute ago: not yet');
+ fixture('billing',{userId:p.id,next_sync_at:now()+3600,last_synced_at:now()-3600});run('lazy',{userId:p.id});assert.deepEqual(await since(t),[],'not due');
+ fixture('billing',{userId:p.id,next_sync_at:now()-1,last_synced_at:now()-3600});run('lazy',{userId:p.id});
+ assert.equal((await since(t,'GET',/^\/v1\/subscriptions$/)).length,1);assert.deepEqual([row(p.id).sub_status,(await me(p.c)).access.state],['past_due','past_due']);
 });
 
 test('account deletion: the Stripe customer is deleted; a failure leaves stripe_redact_pending for billing-due; tombstones stay unchanged',{skip},async()=>{
