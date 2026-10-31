@@ -250,7 +250,8 @@ const serve=()=>new Promise(resolve=>{
  }).listen(0,'127.0.0.1',()=>resolve({server,url:'http://127.0.0.1:'+server.address().port+'/'}));
 });
 test('panel in a browser: hostile texts stay text, the dialogs send the right bodies, settings save, no CSP violation',{skip:(!runBrowser&&'set MATDRAW_BROWSER_TESTS=1')||(!chromium&&'Playwright is not installed'),timeout:120000},async()=>{
- const {server,url}=await serve(),browser=await chromium.launch(),problems=[];
+ // The server is closed also when Chromium cannot start, so no open handle keeps the test process alive.
+ const {server,url}=await serve(),browser=await chromium.launch().catch(e=>{server.close();throw e;}),problems=[];
  try{
   const ctx=await browser.newContext({viewport:{width:1280,height:900},locale:'pl-PL'}),page=await ctx.newPage();
   page.on('pageerror',e=>problems.push('pageerror '+e.message));page.on('console',m=>{if(m.type()==='error'||/Content Security Policy/i.test(m.text()))problems.push(m.text());});
