@@ -33,11 +33,36 @@ publish(){
  mv -T "$2.new" "$2"
  rm -rf "$2.old"
 }
+# Service worker kill switch for a release that ships no sw.js (the code before the PWA, a rollback or revert target).
+# A browser that loaded a newer release keeps that release's worker, which serves the newer app shell from its cache:
+# a 404 on the update check leaves the active worker in place, so a rollback would change the server but not the app
+# people run. This worker under the same URL replaces it on the next update check (updateViaCache 'none'): it takes over
+# at once, deletes the matbravo-* caches, unregisters itself and reloads the open windows from the server. It has no
+# fetch handler. The .htaccess of such a release has no rule for sw.js, so no-cache is added there (when the file exists;
+# a missing .htaccess is never created, because the hosting's own rules answer 429 without our RewriteEngine block).
+# The next activate of a release with its own sw.js replaces the whole docroot, both files included.
+kill_switch(){
+ cat > "$1/sw.js" <<'JS'
+// MatBravo service worker kill switch, written by deploy-remote.sh because the active release ships no service worker.
+self.addEventListener('install',()=>self.skipWaiting());
+self.addEventListener('activate',e=>e.waitUntil((async()=>{
+ for(const k of await caches.keys())if(k.startsWith('matbravo-'))await caches.delete(k);
+ await self.registration.unregister();
+ for(const c of await self.clients.matchAll({type:'window'}))c.navigate(c.url);
+})()));
+JS
+ chmod 644 "$1/sw.js"
+ if [[ -f $1/.htaccess ]] && ! grep -q 'matbravo-kill-switch' "$1/.htaccess"; then
+  printf '%s\n' '# matbravo-kill-switch: sw.js written by deploy-remote.sh is never cached by the browser.' '<IfModule mod_headers.c>' ' <Files "sw.js">' '  Header set Cache-Control "no-cache, max-age=0"' ' </Files>' '</IfModule>' >> "$1/.htaccess"
+ fi
+ echo "Wydanie bez sw.js: w $1 zapisano sw.js wyłączający service worker (przeglądarki wrócą do wersji z serwera)."
+}
 # Points current at <release> and copies it into the site.
 go_live(){
  switch "$base/current" "$1"
  publish "$1/backend" "$site/backend"
  publish "$1/public" "$docroot"
+ [[ -f $1/public/sw.js ]] || kill_switch "$docroot"
 }
 # Highest migration id a release ships (1 = baseline only), from the file names, exactly as Migrator::target().
 code_target(){ local n=1 f id; for f in "$1"/backend/migrations/[0-9][0-9][0-9][0-9]_*.php; do [[ -f $f ]] || continue; id=${f##*/}; id=$((10#${id:0:4})); ((id>n)) && n=$id; done; echo "$n"; }

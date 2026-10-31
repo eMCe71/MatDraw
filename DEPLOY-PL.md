@@ -152,6 +152,7 @@ Domyślne `php` w SSH na web9 to 8.1, dlatego instalator i wszystkie skrypty uru
 - Automatycznie: każdy push/scalenie do `main`.
 - Ręcznie: **Actions → Test, build i deploy → Run workflow**, gałąź `main`, bez zaznaczania „Przywróć poprzednie wydanie”.
 - Konkretna starsza wersja: `git revert` niechcianych zmian na `main` (pipeline zbuduje i wdroży wynik).
+- **Nigdy nie usuwaj `dist/sw.js`** (także przy `git revert` do kodu sprzed PWA): przeglądarki, które raz otworzyły nową stronę, trzymają jej service worker i jego kopię aplikacji, dopóki serwer nie poda nowego `sw.js`. Gołe `dist/sw.js` z pustą listą plików (szablon) jest wspieranym wyłącznikiem dla złego wydania frontendu: usuwa pamięć podręczną `matbravo-*`.
 
 ## Kiedy wdrażać
 
@@ -202,6 +203,8 @@ Zapytaj też AfterMarket, jak często i jak długo przechowuje własne kopie kon
 ## Powrót do poprzedniego wydania
 
 **Rollback zmienia tylko kod.** Schemat bazy zmienia się wyłącznie przez dodawanie (nowe tabele i kolumny), więc poprzednie wydanie działa na nowym schemacie. Kopia bazy sprzed ostatniej migracji jest w `~/matdraw/backups`.
+
+**Service worker przy powrocie.** Gdy przywracane wydanie nie ma własnego `sw.js` (kod sprzed PWA), `deploy-remote.sh` zapisuje na stronie `sw.js`-wyłącznik (komunikat „Wydanie bez sw.js: … zapisano sw.js wyłączający service worker”) i dopisuje do `.htaccess` regułę `no-cache` dla niego. Przeglądarki, które otworzyły nowszą wersję, przy najbliższym sprawdzeniu aktualizacji usuwają jej pamięć podręczną, wyrejestrowują service worker i przeładowują otwarte karty z serwera. Bez tego zostałyby na nowszej aplikacji, która rozmawiałaby ze starym API. Następne wdrożenie wydania z własnym `sw.js` zastępuje oba pliki.
 
 - Automatycznie: gdy po przełączeniu strona lub API nie odpowiada poprawnie z winy wydania. Problemy hostingu (429, 503, brak połączenia z bazą) nie cofają wydania, bo poprzednie wydanie by nie pomogło.
 - Ręcznie w GitHub: **Run workflow** na `main` z zaznaczonym „Przywróć poprzednie wydanie” — przywraca na stronę wydanie sprzed ostatniego deployu, bez testów i budowania.

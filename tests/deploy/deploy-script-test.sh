@@ -8,6 +8,8 @@
 #    copy with the hash of the old data, and the migration leaves the old rows unchanged;
 #  - a failing migration stops before activate; a missing copy blocks a migration unless ALLOW_NO_BACKUP=1;
 #  - the floor guard blocks a rollback to a release before 0002 while a member exists (FORCE_ROLLBACK=1 overrides);
+#  - a rollback to a release without sw.js (the code before the PWA) leaves a kill-switch sw.js with no-cache in the
+#    docroot, and the next activate of a release with its own sw.js replaces it;
 #  - cleanup deletes copies older than 30 days and always keeps the newest one of each kind;
 #  - deploy-verify: ROLLBACK=false on a good release, ROLLBACK=true for a schema older than the code, ROLLBACK=false
 #    with the maintenance file, 503 chat_off accepted with the chat-off file; poll-probe.sh reports the status codes.
@@ -73,7 +75,7 @@ release(){ mkdir -p "$base/releases/$1"; cp -a "$work/build/matdraw-php/public" 
 # The test's own migrations (a broken one, a probe) take the next free id after the shipped ones.
 next=$(( $("$php" -r 'require $argv[1];echo MatDraw\Migrator::target($argv[2]);' "$work/build/matdraw-php/backend/src/Migrator.php" "$work/build/matdraw-php/backend/migrations") + 1 )); nn=$(printf '%04d' "$next")
 R0=20250101000000-old0000 R1=20260101000001-new1111 R2=20260101000002-bad2222 R3=20260101000003-nob3333
-release "$R1"; release "$R0"; rm -rf "$base/releases/$R0/backend/migrations" "$base/releases/$R0/backend/bin/migrate.php"
+release "$R1"; release "$R0"; rm -rf "$base/releases/$R0/backend/migrations" "$base/releases/$R0/backend/bin/migrate.php" "$base/releases/$R0/public/sw.js" "$base/releases/$R0/public/version.json"
 ln -s "$shared/config.php" "$base/releases/$R0/backend/config.php"
 release "$R2"; echo r2 > "$base/releases/$R2/public/r2-marker.txt"
 printf '%s\n' '<?php' "return ['id'=>$next,'name'=>'broken','destructive'=>false,'up'=>function(MatDraw\\Migrator \$m):void{throw new RuntimeException('Celowo błędna migracja testowa.');}];" > "$base/releases/$R2/backend/migrations/${nn}_broken.php"
@@ -167,8 +169,16 @@ mkdir "$work/ini"; printf '%s\n' '<?php if(in_array("--rollback-floor",$argv??[]
 printf 'auto_prepend_file=%s\nerror_reporting=E_ALL\ndisplay_errors=1\n' "$work/noise.php" > "$work/ini/zz-noise.ini"
 run 'rollback to R0 without members (PHP notices)' env PHP_INI_SCAN_DIR=":$work/ini" bash "$repo/scripts/deploy-remote.sh" rollback "$base" "$docroot"
 ok 'rollback to a release before 0002 is allowed without members, despite PHP notices' '[[ $rc == 0 && $(readlink -f "$base/current") == "$base/releases/$R0" ]] && ! grep -q "Powrót zablokowany" <<<"$out"'
+# R0 ships no service worker: browsers that loaded R1 would keep R1's worker and its cached app shell. The rollback
+# writes a kill switch (takes over, deletes matbravo-* caches, unregisters, reloads the windows; no fetch handler).
+ks=$docroot/sw.js
+ok 'rollback to a release without sw.js writes the kill-switch worker' '[[ -f $ks && ! -e $base/releases/$R0/public/sw.js ]] && grep -q "Wydanie bez sw.js" <<<"$out" && grep -q "skipWaiting" "$ks" && grep -q "registration.unregister" "$ks" && grep -q "startsWith(.matbravo-.)" "$ks" && grep -q "c.navigate(c.url)" "$ks" && ! grep -q "fetch" "$ks" && node --check "$ks"'
+ok 'the kill switch is served with no-cache (one .htaccess block, the RewriteEngine block kept)' '[[ $(grep -c "matbravo-kill-switch" "$docroot/.htaccess") == 1 ]] && grep -q "Header set Cache-Control \"no-cache, max-age=0\"" "$docroot/.htaccess" && grep -q "RewriteEngine On" "$docroot/.htaccess" && cmp -s <(head -n "$(wc -l < "$base/releases/$R0/public/.htaccess")" "$docroot/.htaccess") "$base/releases/$R0/public/.htaccess"'
+start_server; code=$(curl -sS -D "$work/ks.h" -o "$work/ks.js" -w '%{http_code}' "$app/sw.js")
+ok 'the kill switch answers 200 as JavaScript' '[[ $code == 200 ]] && grep -qi "^content-type:.*javascript" "$work/ks.h" && cmp -s "$work/ks.js" "$ks"'
 run 'activate R1 again' remote activate "$R1"
 ok 'activate a newer release needs no floor check' '[[ $rc == 0 && $(readlink -f "$base/current") == "$base/releases/$R1" && $(cat "$base/releases/$R1/.previous") == "$base/releases/$R0" ]]'
+ok 'activating a release with its own sw.js replaces the kill switch and its .htaccess block' 'cmp -s "$docroot/sw.js" "$base/releases/$R1/public/sw.js" && cmp -s "$docroot/.htaccess" "$base/releases/$R1/public/.htaccess" && ! grep -q "Wydanie bez sw.js" <<<"$out"'
 sql "INSERT INTO users (id,club_id,email,role,active,password_hash,auth_version) VALUES ('m1',NULL,'member@test.example','member',1,'x',1)"
 run 'rollback to R0 with a member' env PHP_INI_SCAN_DIR=":$work/ini" bash "$repo/scripts/deploy-remote.sh" rollback "$base" "$docroot"
 ok 'the floor guard blocks the rollback while a member exists' '[[ $rc != 0 && $(readlink -f "$base/current") == "$base/releases/$R1" ]] && grep -q "dane w bazie wymagają kodu co najmniej w wersji" <<<"$out" && grep -q FORCE_ROLLBACK <<<"$out"'
