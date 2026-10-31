@@ -139,6 +139,18 @@ test('query: at most 6 channels on screen and 30 in the background, h without ch
  assert.match(T.clientId(),/^[A-Za-z0-9_-]{22}$/);assert.notEqual(T.clientId(),T.clientId());
 });
 
+test('reading (plan §3.5 step 6): a=1 only for a feed poll with a chat on screen, a channel in ch and own interaction within idle[3]',()=>{
+ const now=1_800_000_000_000,recent={ch:{'1':4},h:{},onScreen:true,interactionAt:now-CFG.idle[3]*1000};
+ assert.equal(T.reading(recent,'feed',CFG,now),true,'interaction exactly idle[3] ago still counts');
+ assert.equal(T.reading({...recent,interactionAt:now-CFG.idle[3]*1000-1},'feed',CFG,now),false,'older interaction: not reading');
+ assert.equal(T.reading(recent,'public',CFG,now),false,'never on the public chat');
+ assert.equal(T.reading({...recent,onScreen:false},'feed',CFG,now),false,'never in the background');
+ assert.equal(T.reading({...recent,ch:{},h:{'1':[3,4]}},'feed',CFG,now),false,'never on a heads-only poll');
+ const cfg=T.normalizeCfg({idle:[1,2,3,4]});
+ assert.equal(T.reading({...recent,interactionAt:now-4000},'feed',cfg,now),true,'the server\'s idle levels count');
+ assert.equal(T.reading({...recent,interactionAt:now-4001},'feed',cfg,now),false);
+});
+
 // ——— Runtime: fake clock, locks and fetch ———
 function fakeClock(){
  let now=1_800_000_000_000,seq=0;const q=[];
@@ -194,6 +206,28 @@ test('401 calls onUnauth; 409 client_outdated stops polling for good',async()=>{
  await clock.advance(60000);assert.equal(n,1);assert.equal(outdated,1);assert.equal(t2.stopped,true);
 });
 
+test('a=1 rides only on feed polls of someone reading: not after idle[3] without interaction, not on heads-only, public or history requests',async()=>{
+ const clock=fakeClock(),locks=fakeLocks(),urls=[],params=()=>urls.map(u=>new URLSearchParams(u.slice(1)));let wants={ch:{'1':5},h:{'2':[1,1]},onScreen:true};
+ const fetch=async url=>{urls.push(url);if(new URLSearchParams(url.slice(1)).has('before'))return json(200,{ch:{'1':{rev:5,st:'open',more:false,older:false,m:[]}}});return json(204);};
+ const t=tab(clock,locks,{mode:'feed',wants:()=>wants,fetch});
+ await clock.advance(10000);
+ assert.ok(urls.length>=2);for(const q of params()){assert.equal(q.get('route'),'chat-feed');assert.equal(q.get('a'),'1',String(q));assert.ok(q.has('ch'));}
+ // No interaction for longer than idle[3] (30 min): the polls continue without a=1.
+ await clock.advance(CFG.idle[3]*1000+1000);urls.length=0;await clock.advance(130000);
+ assert.ok(urls.length>=1,'still polling');for(const q of params())assert.equal(q.get('a'),null,String(q));
+ // Own interaction again: a=1 is back on the next poll.
+ t.interact();urls.length=0;await clock.advance(10000);assert.ok(urls.length>=1);for(const q of params())assert.equal(q.get('a'),'1',String(q));
+ // History pages never carry it.
+ urls.length=0;await t.history('1',40);const hist=params().find(q=>q.has('before'));assert.ok(hist);assert.equal(hist.get('a'),null);
+ // Heads only (chat not on screen, no channel in ch): background polls never carry it.
+ wants={ch:{},h:{'2':[1,1]},onScreen:false};t.interact();t.update();urls.length=0;await clock.advance(70000);
+ assert.ok(urls.length>=1);for(const q of params()){assert.ok(!q.has('ch'));assert.equal(q.get('a'),null,String(q));}
+ t.stop();
+ // The public chat never carries it.
+ urls.length=0;const p=tab(clock,locks,{mode:'public',wants:()=>({ch:{'1':5},onScreen:true}),fetch});
+ await clock.advance(10000);assert.ok(urls.length>=1);for(const q of params()){assert.equal(q.get('route'),'public-chat');assert.equal(q.get('a'),null);}
+ p.stop();
+});
 test('409 client_outdated emits registry client-outdated once in every tab: alone, as the leader, as a follower and from lists',async()=>{
  const clock=fakeClock(),outdated=async()=>json(409,{error:'x',code:'client_outdated'});
  const make=(emits,more,wants=()=>({ch:{'1':0},onScreen:true}))=>T.createTransport({mode:()=>'public',wants,onOutdated:()=>{},env:{fetch:outdated,now:clock.now,random:()=>0.5,setTimeout:clock.setTimeout,clearTimeout:clock.clearTimeout,setInterval:clock.setInterval,clearInterval:clock.clearInterval,online:()=>true,visible:()=>true,apiUrl:q=>'?'+new URLSearchParams(q),emit:event=>emits.push(event),events:false,...more}});

@@ -11,10 +11,10 @@ use PDO;
  * file or sending a cookie, for GET routes that poll (PHP's files handler still waits for the file lock while it reads,
  * so a poll can wait behind a long request of the same session; it never holds the lock itself beyond the read).
  * Peek routes keep member sessions alive; a staff session only when the route passes $active (chat-feed with a=1 and a
- * chat on screen; plan §3.5 step 6: a club representative who only reads the chat is not signed out). The exception
- * needs the client: dist/chat-transport.js is to add a=1 only after the person's own recent interaction, and without it
- * a staff session that only reads the chat expires after its idle limit. Background polls (chat heads every 30 s, the
- * moderation badge) never pass it, so they cannot keep an unattended staff tab signed in until the 12 h maximum.
+ * chat on screen; plan §3.5 step 6: a club representative who only reads the chat is not signed out). dist/chat-transport.js
+ * adds a=1 only while the person's own last interaction is within cfg.idle[3] (30 min), so a staff tab left untouched
+ * expires after its idle limit. Background polls (chat heads every 30 s, the moderation badge) never pass it, so they
+ * cannot keep an unattended staff tab signed in until the 12 h maximum.
  */
 final class Auth {
  public const COOKIE='matdraw_session';
