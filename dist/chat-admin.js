@@ -312,8 +312,9 @@ async function submit(event){
  try{
   const kind=form.dataset.kind;
   if(kind==='settings'){
+   S.saved=false;form.querySelector('.mod-saved')?.remove(); // a new attempt: the old "saved" note must not stand next to a new error
    const body=settingsBody(S.data.settings,{on:f.has('on'),preset:f.get('preset'),notice:f.get('notice')});
-   if(!changed(body)){S.saved=false;if(box)box.textContent=T('Brak zmian do zapisania.');return;}
+   if(!changed(body)){if(box)box.textContent=T('Brak zmian do zapisania.');return;}
    S.data.settings=await request('admin-chat-settings-save',{method:'POST',body});S.saved=true;S.settingsError='';
    ui()?.toast?.(T('Ustawienia czatu zapisane.'));drawPanel();return;
   }

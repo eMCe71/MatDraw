@@ -331,6 +331,14 @@ test('panel in a browser: hostile texts stay text, the dialogs send the right bo
   await page.check('#mod-settings-form input[value="saver"]');await page.fill('#mod-notice','Przerwa techniczna');await page.click('#mod-settings-form button[type=submit]');
   await page.waitForSelector('.mod-saved');
   assert.deepEqual(await page.evaluate(()=>window.__calls.filter(c=>c.params.route==='admin-chat-settings-save').map(c=>c.body)),[{version:3,on:false,preset:'saver',notice:'Przerwa techniczna'},{version:3,on:false,preset:'saver',notice:'Przerwa techniczna'},{version:3,on:false,preset:'saver',notice:'Przerwa techniczna'},{version:4,preset:'saver',notice:'Przerwa techniczna'}]);
+  // after a successful save, a later failed save (503) must not keep saying "saved"; the typed input stays. The same for an unchanged form.
+  const saves=()=>page.evaluate(()=>window.__calls.filter(c=>c.params.route==='admin-chat-settings-save').length);
+  await page.fill('#mod-notice','Trzecia zmiana');await page.evaluate(()=>{window.__fail={status:503,message:'Service Unavailable'};});
+  await page.click('#mod-settings-form button[type=submit]');await page.waitForFunction(()=>document.querySelector('#mod-settings-form .form-error')?.textContent.trim());
+  assert.equal(await page.locator('.mod-saved').count(),0,'a failed save removes the old "saved" note');assert.equal(await page.inputValue('#mod-notice'),'Trzecia zmiana');
+  await page.click('#mod-settings-form button[type=submit]');await page.waitForSelector('.mod-saved');
+  const before=await saves();await page.click('#mod-settings-form button[type=submit]');await page.waitForFunction(()=>!document.querySelector('.mod-saved')&&document.querySelector('#mod-settings-form .form-error')?.textContent.trim());
+  assert.equal(await saves(),before,'an unchanged form sends nothing and drops the "saved" note');
   // keyboard: arrows move between tabs
   await page.focus('#mod-tab-settings');await page.keyboard.press('ArrowRight');assert.equal(await page.evaluate(()=>document.activeElement.id),'mod-tab-reports');
   assert.deepEqual(await page.evaluate(()=>window.__sec),[],'CSP violations');
