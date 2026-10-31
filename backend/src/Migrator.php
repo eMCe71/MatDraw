@@ -13,9 +13,12 @@ use PDO;
  */
 final class Migrator {
  /** Lock name prefix; the lock is per schema (matdraw_migrate:<database>), so staging and production, or parallel
-  *  test databases on one server, never block each other. 16 + 48 characters stay within MySQL's 64-character limit. */
+  *  test databases on one server, never block each other. 16 + 48 characters stay within MySQL's 64-character limit,
+  *  so two schemas whose names share the first 48 characters share one lock. */
  public const LOCK='matdraw_migrate';
  private const LOCK_SQL="CONCAT('matdraw_migrate:',LEFT(IFNULL(DATABASE(),''),48))";
+ /** The lock name run() takes on this connection (tests and diagnostics hold it to simulate a migration in progress). */
+ public static function lockName(PDO $pdo):string{return (string)$pdo->query('SELECT '.self::LOCK_SQL)->fetchColumn();}
  private ?array $list=null;private bool $dry=false;private $log=null;
  public function __construct(private PDO $pdo,private string $dir){}
  /** id => path of every migration file, sorted; no database needed. */

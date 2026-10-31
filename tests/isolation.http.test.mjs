@@ -78,6 +78,9 @@ test('migrations from empty and from version 1, rollback floor, dump.php --auto 
   // Empty database: status says so, migrate exits 10 (run the installer), the floor is 1.
   assert.equal(status(),`STATE=empty CURRENT=0 TARGET=${target} PENDING=0 DESTRUCTIVE=0 FLOOR=1`);
   const empty=run('migrate.php',[],env);assert.equal(empty.code,10,empty.out+empty.err);assert.match(empty.out,/instalator/);
+  // dump.php --auto on the empty database: a copy of 1 KiB or less is refused, nothing (not even a .tmp) is left behind.
+  const tiny=run('dump.php',['--auto'],env);assert.equal(tiny.code,1,tiny.out+tiny.err);assert.match(tiny.err,/podejrzanie mała/);
+  const bdir=path.join(dir,'backups');assert.deepEqual(existsSync(bdir)?readdirSync(bdir).filter(f=>/\.sql\.gz(\.tmp)?$/.test(f)):[],[]);
   // Version 1 (the frozen baseline) with existing staff data, as in production before 0002.
   sql('$pdo->exec(file_get_contents($in));$pdo->exec("INSERT INTO clubs (id,name) VALUES (\'c1\',\'Klub bazowy\')");$pdo->exec("INSERT INTO users (id,club_id,email,role,active,password_hash,auth_version) VALUES (\'u1\',\'c1\',\'admin@aux.example\',\'admin\',1,\'x\',1),(\'u2\',\'c1\',\'klub@aux.example\',\'club\',1,\'y\',3)");return true;',env,JSON.stringify(path.join(backend,'database','schema.sql')));
   assert.equal(status(),`STATE=ready CURRENT=1 TARGET=${target} PENDING=${target-1} DESTRUCTIVE=0 FLOOR=1`);
@@ -144,7 +147,7 @@ test('migrations from empty and from version 1, rollback floor, dump.php --auto 
 test('the migration lock is per database: another schema migrates, the same schema waits',{skip:!base||!process.env.MATDRAW_TEST_AUX_DB},()=>{
  const aux=process.env.MATDRAW_TEST_AUX_DB;
  const r=sql(`require_once dirname(getenv("B")).chr(47)."src/Migrator.php";$c=require getenv("MATDRAW_CONFIG");$auxCfg=$c;$auxCfg["db"]["dsn"]=preg_replace("/dbname=[^;]+/","dbname=".$in,$c["db"]["dsn"]);
-  $name=$pdo->query("SELECT CONCAT('matdraw_migrate:',DATABASE())")->fetchColumn();$held=(int)$pdo->query("SELECT GET_LOCK('$name',0)")->fetchColumn();
+  $name=MatDraw\\Migrator::lockName($pdo);$held=(int)$pdo->query("SELECT GET_LOCK('$name',0)")->fetchColumn();
   $try=function(array $cfg){try{(new MatDraw\\Migrator(matdraw_database($cfg),getenv("B")))->run(fn($l)=>null);return "ok";}catch(RuntimeException $e){return $e->getMessage();}};
   $out=[$name,$held,$try($auxCfg),$try($c)];$pdo->query("SELECT RELEASE_LOCK('$name')")->fetchAll();$out[]=$try($c);return $out;`,{B:path.join(backend,'migrations')},JSON.stringify(aux));
  assert.match(r[0],/^matdraw_migrate:/);assert.equal(r[1],1);

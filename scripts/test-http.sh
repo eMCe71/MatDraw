@@ -2,7 +2,8 @@
 # HTTP integration tests on a disposable local database (plan §11, §12.1).
 # Usage: scripts/test-http.sh <port> [db_name] [test files...]
 #   Builds the PHP release, creates a fresh MariaDB/MySQL database <db_name> (default matdraw_test_<port>) plus
-#   <db_name>_aux (second database for migration and backup tests), writes a test-only config in <work>/shared,
+#   <db_name>_aux (second database for migration and backup tests; <db_name> has at most 44 characters, so both names
+#   differ within the first 48 characters that the per-schema migration lock uses), writes a test-only config in <work>/shared,
 #   runs install.php and migrate.php twice, starts tests/stubs/stripe-stub.mjs on <port+1> when it exists, serves
 #   the release with `php -S 127.0.0.1:<port>` and runs tests/http.test.mjs first, then the given files or the glob
 #   tests/*.http.test.mjs, one file at a time. Distinct ports and database names allow parallel runs.
@@ -16,7 +17,7 @@
 set -uo pipefail
 port=${1:?usage: scripts/test-http.sh <port> [db_name] [test files...]}; shift
 dbn=${1:-matdraw_test_$port}; [[ $# -gt 0 ]] && shift
-[[ $port =~ ^[0-9]+$ && $dbn =~ ^[A-Za-z0-9_]{1,50}$ ]] || { echo "Invalid port or database name." >&2; exit 2; }
+[[ $port =~ ^[0-9]+$ && $dbn =~ ^[A-Za-z0-9_]{1,44}$ ]] || { echo "Invalid port or database name." >&2; exit 2; }
 repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 php=${PHP_BIN:-$(command -v php)}; stub_port=$((port+1)); aux=${dbn}_aux
 root=${MATDRAW_TEST_DB_ROOT:-$(command -v mariadb >/dev/null && echo 'mariadb -uroot' || echo 'mysql -uroot')}
