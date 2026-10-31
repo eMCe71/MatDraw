@@ -15,10 +15,11 @@ use PDO;
  * guard), so neither an old event nor a slower fetch can overwrite newer state.
  *
  * Sources: confirm and checkout events (session), syncUser() (one call lists the customer's subscriptions with the
- * customer expanded: best subscription, customer e-mail compared and corrected, deleted customer detected), handleEvent()
- * (15 types, idempotent through stripe_events shared by webhook and pull), pullEvents() (cursor in billing_kv),
- * reconcile() (all subscriptions, best per customer), due() (rows whose next_sync_at passed, plus retries of customer
- * deletions, stripe_redact_pending), lazy() (after the response of me only).
+ * customer expanded: best subscription, customer e-mail compared and corrected, deleted customer detected, more than one
+ * ongoing subscription audited as 'sub.multiple'), handleEvent() (15 types, idempotent through stripe_events shared by
+ * webhook and pull), pullEvents() (forward from the cursor in billing_kv), reconcile() (all subscriptions, best per
+ * customer), due() (rows whose next_sync_at passed, plus retries of customer deletions, stripe_redact_pending), lazy()
+ * (after the response of me only).
  * Concurrency: a sync claims the row (sync_claimed_at, 60 s lease, rowCount 1) and never holds a transaction or lock
  * while talking to Stripe. Background work uses StripeClient::background (no retries, 3 s / 8 s, circuit breaker).
  * Audit rows hold ids and short codes only, never e-mails or addresses.
@@ -26,7 +27,9 @@ use PDO;
 final class BillingSync {
  public const ONGOING=['active','trialing','past_due','incomplete'];
  public const PRODUCT='matbravo_membership';
- public const LEASE=60,RETRY_AFTER_ERROR=900,MAX_INTERVAL=604800,EVENTS_KEEP=7776000;
+ public const LEASE=60,RETRY_AFTER_ERROR=900,MAX_INTERVAL=604800,EVENTS_KEEP=7776000,EVENT_ATTEMPTS=5,REDACT_BACKOFF=3600;
+ /** Seconds of work per job run (Jobs: a job should stop after about 2 s of work). */
+ public const JOB_BUDGET=2.0;
  public const EVENT_TYPES=['checkout.session.completed','checkout.session.async_payment_succeeded','checkout.session.async_payment_failed','checkout.session.expired',
   'customer.subscription.created','customer.subscription.updated','customer.subscription.deleted','customer.subscription.paused','customer.subscription.resumed','customer.subscription.trial_will_end',
   'invoice.paid','invoice.payment_failed','invoice.payment_action_required','invoice.finalized','customer.deleted'];
@@ -168,6 +171,7 @@ final class BillingSync {
     if($curSub===null){try{$curSub=$client->get('/v1/subscriptions/'.$cur,['expand'=>['latest_invoice']]);}catch(StripeError $e){if(!$e->missing())throw $e;}}
     if(!is_array($curSub))$replace=true;
     else{$curState=self::stateFromSubscription($curSub,$keys);
+     if(in_array($curState['sub_status'],self::ONGOING,true)&&in_array($state['sub_status'],self::ONGOING,true))self::multiple($pdo,$row['user_id'],$actor,[$cur,$state['stripe_subscription_id']]);
      $replace=self::prefer($curState['sub_status'],$curState['created'],$state['sub_status'],$state['created']);
      if(!$replace){self::audit($pdo,$row['user_id'],$actor,'sub.ignored',$curState['sub_status'],$state['sub_status'],$state['stripe_subscription_id'].' kept '.$cur);
       $state=$curState;$opts['clearPending']=false;}// keep the current subscription, refreshed
@@ -226,6 +230,16 @@ final class BillingSync {
   self::audit($pdo,$row['user_id'],$actor,'customer.deleted',(string)$row['sub_status'],'none',$customerId);
   return 'updated';
  }
+ /**
+  * Report 03 §5.3 guard 4: the customer has more than one ongoing subscription, so the person may be charged twice (the
+  * row keeps only the best one). billing_audit 'sub.multiple' with the ids, shown in admin-billing?userId=; written once
+  * per set of ids, not on every sync.
+  */
+ private static function multiple(PDO $pdo,string $userId,string $actor,array $ids):void {
+  $ids=array_values(array_unique($ids));sort($ids);$detail=mb_substr(implode(' ',$ids),0,500);
+  $q=$pdo->prepare("SELECT detail FROM billing_audit WHERE user_id=? AND action='sub.multiple' ORDER BY id DESC LIMIT 1");$q->execute([$userId]);$last=$q->fetchColumn();$q->closeCursor();
+  if($last!==$detail)self::audit($pdo,$userId,$actor,'sub.multiple',null,null,$detail);
+ }
 
  // ---- per-account sync -------------------------------------------------------------------------------------------
  /**
@@ -239,8 +253,9 @@ final class BillingSync {
  }
  /**
   * One account against Stripe (one list call with the customer expanded, plus a customer read when there is no
-  * subscription and an e-mail update when it differs). Returns {outcome,row}; outcome busy = another sync holds the
-  * claim. Stripe errors are recorded (sync_error, next_sync_at in 15 min) and rethrown.
+  * subscription and an e-mail update when it differs). Returns {outcome,row,customer?}: customer is the Stripe Customer
+  * just read (Billing::checkout compares its currency); outcome busy = another sync holds the claim. Stripe errors are
+  * recorded (sync_error, next_sync_at in 15 min) and rethrown.
   */
  public static function syncUser(PDO $pdo,array $c,string $userId,StripeClient $client,string $actor,bool $claim=true):array {
   $row=Access::row($pdo,$userId);$now=time();
@@ -272,6 +287,8 @@ final class BillingSync {
    // Nothing written (an ignored, orphaned or stale result): still move a due next_sync_at on, so billing-due does not
    // pick the same account again and again.
    if(!in_array($outcome,['updated','unchanged'],true)){$f=Access::row($pdo,$userId);if($f)$pdo->prepare('UPDATE billing_accounts SET next_sync_at=? WHERE user_id=? AND next_sync_at<=?')->execute([self::nextSyncAt($f,$now,$min),$userId,$now]);}
+   $on=array_column(array_filter($states,fn($s)=>in_array($s['sub_status'],self::ONGOING,true)),'stripe_subscription_id');
+   if(count($on)>1)self::multiple($pdo,$userId,$actor,$on);
    // The Stripe customer's e-mail follows the account (§3.9): receipts and payment reminders must reach the person. A
    // failure does not undo the sync; it is recorded and retried in 15 minutes.
    $u=Accounts::find($pdo,$userId);
@@ -279,7 +296,7 @@ final class BillingSync {
     try{$client->post('/v1/customers/'.$cus,['email'=>$u['email']]);self::audit($pdo,$userId,$actor,'customer.email',null,null,$cus);}
     catch(StripeError $e){$pdo->prepare('UPDATE billing_accounts SET sync_error=?,next_sync_at=? WHERE user_id=?')->execute([substr($e->code(),0,200),time()+self::RETRY_AFTER_ERROR,$userId]);}
    }
-   return ['outcome'=>$outcome,'row'=>Access::row($pdo,$userId)];
+   return ['outcome'=>$outcome,'row'=>Access::row($pdo,$userId),'customer'=>$customer];
   }catch(StripeError $e){
    $pdo->prepare('UPDATE billing_accounts SET sync_error=?,next_sync_at=?,updated_at=? WHERE user_id=?')->execute([substr($e->code(),0,200),time()+self::RETRY_AFTER_ERROR,time(),$userId]);
    throw $e;
@@ -306,8 +323,10 @@ final class BillingSync {
   * both sources. A processed duplicate returns 'duplicate' at once; an earlier failed attempt is retried (attempts+1).
   * The payload only names the object; it is fetched again in the pinned version. Unknown types are recorded and
   * acknowledged. A failure stores a short code (no personal data) and is rethrown (the webhook answers 500).
+  * $memo (pull only, one page): objects already fetched in this page; a later event about one of them is answered
+  * 'deduped' without another fetch (every event of a page was created before the page was read, so before that fetch).
   */
- public static function handleEvent(PDO $pdo,array $c,StripeClient $client,array $event,string $source):string {
+ public static function handleEvent(PDO $pdo,array $c,StripeClient $client,array $event,string $source,?array &$memo=null):string {
   $id=(string)$event['id'];$now=time();
   $ins=$pdo->prepare('INSERT IGNORE INTO stripe_events (event_id,type,livemode,source,received_at) VALUES (?,?,?,?,?)');
   $ins->execute([$id,substr((string)$event['type'],0,100),(int)!empty($event['livemode']),$source==='webhook'?'webhook':'pull',$now]);
@@ -316,7 +335,7 @@ final class BillingSync {
    if($done!==null&&$done!==false)return 'duplicate';
    $pdo->prepare('UPDATE stripe_events SET attempts=attempts+1 WHERE event_id=?')->execute([$id]);
   }
-  try{$out=self::process($pdo,$c,$client,$event,$source==='webhook'?'stripe':'cron');}
+  try{$out=self::process($pdo,$c,$client,$event,$source==='webhook'?'stripe':'cron',$memo);}
   catch(\Throwable $e){
    $code=$e instanceof StripeError?$e->code():get_class($e);
    $pdo->prepare('UPDATE stripe_events SET error=? WHERE event_id=?')->execute([mb_substr($code,0,200),$id]);
@@ -325,24 +344,33 @@ final class BillingSync {
   $pdo->prepare('UPDATE stripe_events SET processed_at=?,error=NULL WHERE event_id=?')->execute([time(),$id]);
   return $out;
  }
- private static function process(PDO $pdo,array $c,StripeClient $client,array $e,string $actor):string {
+ private static function process(PDO $pdo,array $c,StripeClient $client,array $e,string $actor,?array &$memo):string {
   $type=(string)$e['type'];$o=$e['data']['object'];$oid=self::ref($o['id']??null);$started=time();
+  // A subscription fetched again and applied (memo key sub:<id>); missing in Stripe counts as done too.
+  $sub=function(string $sid)use($pdo,$c,$client,$actor,$started,&$memo):string{
+   if(isset($memo['sub:'.$sid]))return 'deduped';
+   try{$s=$client->get('/v1/subscriptions/'.$sid,['expand'=>['latest_invoice']]);}catch(StripeError $x){if(!$x->missing())throw $x;$memo['sub:'.$sid]=1;return 'missing';}
+   $out=self::apply($pdo,$c,$client,$s,$actor,$started);$memo['sub:'.$sid]=1;return $out;
+  };
   switch(true){
    case in_array($type,['checkout.session.completed','checkout.session.async_payment_succeeded','checkout.session.async_payment_failed','checkout.session.expired'],true):
     if(!$oid||!preg_match('/^cs_(test|live)_[A-Za-z0-9]{10,250}$/D',$oid))return 'ignored';
     if($type==='checkout.session.expired'){$r=self::rowBy($pdo,'pending_checkout_id',$oid);if($r)self::clearPending($pdo,$r['user_id'],$oid);return $r?'expired':'ignored';}
+    if(isset($memo['cs:'.$oid]))return 'deduped';
     $s=$client->get('/v1/checkout/sessions/'.$oid,['expand'=>['subscription','subscription.latest_invoice']]);
-    return self::applySession($pdo,$c,$client,$s,$actor,$started);
+    $out=self::applySession($pdo,$c,$client,$s,$actor,$started);$memo['cs:'.$oid]=1;
+    // The session's subscription was applied with it (not for a foreign, open or expired session).
+    if(!in_array($out,['foreign','open','expired'],true)&&($sid=self::ref($s['subscription']??null)))$memo['sub:'.$sid]=1;
+    return $out;
    case str_starts_with($type,'customer.subscription.'):
-    if(!$oid||!str_starts_with($oid,'sub_'))return 'ignored';
-    try{$sub=$client->get('/v1/subscriptions/'.$oid,['expand'=>['latest_invoice']]);}catch(StripeError $x){if($x->missing())return 'missing';throw $x;}
-    return self::apply($pdo,$c,$client,$sub,$actor,$started);
+    return $oid&&str_starts_with($oid,'sub_')?$sub($oid):'ignored';
    case str_starts_with($type,'invoice.'):
-    $sid=self::invoiceSubscription($o);
-    if($sid){try{$sub=$client->get('/v1/subscriptions/'.$sid,['expand'=>['latest_invoice']]);}catch(StripeError $x){if($x->missing())return 'missing';throw $x;}return self::apply($pdo,$c,$client,$sub,$actor,$started);}
+    if($sid=self::invoiceSubscription($o))return $sub($sid);
     $cus=self::ref($o['customer']??null);$r=$cus?self::rowBy($pdo,'stripe_customer_id',$cus):null;
     if(!$r||$r['deleted_at']!==null)return 'ignored';
-    return self::syncUser($pdo,$c,$r['user_id'],$client,$actor)['outcome'];
+    if(isset($memo['user:'.$r['user_id']]))return 'deduped';
+    $out=self::syncUser($pdo,$c,$r['user_id'],$client,$actor)['outcome'];if($out!=='busy')$memo['user:'.$r['user_id']]=1;
+    return $out;
    case $type==='customer.deleted':
     return $oid?self::customerGone($pdo,$oid,$actor):'ignored';
    case in_array($type,self::AUDIT_TYPES,true):
@@ -353,31 +381,74 @@ final class BillingSync {
   return 'ignored';
  }
  /**
-  * Pull of /v1/events ("webhooks by polling", §6.3): from the cursor in billing_kv (events_cursor:<mode>) minus 120 s,
-  * newest first in pages of 100 up to $maxPages, processed oldest first through handleEvent('pull'). The cursor moves to
-  * the newest processed event; a failure stops the run there (the rest is read again next time). Returns counts.
+  * Pull of /v1/events ("webhooks by polling", §6.3). The cursor in billing_kv (events_cursor:<mode>) is the last event
+  * handled, {created,id}, and the pull walks forward from it: GET /v1/events?ending_before=<id> answers the $limit events
+  * directly after the cursor (Stripe lists newest first, so a page is handled from its end), the next page starts after
+  * the newest event of the page, and the cursor moves event by event. A run may therefore stop anywhere (time budget,
+  * failure, $maxPages) and the next run continues exactly there; nothing between two runs is skipped.
+  * Without a cursor (first run) or when Stripe no longer knows the cursor event (older than 30 days), the window from the
+  * cursor time minus 120 s (or the last 24 h) is read newest first with starting_after, up to $maxPages pages, and
+  * handled oldest first; anything older than what was read is left to the due syncs and reconcile (complete=no).
+  * Failures: Stripe unavailable, 401/403 (key or permission), 409 and 429 stop the run before the event, which the next
+  * run starts with; any other Stripe refusal, or another error at its EVENT_ATTEMPTS-th attempt, marks the event done with
+  * its error (billing_audit 'event.skipped') and the pull goes on, so one bad event never blocks the ones after it.
+  * $budget (seconds, 0 = none): no further event or page is started after that much time, at least one event per run.
+  * Returns counts; complete=yes when everything up to now was handled.
   */
- public static function pullEvents(PDO $pdo,array $c,StripeClient $client,int $maxPages=1,bool $dry=false):array {
-  $key='events_cursor:'.($c['billing_mode']==='live'?'live':'test');$cur=json_decode((string)self::kv($pdo,$key),true);$now=time();
-  $since=is_array($cur)&&is_int($cur['created']??null)?$cur['created']-120:$now-86400;
-  $events=[];$after=null;$complete=false;
-  for($page=0;$page<$maxPages;$page++){
-   $r=$client->get('/v1/events',['created'=>['gte'=>$since],'types'=>self::EVENT_TYPES,'limit'=>100]+($after?['starting_after'=>$after]:[]));
-   $data=is_array($r['data']??null)?$r['data']:[];foreach($data as $e)if(self::validEvent($e,$c))$events[$e['id']]=$e;
-   $last=end($data);$after=is_array($last)?($last['id']??null):null;
-   if(empty($r['has_more'])||!$after){$complete=true;break;}
-  }
-  uasort($events,fn($a,$b)=>[(int)$a['created'],$a['id']]<=>[(int)$b['created'],$b['id']]);
-  $n=['events'=>count($events),'processed'=>0,'duplicates'=>0,'failed'=>0,'complete'=>$complete];
-  if($dry){$q=$pdo->prepare('SELECT 1 FROM stripe_events WHERE event_id=? AND processed_at IS NOT NULL');foreach($events as $id=>$_){$q->execute([$id]);if($q->fetchColumn())$n['duplicates']++;$q->closeCursor();}return $n;}
-  $newest=is_array($cur)?$cur:null;
+ public static function pullEvents(PDO $pdo,array $c,StripeClient $client,int $maxPages=1,bool $dry=false,int $limit=100,float $budget=0.0):array {
+  $key='events_cursor:'.(self::live($c)?'live':'test');$saved=json_decode((string)self::kv($pdo,$key),true);$t0=hrtime(true);
+  $saved=is_array($saved)&&is_int($saved['created']??null)?$saved:null;$cursor=$saved;
+  $n=['events'=>0,'processed'=>0,'deduped'=>0,'duplicates'=>0,'skipped'=>0,'failed'=>0,'complete'=>false];
+  $q=['types'=>self::EVENT_TYPES,'limit'=>max(1,min(100,$limit))];$over=fn():bool=>$budget>0&&(hrtime(true)-$t0)/1e9>=$budget;
+  $rows=fn(array $r):array=>array_values(array_filter(is_array($r['data']??null)?$r['data']:[],'is_array'));
+  try{
+   $before=is_string($saved['id']??null)&&preg_match('/^evt_[A-Za-z0-9]{1,250}$/D',$saved['id'])?$saved['id']:null;
+   for($page=0;$before!==null&&$page<$maxPages;$page++){
+    if($page>0&&$over())return $n;
+    try{$r=$client->get('/v1/events',$q+['ending_before'=>$before]);}
+    catch(StripeError $x){if($page===0&&!$x->unavailable()&&in_array($x->status,[400,404],true)){$before=null;break;}throw $x;}
+    $data=$rows($r);$events=array_reverse(array_values(array_filter($data,fn($e)=>self::validEvent($e,$c))));$n['events']+=count($events);
+    if(!self::pullBatch($pdo,$c,$client,$events,$dry,$n,$cursor,$over))return $n;
+    // The whole page is handled: the cursor passes its newest entry (also one that failed validEvent).
+    if(is_string($data[0]['id']??null)){$before=$data[0]['id'];if(!$dry&&is_int($data[0]['created']??null))$cursor=['created'=>$data[0]['created'],'id'=>$before];}
+    if(!$data||empty($r['has_more'])){$n['complete']=true;return $n;}
+   }
+   if($before!==null)return $n;
+   $since=$saved?$saved['created']-120:time()-86400;$all=[];$after=null;$read=false;
+   for($page=0;$page<$maxPages;$page++){
+    $r=$client->get('/v1/events',$q+['created'=>['gte'=>$since]]+($after?['starting_after'=>$after]:[]));
+    $data=$rows($r);foreach($data as $e)if(self::validEvent($e,$c))$all[]=$e;
+    $last=end($data);$after=is_array($last)&&is_string($last['id']??null)?$last['id']:null;
+    if(empty($r['has_more'])||!$after){$read=true;break;}
+   }
+   $all=array_reverse($all);$n['events']+=count($all);
+   $n['complete']=self::pullBatch($pdo,$c,$client,$all,$dry,$n,$cursor,$over)&&$read;
+   return $n;
+  }finally{if(!$dry&&$cursor!==null&&$cursor!==$saved)self::kvSet($pdo,$key,json_encode($cursor,JSON_THROW_ON_ERROR));}
+ }
+ /** Events of one read (oldest first) through handleEvent('pull'); moves $cursor past each one handled; false = stop the run. */
+ private static function pullBatch(PDO $pdo,array $c,StripeClient $client,array $events,bool $dry,array &$n,?array &$cursor,\Closure $over):bool {
+  if($dry){$q=$pdo->prepare('SELECT 1 FROM stripe_events WHERE event_id=? AND processed_at IS NOT NULL');foreach($events as $e){$q->execute([$e['id']]);if($q->fetchColumn())$n['duplicates']++;$q->closeCursor();}return true;}
+  $memo=[];
   foreach($events as $e){
-   try{$out=self::handleEvent($pdo,$c,$client,$e,'pull');}catch(StripeError $x){$n['failed']++;break;}catch(\Throwable $x){Routes::logThrowable($x,'MatDraw stripe event');$n['failed']++;break;}
-   $out==='duplicate'?$n['duplicates']++:$n['processed']++;
-   if(!$newest||(int)$e['created']>=(int)$newest['created'])$newest=['created'=>(int)$e['created'],'id'=>$e['id']];
+   if($n['processed']+$n['deduped']+$n['duplicates']+$n['skipped']>0&&$over())return false;
+   try{$out=self::handleEvent($pdo,$c,$client,$e,'pull',$memo);$n[$out==='duplicate'?'duplicates':($out==='deduped'?'deduped':'processed')]++;}
+   catch(\Throwable $x){
+    $stripe=$x instanceof StripeError;if(!$stripe)Routes::logThrowable($x,'MatDraw stripe event');
+    $retry=$stripe?$x->unavailable()||in_array($x->status,[401,403,409,429],true):self::attempts($pdo,(string)$e['id'])<self::EVENT_ATTEMPTS;
+    if($retry){$n['failed']++;return false;}
+    self::skipEvent($pdo,$e,$stripe?$x->code():get_class($x));$n['skipped']++;
+   }
+   $cursor=['created'=>(int)$e['created'],'id'=>(string)$e['id']];
   }
-  if($newest)self::kvSet($pdo,$key,json_encode($newest,JSON_THROW_ON_ERROR));
-  return $n;
+  return true;
+ }
+ private static function attempts(PDO $pdo,string $id):int{$q=$pdo->prepare('SELECT attempts FROM stripe_events WHERE event_id=?');$q->execute([$id]);$v=$q->fetchColumn();$q->closeCursor();return (int)$v;}
+ /** An event that cannot succeed is given up: done with its error, billing_audit 'event.skipped' (ids and the code only). */
+ private static function skipEvent(PDO $pdo,array $e,string $code):void {
+  $pdo->prepare('UPDATE stripe_events SET processed_at=?,error=? WHERE event_id=?')->execute([time(),mb_substr('skipped: '.$code,0,200),(string)$e['id']]);
+  self::audit($pdo,null,'cron','event.skipped',null,null,$e['id'].' '.$e['type'].' '.$code);
+  error_log('MatDraw stripe: event '.$e['id'].' skipped ('.$code.')');
  }
  /** Prunes stripe_events older than 90 days (§10 retention); returns the number deleted. */
  public static function prune(PDO $pdo,?int $now=null):int{$q=$pdo->prepare('DELETE FROM stripe_events WHERE received_at<?');$q->execute([($now??time())-self::EVENTS_KEEP]);return $q->rowCount();}
@@ -405,15 +476,21 @@ final class BillingSync {
  }
  /**
   * Accounts whose next_sync_at passed (this mode, oldest first) and retries of Stripe customer deletions
-  * (stripe_redact_pending, also on tombstones), $limit accounts in all. Stops at the first unavailable error.
+  * (stripe_redact_pending, also on tombstones), $limit accounts in all. Deletions come first but take at most half of
+  * the slots (at least one), so due syncs always get their share; a refused deletion goes to the back of the queue and
+  * waits REDACT_BACKOFF (sync_error 'redact …', updated_at). Stops at the first unavailable error, and with $budget
+  * (seconds, 0 = none) starts no further account after that much time (at least one per run).
   */
- public static function due(PDO $pdo,array $c,StripeClient $client,int $limit,?int $now=null,string $actor='cron',int $pauseMs=0):array {
-  $now??=time();$n=['synced'=>0,'busy'=>0,'failed'=>0,'redacted'=>0,'redactFailed'=>0];$live=(int)self::live($c);
-  $q=$pdo->prepare('SELECT user_id,stripe_customer_id FROM billing_accounts WHERE stripe_redact_pending=1 AND stripe_customer_id IS NOT NULL AND livemode=? ORDER BY updated_at LIMIT '.max(1,$limit));$q->execute([$live]);$redact=$q->fetchAll(PDO::FETCH_ASSOC);
-  foreach($redact as $r){
-   if($limit--<=0)break;
-   try{$client->delete('/v1/customers/'.$r['stripe_customer_id']);$ok=true;}catch(StripeError $e){$ok=$e->missing();if(!$ok){$n['redactFailed']++;if($e->unavailable())return $n;continue;}}
-   $pdo->prepare('UPDATE billing_accounts SET stripe_redact_pending=0,updated_at=? WHERE user_id=?')->execute([time(),$r['user_id']]);
+ public static function due(PDO $pdo,array $c,StripeClient $client,int $limit,?int $now=null,string $actor='cron',int $pauseMs=0,float $budget=0.0):array {
+  $now??=time();$t0=hrtime(true);$n=['synced'=>0,'busy'=>0,'failed'=>0,'redacted'=>0,'redactFailed'=>0];$live=(int)self::live($c);$done=0;
+  $over=function()use(&$done,$budget,$t0):bool{return $budget>0&&$done>0&&(hrtime(true)-$t0)/1e9>=$budget;};
+  $q=$pdo->prepare("SELECT user_id,stripe_customer_id FROM billing_accounts WHERE stripe_redact_pending=1 AND stripe_customer_id IS NOT NULL AND livemode=? AND (sync_error IS NULL OR sync_error NOT LIKE 'redact %' OR updated_at<=?) ORDER BY updated_at LIMIT ".max(1,intdiv($limit,2)));
+  $q->execute([$live,$now-self::REDACT_BACKOFF]);
+  foreach($q->fetchAll(PDO::FETCH_ASSOC) as $r){
+   if($over())return $n;$done++;$limit--;
+   try{$client->delete('/v1/customers/'.$r['stripe_customer_id']);$ok=true;}catch(StripeError $e){$ok=$e->missing();if(!$ok){$n['redactFailed']++;if($e->unavailable())return $n;
+    $pdo->prepare('UPDATE billing_accounts SET sync_error=?,updated_at=? WHERE user_id=?')->execute([substr('redact '.$e->code(),0,200),time(),$r['user_id']]);continue;}}
+   $pdo->prepare('UPDATE billing_accounts SET stripe_redact_pending=0,sync_error=NULL,updated_at=? WHERE user_id=?')->execute([time(),$r['user_id']]);
    self::audit($pdo,$r['user_id'],$actor,'customer.redact',null,null,$r['stripe_customer_id']);$n['redacted']++;
    if($pauseMs)usleep($pauseMs*1000);
   }
@@ -421,22 +498,26 @@ final class BillingSync {
   $q=$pdo->prepare('SELECT user_id FROM billing_accounts WHERE next_sync_at IS NOT NULL AND next_sync_at<=? AND livemode=? AND deleted_at IS NULL AND stripe_customer_id IS NOT NULL ORDER BY next_sync_at LIMIT '.max(1,$limit));
   $q->execute([$now,$live]);
   foreach($q->fetchAll(PDO::FETCH_COLUMN) as $uid){
+   if($over())break;$done++;
    try{$out=self::syncUser($pdo,$c,(string)$uid,$client,$actor)['outcome'];$out==='busy'?$n['busy']++:$n['synced']++;}
    catch(StripeError $e){$n['failed']++;if($e->unavailable())break;}
    if($pauseMs)usleep($pauseMs*1000);
   }
   return $n;
  }
- /** Job billing-due (every 10 min, needsFlush): up to 5 accounts in the background; skipped while payments are off or Stripe is down. */
+ /** Job billing-due (every 10 min, needsFlush): up to 5 accounts within JOB_BUDGET; skipped while payments are off or Stripe is down. */
  public static function dueJob(PDO $pdo,array $c,int $now):string {
   if(empty($c['billing_enabled']))return 'billing off';if($s=StripeClient::downFor($pdo))return "stripe down {$s}s";
-  try{return self::counts(self::due($pdo,$c,StripeClient::background($pdo,$c),5,$now));}catch(StripeError $e){return 'error '.$e->code();}
+  try{return self::counts(self::due($pdo,$c,StripeClient::background($pdo,$c),5,$now,'cron',0,self::JOB_BUDGET));}catch(StripeError $e){return 'error '.$e->code();}
  }
- /** Job billing-events (every 15 min, needsFlush): one page of /v1/events, then stripe_events older than 90 days are pruned. */
+ /**
+  * Job billing-events (every 15 min, needsFlush): /v1/events forward from the cursor in pages of 20 (at most 5) within
+  * JOB_BUDGET, then stripe_events older than 90 days are pruned. The CLI (stripe-sync.php --events) reads pages of 100.
+  */
  public static function eventsJob(PDO $pdo,array $c,int $now):string {
   if(empty($c['billing_enabled']))return 'billing off';if($s=StripeClient::downFor($pdo))return "stripe down {$s}s";
   // A Stripe error is reported by its code only (Jobs would log the message, which may quote request values).
-  try{$n=self::pullEvents($pdo,$c,StripeClient::background($pdo,$c),1);}catch(StripeError $e){$n=['error'=>$e->code()];}
+  try{$n=self::pullEvents($pdo,$c,StripeClient::background($pdo,$c),5,false,20,self::JOB_BUDGET);}catch(StripeError $e){$n=['error'=>$e->code()];}
   $n['pruned']=self::prune($pdo,$now);
   return self::counts($n);
  }

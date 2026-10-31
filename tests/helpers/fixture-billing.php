@@ -4,7 +4,7 @@
 //   billing-audit {userId?, action?}         billing_audit rows, oldest first
 //   stripe-events {}                         stripe_events rows, oldest first
 //   billing-kv {get?:key, set?:{key:value|null}}  read or change billing_kv (e.g. the circuit breaker)
-//   billing-run {fn, userId?, limit?, background?, pages?}  runs BillingSync/Billing directly:
+//   billing-run {fn, userId?, limit?, background?, pages?, budget?}  runs BillingSync/Billing directly (events: limit = page size):
 //        due | events | reconcile | sync (forced, never throws) | sync-user (throws) | lazy | delete-customer | push-email | prune
 //   billing-config-set {set:{key:value}}     rewrites MATDRAW_CONFIG atomically (allow-listed keys); returns the old values
 //   billing-country {userId, country}        sets the profile country (staff accounts have no profile fixture)
@@ -29,7 +29,7 @@ return [
   try{
    return match($p['fn']??''){
     'due'=>BillingSync::due($pdo,$c,$client,(int)($p['limit']??5)),
-    'events'=>BillingSync::pullEvents($pdo,$c,$client,(int)($p['pages']??1)),
+    'events'=>BillingSync::pullEvents($pdo,$c,$client,(int)($p['pages']??1),false,(int)($p['limit']??100),(float)($p['budget']??0)),
     'reconcile'=>BillingSync::reconcile($pdo,$c,$client,'cli'),
     'sync'=>BillingSync::sync($pdo,$c,$uid),
     'sync-user'=>BillingSync::syncUser($pdo,$c,$uid,$client,'cli')['outcome'],

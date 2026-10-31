@@ -6,12 +6,16 @@
 // 403, open/expired/incomplete/active, 409 {portal:true} afterwards); staff 402 until paid; Portal; billing-sync and its
 // 10 s limit; past_due with grace and its end (billing-due through bin/cron.php); requireFrom → grace → none and the
 // grandfathered scope; webhook (valid, duplicate, bad signature, stale timestamp, livemode, bad JSON, unknown type,
-// processing failure → 500 then retry, 404 without secrets); /v1/events pull without double processing (stripe-sync.php);
-// subscription precedence (reconcile and a late event about an old canceled subscription); Admin tools with audit
-// (exempt + warnLive, require, cancelAtPeriodEnd, currency, resync); two parallel syncs = one Stripe call; circuit breaker
-// after a network error; account deletion (DELETE /v1/customers, failure → stripe_redact_pending → billing-due retry,
-// tombstone); e-mail pushed to Stripe and corrected by sync; 503 when Stripe fails, transparent retry of one 500; and
-// every request the app sent carried the pinned Stripe-Version, Bearer rk_test_stub and (POST) an Idempotency-Key.
+// processing failure → 500 then retry, 404 without secrets); /v1/events pull without double processing (stripe-sync.php)
+// and forward from the cursor (more than one page, time budget, one fetch per object, a refused event skipped, 429 stops,
+// unknown cursor); subscription precedence (reconcile and a late event about an old canceled subscription); Admin tools
+// with audit (exempt + warnLive, require, cancelAtPeriodEnd, currency, resync); no second subscription next to an
+// incomplete one or a session paid elsewhere, and 'sub.multiple' for two ongoing ones; two parallel syncs = one Stripe
+// call; circuit breaker after a network error; account deletion (DELETE /v1/customers, failure → stripe_redact_pending →
+// billing-due retry, tombstone) and refused deletions that cannot starve billing-due; e-mail pushed to Stripe and
+// corrected by sync; 503 when Stripe fails, transparent retry of one 500; a new customer for another currency
+// (Customer.currency first, Stripe's refusal as the fallback); and every request the app sent carried the pinned
+// Stripe-Version, Bearer rk_test_stub and (POST) an Idempotency-Key.
 import test,{before} from 'node:test';
 import assert from 'node:assert/strict';
 import {spawn,spawnSync} from 'node:child_process';
@@ -231,17 +235,65 @@ test('events pull: an event received by webhook is not processed again by stripe
  await stub({op:'subscription',id:p.sub,status:'active',current_period_start:now(),invoice:'paid'});
  const e2=(await stub({op:'events'})).find(e=>e.data.object.id===p.sub&&e.id!==e1.id&&e.type==='customer.subscription.updated');
  const t=Date.now();const out=cli('stripe-sync.php',['--events']);assert.equal(out.code,0,out.err+out.out);
- const counts=out.out.match(/^events: events=(\d+) processed=(\d+) duplicates=(\d+) failed=0 complete=yes$/m);assert.ok(counts,out.out);assert.ok(Number(counts[3])>=1,'the webhook event counts as a duplicate');
+ const counts=out.out.match(/^events: events=(\d+) processed=(\d+) deduped=(\d+) duplicates=(\d+) skipped=0 failed=0 complete=yes$/m);assert.ok(counts,out.out);assert.ok(Number(counts[4])>=1,'the webhook event counts as a duplicate');
  const events=fixture('stripe-events');
  assert.deepEqual([events.find(x=>x.event_id===e1.id).source,events.find(x=>x.event_id===e1.id).attempts],['webhook',1]);assert.equal(events.find(x=>x.event_id===e2.id).source,'pull');
- const fetched=await since(t,'GET',new RegExp('^/v1/subscriptions/'+p.sub+'$'));assert.ok(fetched.length>=1);
+ // The state is fetched again (the session with its subscription expanded, oldest event first); the later events about
+ // the same subscription in that page are answered from that fetch.
+ const state=new RegExp('^/v1/(subscriptions/'+p.sub+'|checkout/sessions/'+p.sessionId+')$');
+ const fetched=await since(t,'GET',state);assert.equal(fetched.length,1,JSON.stringify(fetched.map(x=>x.path)));assert.ok(Number(counts[3])>=2,'deduped');
  const evReq=(await since(t,'GET',/^\/v1\/events$/))[0];assert.equal(evReq.query.types.length,15);assert.ok(Number(evReq.query.created.gte)>0);
  assert.equal((await me(p.c)).access.state,'active');
  const before=fetched.length;const again=cli('stripe-sync.php',['--events']);assert.equal(again.code,0);
- assert.equal((await since(t,'GET',new RegExp('^/v1/subscriptions/'+p.sub+'$'))).length,before,'a second pull fetches nothing again');
+ assert.equal((await since(t,'GET',state)).length,before,'a second pull fetches nothing again');
  assert.ok(fixture('billing-kv',{})['events_cursor:test'],'cursor stored');
 });
 
+test('events pull walks forward from the cursor: more than a page, time budget, one fetch per object, a refused event is skipped',{skip},async()=>{
+ const p=await paidMember('forward');
+ assert.equal(run('events',{pages:50}).complete,true,'caught up: the cursor is the newest event');
+ const cursor=()=>JSON.parse(fixture('billing-kv',{})['events_cursor:test']);const start=cursor().id;
+ // 150 events after the cursor, read one page of 100 per run (the shape the review found skipping 50 of them).
+ const objects=Array.from({length:150},(_,i)=>({id:`sub_missing${process.pid}x${i}`,object:'subscription'}));
+ const ids=await stub({op:'bulk-events',type:'customer.subscription.updated',objects});
+ let t=Date.now();let r=run('events',{pages:1});
+ assert.deepEqual([r.events,r.processed,r.failed,r.complete],[100,100,0,false]);assert.equal(cursor().id,ids[99],'the cursor stops at the last event handled');
+ r=run('events',{pages:1});assert.deepEqual([r.events,r.processed,r.complete],[50,50,true]);assert.equal(cursor().id,ids[149]);
+ const done=new Set(fixture('stripe-events').filter(x=>x.processed_at).map(x=>x.event_id));
+ assert.deepEqual(ids.filter(id=>!done.has(id)),[],'every one of the 150 events was handled');
+ const reads=await since(t,'GET',/^\/v1\/events$/);assert.deepEqual(reads.map(x=>x.query.ending_before),[start,ids[99]]);
+ assert.ok(reads.every(x=>!x.query.created&&x.query.types.length===15&&x.query.limit==='100'));
+ // A time budget: one event per run at least, and the cursor moves exactly past what was handled.
+ const three=await stub({op:'bulk-events',type:'customer.subscription.updated',objects:objects.slice(0,3).map(o=>({...o,id:o.id+'b'}))});
+ r=run('events',{budget:0.000001});assert.deepEqual([r.processed,r.complete],[1,false]);assert.equal(cursor().id,three[0]);
+ r=run('events',{budget:0.000001});assert.equal(cursor().id,three[1]);
+ r=run('events',{limit:20});assert.deepEqual([r.processed,r.complete],[1,true]);assert.equal(cursor().id,three[2]);
+ // Three events about one subscription in one page: one fetch, the other two answered from it.
+ const sub={id:p.sub,object:'subscription',customer:p.customer};
+ await stub({op:'event',type:'customer.subscription.updated',object:sub});await stub({op:'event',type:'customer.subscription.updated',object:sub});
+ await stub({op:'event',type:'invoice.paid',object:{id:'in_forward',object:'invoice',customer:p.customer,parent:{type:'subscription_details',subscription_details:{subscription:p.sub}}}});
+ t=Date.now();r=run('events',{});assert.deepEqual([r.events,r.processed,r.deduped,r.complete],[3,1,2,true]);
+ assert.equal((await since(t,'GET',new RegExp('^/v1/subscriptions/'+p.sub+'$'))).length,1);
+ // 429 stops the run before the event (the next run starts with it); a refusal that cannot succeed (400) is given up,
+ // audited, and the events after it are handled.
+ const bad=await stub({op:'bulk-events',type:'customer.subscription.updated',objects:[{id:'sub_refused'+process.pid,object:'subscription'},{id:'sub_after'+process.pid,object:'subscription'}]});
+ const before=cursor().id;await stub({op:'fault',method:'GET',path:'^/v1/subscriptions/sub_refused',status:429,type:'rate_limit_error',times:1});
+ r=run('events',{background:true});assert.deepEqual([r.failed,r.processed,r.skipped,r.complete],[1,0,0,false]);assert.equal(cursor().id,before);
+ await stub({op:'fault',method:'GET',path:'^/v1/subscriptions/sub_refused',status:400,type:'invalid_request_error',times:1});
+ r=run('events',{background:true});assert.deepEqual([r.skipped,r.processed,r.failed,r.complete],[1,1,0,true]);assert.equal(cursor().id,bad[1]);
+ const refused=fixture('stripe-events').find(x=>x.event_id===bad[0]);assert.ok(refused.processed_at);assert.equal(refused.attempts,2);
+ assert.equal(refused.error,'skipped: stripe 400 invalid_request_error/-');
+ assert.ok(audit(undefined,'event.skipped').some(a=>a.detail===`${bad[0]} customer.subscription.updated stripe 400 invalid_request_error/-`&&a.actor==='cron'));
+ // A cursor Stripe no longer knows (events are kept 30 days): the window from its time minus 120 s, then forward again.
+ fixture('billing-kv',{set:{'events_cursor:test':JSON.stringify({created:now()-60,id:'evt_gone'+process.pid})}});
+ t=Date.now();r=run('events',{pages:5});assert.equal(r.complete,true,JSON.stringify(r));assert.ok(r.duplicates>=1);
+ const [gone,window]=await since(t,'GET',/^\/v1\/events$/);assert.equal(gone.query.ending_before,'evt_gone'+process.pid);
+ assert.ok(!window.query.ending_before&&Number(window.query.created.gte)<=now()-180&&Number(window.query.created.gte)>=now()-200);
+ assert.equal(cursor().id,bad[1],'back on the newest event');
+ // The job: background client, pages of 20, the counters in job_runs.
+ fixture('jobs-reset');const cron=cli('cron.php',['--job=billing-events']);assert.equal(cron.code,0,cron.err);
+ assert.match(cron.out,/^billing-events: events=0 processed=0 deduped=0 duplicates=0 skipped=0 failed=0 complete=yes pruned=\d+$/m);
+});
 test('subscription precedence: reconcile keeps the active B over an old canceled A; a late event about A changes nothing',{skip},async()=>{
  const p=await paidMember('prec');
  const a=await stub({op:'create-subscription',customer:p.customer,status:'canceled',created:now()-1000});
@@ -385,13 +437,22 @@ test('Stripe failures: one 500 or 429 is retried with the same Idempotency-Key; 
 test('a new Stripe customer when the old one keeps another currency or was deleted in the Dashboard',{skip},async()=>{
  const p=await paidMember('swap','DE');const keys=await prices();
  await stub({op:'subscription',id:p.sub,status:'canceled'});assert.equal((await p.c.req('billing-sync',{})).data.access.state,'ended');
- fixture('billing-country',{userId:p.id,country:'PL'});
+ fixture('billing-country',{userId:p.id,country:'PL'});assert.equal((await stub({op:'customer',id:p.customer})).currency,'usd');
+ // Customer.currency (usd, from the first invoice) differs from the plan (pln): Stripe is asked first and the new customer
+ // comes before the session, so Stripe never has to refuse it.
  let t=Date.now();const r=await p.c.req('billing-checkout',{});assert.equal(r.status,200,JSON.stringify(r.data));
- const sessions=await since(t,'POST',/^\/v1\/checkout\/sessions$/);assert.deepEqual(sessions.map(x=>x.body.line_items[0].price),[keys.matbravo_monthly_pln,keys.matbravo_monthly_pln]);
+ assert.equal((await since(t,'GET',/^\/v1\/subscriptions$/))[0].query.customer,p.customer);
+ const sessions=await since(t,'POST',/^\/v1\/checkout\/sessions$/);assert.deepEqual(sessions.map(x=>x.body.line_items[0].price),[keys.matbravo_monthly_pln]);
  const [created]=await since(t,'POST',/^\/v1\/customers$/);assert.equal(created.idempotencyKey,`matbravo-customer-${p.id}-test-1`);
- const swapped=row(p.id);assert.notEqual(swapped.stripe_customer_id,p.customer);assert.equal(sessions[1].body.customer,swapped.stripe_customer_id);
+ const swapped=row(p.id);assert.notEqual(swapped.stripe_customer_id,p.customer);assert.equal(sessions[0].body.customer,swapped.stripe_customer_id);
  assert.deepEqual([swapped.customer_seq,swapped.stripe_subscription_id,swapped.sub_status],[1,null,'none']);
  assert.ok(audit(p.id,'customer.replace').some(a=>a.detail===`${p.customer} -> ${swapped.stripe_customer_id}`));
+ // Fallback when Customer.currency says nothing: Stripe's currency refusal still leads to a new customer.
+ const f=await paidMember('swap-fallback','DE');await stub({op:'subscription',id:f.sub,status:'canceled'});await stub({op:'hide-currency',id:f.customer});
+ assert.equal(run('sync',{userId:f.id}).sub_status,'canceled');fixture('billing-country',{userId:f.id,country:'PL'});
+ t=Date.now();const fr=await f.c.req('billing-checkout',{});assert.equal(fr.status,200,JSON.stringify(fr.data));
+ const fs=await since(t,'POST',/^\/v1\/checkout\/sessions$/);assert.deepEqual(fs.map(x=>[x.body.customer,x.body.line_items[0].price]),[[f.customer,keys.matbravo_monthly_pln],[row(f.id).stripe_customer_id,keys.matbravo_monthly_pln]]);
+ assert.notEqual(row(f.id).stripe_customer_id,f.customer);assert.equal(row(f.id).customer_seq,1);
  // Deleted in the Dashboard: the next checkout notices it, forgets the customer and starts with a new one.
  const q=member('gone'),cq=await signIn(q.email);const first=await cq.req('billing-checkout',{});const old=row(q.id).stripe_customer_id;
  await stub({op:'expire-session',sessionId:sessionOf(first.data.url)});await stub({op:'delete-customer',id:old});
@@ -399,6 +460,45 @@ test('a new Stripe customer when the old one keeps another currency or was delet
  const fresh=row(q.id);assert.notEqual(fresh.stripe_customer_id,old);assert.equal(fresh.customer_seq,1);
  assert.deepEqual((await since(t,'POST',/^\/v1\/customers$/)).map(x=>x.idempotencyKey),[`matbravo-customer-${q.id}-test-1`]);
  assert.ok(audit(q.id,'customer.deleted').some(a=>a.detail===old));
+});
+
+test('checkout: no second subscription next to an incomplete one or a session paid elsewhere; two ongoing subscriptions are audited',{skip},async()=>{
+ const m=member('lock'),c=await signIn(m.email);let sessionId=sessionOf((await c.req('billing-checkout',{})).data.url);
+ const first=await stub({op:'pay',sessionId,status:'incomplete'});assert.equal((await c.req('billing-confirm',{sessionId})).data.status,'incomplete');
+ // Still incomplete in Stripe (an async payment): Stripe is asked first, then the Portal answer, and no new session.
+ let t=Date.now();let r=await c.req('billing-checkout',{});assert.deepEqual([r.status,r.data.error,r.data.portal],[409,'Masz już aktywną subskrypcję.',true]);
+ assert.equal((await since(t,'GET',/^\/v1\/subscriptions$/)).length,1);assert.deepEqual(await since(t,'POST'),[]);
+ // Expired in Stripe while the cache still says incomplete: a new checkout, with the same customer (same currency).
+ await stub({op:'subscription',id:first.id,status:'incomplete_expired',event:false});assert.equal(row(m.id).sub_status,'incomplete');
+ t=Date.now();r=await c.req('billing-checkout',{});assert.equal(r.status,200,JSON.stringify(r.data));
+ assert.equal((await since(t,'POST',/^\/v1\/checkout\/sessions$/))[0].body.customer,first.customer);assert.equal(row(m.id).sub_status,'incomplete_expired');
+ // That session is paid in another tab and never confirmed here: the next click finds the subscription, not a new session.
+ sessionId=sessionOf(r.data.url);const paid=await stub({op:'pay',sessionId});
+ t=Date.now();r=await c.req('billing-checkout',{});assert.deepEqual([r.status,r.data.portal],[409,true]);assert.deepEqual(await since(t,'POST',/^\/v1\/checkout\/sessions$/),[]);
+ const rw=row(m.id);assert.deepEqual([rw.stripe_subscription_id,rw.sub_status,rw.pending_checkout_id],[paid.id,'active',null]);
+ // A second ongoing subscription of the customer (report 03 §5.3 guard 4): 'sub.multiple' once, in the Admin's detail.
+ const second=await stub({op:'create-subscription',customer:first.customer,status:'active',created:now()+5});
+ assert.equal((await c.req('billing-sync',{})).status,200);run('sync',{userId:m.id});
+ const multi=audit(m.id,'sub.multiple');assert.equal(multi.length,1,'written once per set of ids');assert.equal(multi[0].detail,[paid.id,second.id].sort().join(' '));
+ const det=await admin.req('admin-billing&userId='+m.id);assert.ok(det.data.audit.some(a=>a.action==='sub.multiple'&&a.detail===multi[0].detail));
+ // The Admin's free-account warning covers every ongoing state (an incomplete payment may still go through).
+ const ex=await admin.req('admin-billing-action',{action:'exempt',userId:m.id,reason:'Test'});assert.equal(ex.data.warnLive,true);
+});
+
+test('billing-due: refused customer deletions take at most half of the slots and then wait; due accounts are still synced',{skip},async()=>{
+ const p=await paidMember('due-share');fixture('billing',{userId:p.id,next_sync_at:now()-1});
+ const stuck=Array.from({length:5},(_,i)=>{const s=member('stuck'+i);fixture('billing',{userId:s.id,stripe_customer_id:`cus_stuck${process.pid}x${i}`,stripe_redact_pending:1,deleted_at:now(),livemode:0,updated_at:now()-7200+i});return s;});
+ await stub({op:'fault',method:'DELETE',path:'^/v1/customers/cus_stuck',status:400,type:'invalid_request_error',times:20});
+ let r=run('due',{limit:5});assert.deepEqual([r.redactFailed,r.redacted],[2,0],'two of the five slots');assert.ok(r.synced+r.busy+r.failed>=1,JSON.stringify(r));
+ for(const s of stuck.slice(0,2)){const x=row(s.id);assert.deepEqual([x.sync_error,x.stripe_redact_pending],['redact stripe 400 invalid_request_error/-',1]);}
+ // A refused deletion waits an hour at the back of the queue: the next runs take the others, then none of them.
+ r=run('due',{limit:5});assert.deepEqual([r.redactFailed,r.redacted],[2,0]);
+ r=run('due',{limit:5});assert.deepEqual([r.redactFailed,r.redacted],[1,0]);
+ r=run('due',{limit:5});assert.deepEqual([r.redactFailed,r.redacted],[0,0]);
+ // After the wait, with Stripe answering again (the stub does not know these customers: gone counts as deleted).
+ await stub({op:'clear-faults'});for(const s of stuck)fixture('billing',{userId:s.id,updated_at:now()-3601});
+ r=run('due',{limit:10});assert.equal(r.redacted,5,JSON.stringify(r));
+ for(const s of stuck){const x=row(s.id);assert.deepEqual([x.stripe_redact_pending,x.sync_error],[0,null]);}
 });
 
 test('every request the app sent to Stripe carried the pinned version and rk_test_stub, every POST an Idempotency-Key; routes need a session and CSRF',{skip},async()=>{

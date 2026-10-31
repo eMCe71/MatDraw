@@ -3,7 +3,7 @@
 // without it (confirm, Portal return, lazy sync and the billing jobs), it only refreshes accounts sooner.
 //   /usr/local/php83/bin/php ~/domains/matbravo.com/backend/bin/stripe-sync.php --events --due     every 20 min
 //   /usr/local/php83/bin/php ~/domains/matbravo.com/backend/bin/stripe-sync.php --reconcile        nightly
-//   --events     /v1/events from the stored cursor (all pages), each event once (shared with the webhook)
+//   --events     /v1/events forward from the stored cursor (pages of 100, up to 200), each event once (shared with the webhook)
 //   --due        accounts whose next_sync_at passed (--limit, default 50) and pending Stripe customer deletions
 //   --reconcile  every subscription of this mode, the best one per customer
 //   --user=<id>  forced sync of one account

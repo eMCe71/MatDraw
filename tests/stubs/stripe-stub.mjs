@@ -12,11 +12,15 @@
 //   pay {sessionId, status='active', invoice='paid', created?}      completes a Checkout Session with a new subscription
 //   subscription {id, status?, cancel_at_period_end?, current_period_start?, current_period_end?, invoice?, created?, event?}
 //   create-subscription {customer, status='active', created?, lookup_key='matbravo_monthly_pln', metadata?, invoice?}
-//   expire-session {sessionId}   event {type, object}   events {}   customer {id}   delete-customer {id} (as in the Dashboard)
-//   A customer keeps the currency of its first paid session: Checkout in another currency answers 400 (03 §3.3).
+//   expire-session {sessionId}   event {type, object}   bulk-events {type, objects} → ids   events {}   customer {id}
+//   delete-customer {id} (as in the Dashboard)
+//   A customer keeps the currency of its first paid session (Customer.currency) and Checkout in another currency answers
+//   400 (03 §3.3); hide-currency {id} clears the visible Customer.currency but keeps the refusal (the message fallback).
 //   fault {method?, path? (regex), kind:'status'|'drop', status, type?, code?, message?, param?, shouldRetry?, times=1}
 //   delay {method?, path?, ms, times=1}   clear-faults {}
 // Every /v1 request is recorded as {method, path, query, body, version, idempotencyKey, authorization, fault?}.
+// Lists are newest first with starting_after, or ending_before (the items just before the cursor, i.e. newer, still
+// newest first; an unknown cursor answers 404 resource_missing like an unknown object).
 import http from 'node:http';
 import crypto from 'node:crypto';
 
@@ -51,9 +55,12 @@ function parseForm(s){
  return arrays(out);
 }
 const list=(url,data,has_more=false)=>({object:'list',url,has_more,data});
-function page(url,items,q){// newest first; starting_after; limit
+function page(url,items,q){// newest first; starting_after or ending_before; limit
+ const limit=Math.min(100,Math.max(1,Number(q.limit||10)));
+ if(q.ending_before){const i=items.findIndex(x=>x.id===q.ending_before);if(i<0)throw new StripeErr(404,'invalid_request_error',`No such object: '${q.ending_before}'`,'resource_missing','ending_before');
+  const from=Math.max(0,i-limit);return list(url,items.slice(from,i),from>0);}
  let start=0;if(q.starting_after){const i=items.findIndex(x=>x.id===q.starting_after);start=i<0?items.length:i+1;}
- const limit=Math.min(100,Math.max(1,Number(q.limit||10)));const data=items.slice(start,start+limit);return list(url,data,start+limit<items.length);
+ const data=items.slice(start,start+limit);return list(url,data,start+limit<items.length);
 }
 const newestFirst=(a,b)=>(b.created-a.created)||(b._seq-a._seq);
 const strip=o=>{if(o&&typeof o==='object'){if(Array.isArray(o))return o.map(strip);const r={};for(const [k,v] of Object.entries(o))if(!k.startsWith('_'))r[k]=strip(v);return r;}return o;};
@@ -101,7 +108,7 @@ function api(m,parts,q,b){
    return price(b);}
  }
  if(res==='customers'){
-  if(m==='POST'&&!id){const c={id:'cus_'+rand(),object:'customer',email:b.email||null,preferred_locales:[].concat(b.preferred_locales||[]),metadata:b.metadata||{},livemode:false,created:now()};return S.customers[c.id]=c;}
+  if(m==='POST'&&!id){const c={id:'cus_'+rand(),object:'customer',email:b.email||null,currency:null,preferred_locales:[].concat(b.preferred_locales||[]),metadata:b.metadata||{},livemode:false,created:now()};return S.customers[c.id]=c;}
   const c=S.customers[id];
   if(!c||(c.deleted&&m!=='GET'))throw missing('customer',id);
   if(m==='GET')return customerView(id);
@@ -161,7 +168,7 @@ function control(b){
   case 'state':return strip({customers:S.customers,sessions:S.sessions,subscriptions:S.subscriptions,prices:S.prices,products:S.products,portal:S.portal,webhooks:S.webhooks,events:S.events.length});
   case 'pay':{const s=S.sessions[b.sessionId];if(!s)throw missing('checkout.session',b.sessionId);
    const sub=newSubscription({customer:s.customer,priceId:s._price,status:b.status||'active',created:b.created,metadata:s._subMeta,invoiceStatus:b.invoice||(b.status==='incomplete'?'open':'paid')});
-   S.customers[s.customer]._currency=S.prices[s._price].currency;
+   S.customers[s.customer]._currency=S.customers[s.customer].currency=S.prices[s._price].currency;
    Object.assign(s,{status:'complete',payment_status:b.status==='incomplete'?'unpaid':'paid',subscription:sub.id});
    event('checkout.session.completed',s);event('customer.subscription.created',sub);event(sub.status==='active'?'invoice.paid':'invoice.payment_action_required',S.invoices[sub.latest_invoice]);
    return subView(sub,['latest_invoice']);}
@@ -171,6 +178,8 @@ function control(b){
    if(b.status==='canceled')setSub(sub,{status:'canceled'});if(b.event)event('customer.subscription.created',sub);return subView(sub,['latest_invoice']);}
   case 'expire-session':{const s=S.sessions[b.sessionId];if(!s)throw missing('checkout.session',b.sessionId);s.status='expired';event('checkout.session.expired',s);return sessionView(s);}
   case 'event':return strip(event(b.type,b.object));
+  case 'bulk-events':return [].concat(b.objects||[]).map(o=>event(b.type,o).id);
+  case 'hide-currency':{const c=S.customers[b.id];if(!c)throw missing('customer',b.id);c.currency=null;return customerView(b.id);}
   case 'events':return strip([...S.events].sort(newestFirst));
   case 'customer':return customerView(b.id);
   case 'delete-customer':{const c=S.customers[b.id];if(!c)throw missing('customer',b.id);c.deleted=true;return customerView(b.id);}

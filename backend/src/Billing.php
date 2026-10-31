@@ -15,8 +15,8 @@ use PDO;
  *    language and our opaque id only (Idempotency-Key matbravo-customer-<userId>-<mode>-<seq>).
  */
 final class Billing {
- /** Statuses for which a new checkout is refused (the Portal is the place to manage them). */
- private const LOCKED=['active','trialing','past_due'];
+ /** Statuses the Admin can end at the period end (cancelAtPeriodEnd); a new checkout is refused for every ongoing one (BillingSync::ONGOING). */
+ private const CANCELABLE=['active','trialing','past_due'];
  public static function enabled(array $c):bool{return !empty($c['billing_enabled']);}
  public static function live(array $c):bool{return ($c['billing_mode']??'test')==='live';}
  public static function requireEnabled(array $c):void{if(!self::enabled($c))throw new AppError('Płatności są wyłączone.',404);}
@@ -53,25 +53,40 @@ final class Billing {
 
  // ---- Checkout --------------------------------------------------------------------------------------------------
  /**
-  * billing-checkout (§6.2): 409 {portal:true} with an ongoing subscription; 422 without a country; an open session of the
-  * same currency that expires in more than 5 minutes is reused; otherwise Customer (once) and a new subscription session.
-  * Returns {url} on checkout.stripe.com.
+  * billing-checkout (§6.2): 409 {portal:true} with an ongoing subscription (active, trialing, past_due and incomplete:
+  * an async payment still running would charge twice next to a second subscription); 422 without a country; an open
+  * session of the same currency that expires in more than 5 minutes is reused; otherwise Stripe's view of a returning
+  * customer comes first (BillingSync::syncUser: one list call): an ongoing subscription the cache did not know yet (a
+  * stale 'incomplete', a session paid in another tab) refuses the checkout, and a customer deleted in the Dashboard or
+  * whose Customer.currency (fixed by its first invoice, 03 §3.3) differs from the plan currency is replaced before the
+  * session is created. Then Customer (once) and a new subscription session. Returns {url} on checkout.stripe.com.
   */
  public static function checkout(PDO $pdo,array $c,array $u,mixed $lang=null):array {
-  $row=Access::row($pdo,$u['id']);$now=time();$live=self::live($c);
+  $row=Access::row($pdo,$u['id']);$now=time();
   if($row&&$row['deleted_at']!==null)throw new AppError('Brak uprawnień.',403);
-  if(in_array(Access::subStatus($row,$c),self::LOCKED,true))throw new ApiError('Masz już aktywną subskrypcję.',409,['portal'=>true]);
+  $status=Access::subStatus($row,$c);
+  if($status!=='incomplete'&&in_array($status,BillingSync::ONGOING,true))self::locked();
   $country=self::country($pdo,$u['id']);$currency=self::currencyFor($pdo,$c,$row,$country,$u['id']);
   if($currency===null)throw new AppError('Wybierz kraj w profilu, aby wybrać plan.',422);
   $client=StripeClient::interactive($c);
   if(!isset($c['stripe_prices'][$currency]))throw new StripeError('No price for '.$currency,0,'config');
-  if($row&&$row['pending_checkout_id']!==null&&(int)$row['pending_checkout_expires']>$now+300&&$row['currency']===$currency&&self::sameMode($row,$c)&&$row['stripe_customer_id']!==null){
+  $known=$row!==null&&$row['stripe_customer_id']!==null&&self::sameMode($row,$c);
+  if($known&&$status!=='incomplete'&&$row['pending_checkout_id']!==null&&(int)$row['pending_checkout_expires']>$now+300&&$row['currency']===$currency){
    try{$s=$client->get('/v1/checkout/sessions/'.$row['pending_checkout_id']);
     if(($s['status']??null)==='open'&&BillingSync::ref($s['customer']??null)===$row['stripe_customer_id']&&self::checkoutUrl($s['url']??null))return ['url'=>$s['url']];
    }catch(StripeError $e){if(!$e->missing())throw $e;}
   }
+  $replace=false;
+  if($known){
+   $r=BillingSync::syncUser($pdo,$c,$u['id'],$client,$u['id']);$row=$r['row']??$row;$cus=$r['customer']??null;
+   if(in_array(Access::subStatus($row,$c),BillingSync::ONGOING,true))self::locked();
+   $currency=self::currencyFor($pdo,$c,$row,$country,$u['id'])??$currency;
+   if(!isset($c['stripe_prices'][$currency]))throw new StripeError('No price for '.$currency,0,'config');
+   $cur=is_array($cus)&&empty($cus['deleted'])&&is_string($cus['currency']??null)?strtolower($cus['currency']):'';
+   $replace=$r['outcome']==='customer-deleted'||($cur!==''&&$cur!==$currency);
+  }
   $row=BillingSync::ensureRow($pdo,$u);$lang=self::lang($lang,$country);
-  $customer=self::ensureCustomer($pdo,$c,$client,$u,$row,$country);
+  $customer=self::ensureCustomer($pdo,$c,$client,$u,$row,$country,$replace);
   $params=['mode'=>'subscription','line_items'=>[['price'=>self::resolvePrice($pdo,$c,$client,$currency),'quantity'=>1]],'customer'=>$customer,
    'customer_update'=>['address'=>'auto','name'=>'auto'],'client_reference_id'=>$u['id'],'metadata'=>['matbravo_user_id'=>$u['id'],'matbravo_env'=>$c['billing_mode']],
    'subscription_data'=>['metadata'=>['matbravo_user_id'=>$u['id']],'description'=>'MatBravo'],
@@ -84,7 +99,7 @@ final class Billing {
     BillingSync::customerGone($pdo,$customer,$u['id']);$params['customer']=self::ensureCustomer($pdo,$c,$client,$u,$row,$country,true);$s=$client->post('/v1/checkout/sessions',$params);
    }elseif($e->missing()&&($e->param===null||str_contains($e->param,'price'))){$params['line_items'][0]['price']=self::resolvePrice($pdo,$c,$client,$currency,true);$s=$client->post('/v1/checkout/sessions',$params);}
    elseif($e->status===400&&$e->type==='invalid_request_error'&&stripos($e->getMessage(),'currenc')!==false){
-    // A Customer keeps the currency of its first invoice (03 §3.3): a new Customer for the other currency.
+    // Fallback only (Customer.currency above decides first): Stripe refused the customer's currency, so a new Customer.
     $params['customer']=self::ensureCustomer($pdo,$c,$client,$u,$row,$country,true);$s=$client->post('/v1/checkout/sessions',$params);
    }else throw $e;
   }
@@ -95,6 +110,8 @@ final class Billing {
   BillingSync::audit($pdo,$u['id'],$u['id'],'checkout.create',null,null,$id.' '.$currency);
   return ['url'=>$url];
  }
+ /** §6.2 point 2: an ongoing subscription is managed in the Portal. */
+ private static function locked():never{throw new ApiError('Masz już aktywną subskrypcję.',409,['portal'=>true]);}
  private static function checkoutUrl(mixed $u):bool{return is_string($u)&&str_starts_with($u,'https://checkout.stripe.com/');}
  /** The Stripe Customer of the account in this mode, created on the first checkout ($replace: a new one, customer_seq+1). */
  private static function ensureCustomer(PDO $pdo,array $c,StripeClient $client,array $u,array $row,?string $country,bool $replace=false):string {
@@ -252,7 +269,7 @@ final class Billing {
     $pdo->prepare('INSERT INTO billing_accounts (user_id,billing_exempt,exempt_reason,exempt_by,exempt_at,exempt_until,created_at,updated_at) VALUES (?,1,?,?,?,?,?,?) ON DUPLICATE KEY UPDATE billing_exempt=1,exempt_reason=VALUES(exempt_reason),exempt_by=VALUES(exempt_by),exempt_at=VALUES(exempt_at),exempt_until=VALUES(exempt_until),updated_at=VALUES(updated_at)')
      ->execute([$uid,$reason,$actor,$now,$until,$now,$now]);
     // A paying person made free keeps being charged until the subscription is stopped (03 §10.2): the Admin is warned.
-    $extra['warnLive']=in_array(Access::subStatus($row,$c),self::LOCKED,true)&&empty($row['cancel_at_period_end']);
+    $extra['warnLive']=in_array(Access::subStatus($row,$c),BillingSync::ONGOING,true)&&empty($row['cancel_at_period_end']);
     BillingSync::audit($pdo,$uid,$actor,'exempt.grant',$before,$after(),$until!==null?'until='.date('Y-m-d',$until):null);
     break;
    case 'require':
@@ -282,7 +299,7 @@ final class Billing {
     break;
    case 'cancelAtPeriodEnd':
     self::requireStripe($c);
-    if(!in_array(Access::subStatus($row,$c),self::LOCKED,true)||$row['stripe_subscription_id']===null)throw new AppError('To konto nie ma trwającej subskrypcji.',409);
+    if(!in_array(Access::subStatus($row,$c),self::CANCELABLE,true)||$row['stripe_subscription_id']===null)throw new AppError('To konto nie ma trwającej subskrypcji.',409);
     $client=StripeClient::interactive($c);$started=time();
     $sub=$client->post('/v1/subscriptions/'.$row['stripe_subscription_id'],['cancel_at_period_end'=>true,'expand'=>['latest_invoice']]);
     BillingSync::apply($pdo,$c,$client,$sub,$actor,$started,['row'=>$row]);

@@ -7,6 +7,10 @@ use PDO;
  * A Stripe API error: status 0 = no HTTP answer (network error, timeout, open circuit breaker), otherwise the HTTP
  * status with Stripe's error type, code, param and Request-Id. Its message is Stripe's own text and is never shown to
  * people (routes answer with a generic, translated 503) and never logged in full (it may quote request values).
+ * It lives in this file, and the autoloader maps MatDraw\X only to src/X.php: `catch (StripeError)` and `instanceof`
+ * are safe anywhere (they never load a class), but code that constructs one or calls its static members must have used
+ * StripeClient first (class_exists(StripeClient::class) is enough). Every such site in Billing and BillingSync runs after
+ * a client exists; other slices only call the class_exists contracts, which catch it.
  */
 final class StripeError extends \RuntimeException {
  public function __construct(string $m,public readonly int $status,public readonly ?string $type=null,public readonly ?string $stripeCode=null,public readonly ?string $requestId=null,public readonly ?string $param=null){parent::__construct($m,$status);}
