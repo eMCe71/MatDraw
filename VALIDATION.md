@@ -2,7 +2,17 @@
 
 This file says what was tested, how it can be repeated, and what can only be verified on the real server. Commands are in `README.md` ("Tests and the local harness"); the owner's checklist is `HANDOFF.md`.
 
-> **FINAL NUMBERS — PLACEHOLDER, to be filled by the orchestrator after the final review:** commit `<SHA>`, date `<YYYY-MM-DD>`; unit `<pass>/<total>` (`<skipped>` skipped); PHP bridges `<pass>/<total>`; HTTP on local MariaDB 10.11 `<pass>/<total>`; CI MySQL 8.0 `<pass>/<total>`; CI MariaDB 10.6 `<pass>/<total>`; back-compat `<result>`; deploy-script test `<pass>/<total>`; browser tests `<pass>/<total>`; manual QA findings `<list>`. Until then the figures below are the measurements of the documentation task at its base commit.
+> **Final numbers (2026-10-31, commit `4f9317a`, the state proposed for `main`):**
+> - **Unit (Node + PHP bridges):** `PHP_BIN=… node --test` over every non-HTTP test file — 287 tests, 276 pass, 0 fail, 11 skipped (the skipped ones need `MATDRAW_TEST_URL` or `MATDRAW_BROWSER_TESTS` and run in the rows below).
+> - **HTTP on local MariaDB 10.11.14:** `MATDRAW_BROWSER_TESTS=1 bash scripts/test-http.sh … tests/*.http.test.mjs tests/account-ui.test.mjs` — 108/108 (`tests/http.test.mjs` 2/2, then 106/106 including `tests/integration.http.test.mjs` with the guest privacy sweep and the PHP-build browser flow of `tests/account-ui.test.mjs`).
+> - **Browser (Playwright, Chromium, static demo and PWA):** 58/58.
+> - **Deploy scripts:** `tests/deploy/deploy-script-test.sh` — 29/29 steps.
+> - **CI run #67 (GitHub Actions, same commit): all green** — unit, HTTP on **MySQL 8.0** and **MariaDB 10.6**, back-compat (old code on the new schema, data unchanged) on both engines, deploy-script test, browser job, build.
+> - **Manual QA (wave 5):** every item of plan §11 in Playwright on the PHP release with the Stripe stub and on the demo; 10 UI defects found and fixed (3 major: chat focus lost on every poll, moderation page failing in the demo, no language switch in the phone chat).
+> - **Final 6-lens adversarial review** (security/privacy, payments, chat/realtime, tournament regression, deploy/hosting, UX/a11y/i18n): 14 findings independently reproduced by verifiers (10 major, 4 minor) plus 18 minor notes; all fixed with regression tests except two deferred minors: unread counters can stay too high after unread messages are deleted or auto-hidden, until the next new message (needs a polling-protocol change); no dedicated iOS on-screen-keyboard handling for the full-screen chat (only Chromium was available for testing).
+> - **Original tournament app:** compared side by side with `b1a8fd0` — identical bootstrap/session JSON for admin, editor and club after the migration, identical A4/A3 print PDFs, unchanged hall screen and guest preview.
+>
+> The figures in section 3 below are the earlier measurements of the documentation task at its base commit.
 
 ## 1. Test layers
 
@@ -31,7 +41,7 @@ This file says what was tested, how it can be repeated, and what can only be ver
 | `bash scripts/test-http.sh 8280 matdraw_qa_docs_http` (installer, `migrate.php` twice, Stripe stub) | `tests/http.test.mjs` 2/2 and the five `*.http.test.mjs` files together 72/72 pass (`accounts`, `billing`, `chat`, `isolation`, `profiles`); exit code 0 |
 | `tests/pwa-build.test.mjs`, `tests/pwa-sw.test.mjs` after adding the manifest screenshots | 24 pass, 1 skipped (the browser run) |
 
-`tests/integration.http.test.mjs` (contracts across slices) is added with the final review and counted in the placeholder above.
+`tests/integration.http.test.mjs` (contracts across slices) was added with the final review and is counted in the final numbers above.
 
 ## 4. Earlier baseline (2026-10-29, version 3 of the app, unchanged facts)
 

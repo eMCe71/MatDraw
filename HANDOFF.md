@@ -207,4 +207,6 @@ Nie ma wskaźników „ktoś pisze” ani licznika obecnych osób; wiadomości p
 - Bez e-maili: weryfikacji adresów przy rejestracji nie ma (stąd procedura konfliktu adresów), reset hasła robi Administrator.
 - Webhooki Stripe najpewniej nie dojdą (blokada hostingu); stan subskrypcji jest pobierany ze Stripe przy płatności, przy logowaniu i w tle (opóźnienie do kilkunastu minut zamiast sekund).
 - Nie zbudowano: Web Push, liczników instalacji, wiadomości prywatnych, przypiętej wiadomości, flag krajów (zamiast nich kod `PL`), awansu członka na przedstawiciela klubu, rozszerzenia kanałów o inne sporty.
-- Wymagania tylko dla prawdziwego serwera i telefonu są wypisane w `VALIDATION.md`. Ustalenia z końcowego przeglądu i ręcznej kontroli (znalezione błędy, poprawione albo opisane jako znane) dopisuje tam orkiestrator.
+- Licznik nieprzeczytanych wiadomości przy kanale może chwilowo pokazywać za dużo, jeśli nieprzeczytaną wiadomość usunął moderator albo ukryło ją zgłoszenie. Poprawia się sam przy następnej nowej wiadomości w kanale. Pełna poprawka wymaga zmiany protokołu odpytywania i jest odłożona.
+- Czat pełnoekranowy nie ma osobnej obsługi klawiatury ekranowej na iPhonie (testy działały tylko w Chromium). Przed startem sprawdź pisanie w czacie na prawdziwym iPhonie (krok 14).
+- Wymagania tylko dla prawdziwego serwera i telefonu są wypisane w `VALIDATION.md`. Tam są też końcowe wyniki testów, ręcznej kontroli i końcowego przeglądu.
