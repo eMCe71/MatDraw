@@ -275,8 +275,10 @@ button.chat-name:hover{text-decoration:underline;text-underline-offset:2px}
  .chat-pop{position:fixed;left:0!important;right:0;bottom:0;top:auto!important;width:auto;border-radius:18px 18px 0 0;padding-bottom:max(env(safe-area-inset-bottom),16px)}
 }
 /* Short screens (a laptop at 200–400 % zoom is 640×400 or 320×256 CSS px): the phone chat is not locked to the viewport, the page
-   scrolls instead, so the messages keep a usable height and the gate or composer below them stays reachable (WCAG 1.4.10). */
-@media(max-width:650px) and (max-height:480px){
+   scrolls instead, so the messages keep a usable height and the gate or composer below them stays reachable (WCAG 1.4.10).
+   Only with a mouse or touchpad: on a touch phone a short viewport is the on-screen keyboard (interactive-widget=resizes-content),
+   and the fixed chat must keep shrinking above it with the composer in view (pinch zoom there does not reflow the layout). */
+@media(max-width:650px) and (max-height:480px) and (hover:hover) and (pointer:fine){
  .chat-page-mount,.chat-public .chat-page-mount{height:auto;min-height:0}
  .chat-page-mount .chat-full,.chat-public .chat-page-mount .chat-full{position:static;inset:auto;height:auto;z-index:auto}
  .chat-page-mount .chat-conv{overflow:visible;flex:none}

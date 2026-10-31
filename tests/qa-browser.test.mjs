@@ -207,6 +207,20 @@ test('full chat on short screens (200 % and 400 % zoom): messages keep a usable 
   await page.goto(url+'#chat');await page.waitForSelector('.chat-full .chat-msg');
   assert.equal(await page.evaluate(()=>getComputedStyle(document.querySelector('.chat-page-mount .chat-full')).position),'fixed');
   await ctx.close();
+  // Review R1: on a touch phone the on-screen keyboard shrinks the viewport (interactive-widget=resizes-content) below 480 px; the
+  // full chat must stay fixed above it, with the composer in view and the back button shown, not fall back to the zoom layout.
+  for(const [width,height,keyboard] of [[412,800,450],[390,740,420],[360,640,340]]){
+   const ctx=await browser.newContext({viewport:{width,height},locale:'pl-PL',serviceWorkers:'block',isMobile:true,hasTouch:true}),page=await ctx.newPage();
+   page.on('pageerror',e=>problems.push('pageerror: '+e.message));
+   await page.goto(url);await page.locator('[data-action="demo-login"]').last().click();await page.waitForSelector('.app-shell');
+   await page.goto(url+'#chat');await page.waitForSelector('.chat-full textarea[data-chat-input]');await sleep(400);
+   await page.focus('.chat-full textarea[data-chat-input]');
+   await page.setViewportSize({width,height:keyboard});await sleep(300);
+   const m=await page.evaluate(()=>{const ta=document.querySelector('.chat-full textarea[data-chat-input]'),b=ta.getBoundingClientRect(),back=document.querySelector('.chat-page-mount .chat-back');
+    return {pos:getComputedStyle(document.querySelector('.chat-page-mount .chat-full')).position,composer:b.top>=0&&b.bottom<=innerHeight,back:!!back&&back.getClientRects().length>0,focused:document.activeElement===ta};});
+   assert.deepEqual(m,{pos:'fixed',composer:true,back:true,focused:true},'keyboard open on a phone '+width+'x'+height+' -> '+width+'x'+keyboard);
+   await ctx.close();
+  }
   assert.deepEqual(problems,[],'no page errors');
  }finally{await browser.close();server.close();}
 });
