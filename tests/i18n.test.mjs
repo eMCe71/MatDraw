@@ -23,8 +23,20 @@ const list=dir=>existsSync(new URL('../'+dir,import.meta.url))?readdirSync(new U
 // domain/demo data, dictionaries, boot scripts, the service worker, the registry (no texts) and data-only modules.
 const NOT_UI=new Set(['engine.js','workspace.js','guest-view.js','lang-boot.js','runtime-config.js','sw.js','registry.js','profile-data.js','chat-demo.js']);
 const UI_MODULES=list('dist').filter(f=>f.endsWith('.js')&&!/^i18n/.test(f)&&!NOT_UI.has(f)).map(f=>'dist/'+f);
-// promo.js holds the advertisement and the access offer as Polish data shown through T(); the promotional test below covers it.
-const DATA_MODULES=new Set(['dist/promo.js']);
+// promo.js holds the advertisement and the access offer as Polish data shown through T(); the promotional test below covers those
+// two objects. Only their literals are exempt: the rest of promo.js is scanned like any interface module (plan §8.6 point 3).
+const DATA_OBJECTS={'dist/promo.js':['AD','ACCESS']};
+/** Removes the object literal of each `export const NAME={…}` (balanced braces, quotes respected); throws when one is missing. */
+function stripDataObjects(code,names){
+ for(const name of names){
+  const start=code.search(new RegExp('export const '+name+'=\\{'));if(start<0)throw new Error('data object not found: '+name);
+  let i=code.indexOf('{',start),depth=0,quote=null;
+  for(;i<code.length;i++){const c=code[i];if(quote){if(c==='\\')i++;else if(c===quote)quote=null;}else if(c==="'"||c==='"'||c==='`')quote=c;else if(c==='{')depth++;else if(c==='}'&&--depth===0)break;}
+  code=code.slice(0,start)+'export const '+name+'={}'+code.slice(i+1);
+ }
+ return code;
+}
+const uiSource=file=>DATA_OBJECTS[file]?stripDataObjects(read(file),DATA_OBJECTS[file]):read(file);
 const PHP_MESSAGE_FILES=[...['backend/src','backend/routes','backend/jobs'].flatMap(dir=>list(dir).filter(f=>f.endsWith('.php')).map(f=>dir+'/'+f)),'backend/public/api/index.php'];
 const stripTexts=code=>code.replace(new RegExp("\\b[tT]\\(\\s*"+literal,'g'),'T(').replace(new RegExp("\\b(?:Error|DomainError)\\(\\s*"+literal,'g'),'Error(').replace(/Język \/ Language/g,'');
 
@@ -75,8 +87,15 @@ test('every T()/t() key used in the interface has an English entry with the same
  }
 });
 test('no visible Polish text in interface modules outside T() (thrown messages are translated when shown)',()=>{
- const left=UI_MODULES.filter(file=>!DATA_MODULES.has(file)).flatMap(file=>stripTexts(read(file)).split('\n').filter(line=>POLISH_LETTERS.test(line)).map(line=>file+': '+line.trim().slice(0,160)));
+ const left=UI_MODULES.flatMap(file=>stripTexts(uiSource(file)).split('\n').filter(line=>POLISH_LETTERS.test(line)).map(line=>file+': '+line.trim().slice(0,160)));
  assert.deepEqual(left,[]);
+});
+test('promo.js: only the AD and ACCESS literals are exempt from the Polish-text rule',()=>{
+ const stripped=uiSource('dist/promo.js');
+ assert.ok(!/Reklama|Zaloguj/.test(stripped)&&/export const AD=\{\}/.test(stripped)&&/export const ACCESS=\{\}/.test(stripped),'data objects removed');
+ const planted=stripDataObjects(read('dist/promo.js')+"\nexport const label='Zgłoś';\n",['AD','ACCESS']);
+ assert.ok(planted.split('\n').some(line=>POLISH_LETTERS.test(line)),'interface text added next to the data is still scanned');
+ assert.throws(()=>stripDataObjects('export const OTHER={};',['AD']),/not found/);
 });
 test('Polish output is the key itself (unchanged behaviour); English uses plural forms',()=>{
  polish(()=>{

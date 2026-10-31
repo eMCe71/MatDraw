@@ -39,13 +39,13 @@ const langSwitch=()=>`<div class="lang-switch" role="group" aria-label="Język /
 const safeHtml=value=>value instanceof SafeHtml?value:h`${value}`;
 const ATTRIBUTE=/^(?:data-[a-z0-9-]+|aria-[a-z-]+|id|type|title|form|name|value|disabled|hidden)$/;
 registry.provide('ui',{T,esc,
- icon:(name,cls='')=>trustedHtml(icon(name,cls)),
+ icon:(name,cls='')=>trustedHtml(icon(String(name),esc(cls))),
  button:(label,action,cls='secondary',attrs={})=>h`<button class="btn ${cls}" data-action="${action}"${Object.entries(attrs||{}).filter(([k,v])=>ATTRIBUTE.test(k)&&v!=null&&v!==false).map(([k,v])=>h` ${k}="${v===true?'':v}"`)}>${label}</button>`,
  badge:(text,type='neutral')=>h`<span class="badge ${type}">${text}</span>`,
  modal:(title,body,actions='',large=false)=>modal(String(safeHtml(title)),String(safeHtml(body)),String(safeHtml(actions)),large),
  closeModal:()=>closeModal(),toast:message=>toast(message),navigate:(page,params)=>navigate(page,params),
  shell:(content,title,subtitle='',actions='')=>trustedHtml(shell(String(safeHtml(content)),String(safeHtml(title)),String(safeHtml(subtitle)),String(safeHtml(actions)))),
- mascot:(pose,cls='')=>trustedHtml(mascot(pose,cls)),emptyMascot:()=>trustedHtml(emptyMascot()),
+ mascot:(pose,cls='')=>trustedHtml(mascot(Object.hasOwn(MASCOTS,pose)?pose:'avatar',esc(cls))),emptyMascot:()=>trustedHtml(emptyMascot()),
  render:()=>render(),commit:(...args)=>commit(...args),handleError:(error,form)=>handleError(error,form),getWorkspace:()=>workspace,getState:()=>state,switchTournament:id=>switchTournament(id),clubName:id=>clubName(id)});
 function allCats(){return categories(state.athletes);}
 function selected(){const items=allCats().items;return items.find(c=>c.id===ui.category)||items[0];}
@@ -61,7 +61,7 @@ function shell(content,title,subtitle,actions=''){
  const navBadge=page=>{const n=registry.badge(page);return `<span class="nav-badge" data-nav-badge="${esc(page)}"${n?'':' hidden'}>${registry.badgeText(n)}</span>`;};
  const nav=items=>items.map(([page,i,name,registered])=>`<button class="nav-link ${ui.page===page?'active':''}" data-page="${esc(page)}" ${ui.page===page?'aria-current="page"':''}>${icon(i)}<span>${name}</span>${page==='athletes'?'<span class="nav-count">'+s.athletes+'</span>':''}${registered?navBadge(page):''}</button>`).join('');
  const reg=registry.page(ui.page),globalPage=member||['tournaments','database','accounts'].includes(ui.page)||!!reg&&reg.nav!=='event',home=registry.defaultPage(user.role);
- return `<div class="app-shell"><aside class="sidebar ${ui.menu?'open':''}" aria-label="${T('Nawigacja główna')}"><a href="#${home}" class="brand" data-page="${home}" aria-label="${member?'MatBravo':T('MatBravo — turnieje')}">${logo}</a><nav>${nav(globalNav)}</nav>${member?'':`<div class="nav-divider"></div><label class="sidebar-label" for="active-tournament">${T('AKTYWNY TURNIEJ')}</label><select id="active-tournament" class="tournament-switch" data-control="tournament">${workspace.tournaments.map(x=>`<option value="${x.id}" ${t.id===x.id?'selected':''}>${esc(x.name)}</option>`).join('')||'<option>'+T('Brak turniejów')+'</option>'}</select>`}<nav>${nav(eventNav)}${t.id&&!member&&user.role!=='club'?`<button class="nav-link" data-action="project">${icon('screen')}<span>${T('Ekran hali')}</span>${icon('external','nav-end')}</button>`:''}</nav><div class="sidebar-bottom"><div class="demo-note"><span class="pulse-dot"></span><strong>${isDemo?T('Podgląd demonstracyjny'):T('Połączono z serwerem')}</strong><p>${isDemo?T('Dane i konta testowe w tej przeglądarce.'):T('Wspólna baza zawodników i turniejów.')}</p></div><button class="nav-link" data-page="rules">${icon('settings')}<span>${T('Zasady turnieju')}</span></button><button class="nav-link" data-page="architecture">${icon('info')}<span>${T('O projekcie')}</span></button><div class="profile"><span class="avatar organizer" data-self-avatar>${initials(club?.name||T('Klub'))}</span><div><strong>${esc(roleName(user.role))}</strong><span>${esc(club?.name||'')}</span></div></div><button class="nav-link compact-nav" data-action="my-account">${icon('settings')}<span>${T('Moje konto')}</span></button><button class="nav-link compact-nav" data-action="logout">${icon('left')}<span>${T('Wyloguj się')}</span></button></div></aside>${ui.menu?'<button class="nav-backdrop" data-action="menu" aria-label="'+T('Zamknij menu')+'"></button>':''}<div class="main-shell"><header class="topbar"><div class="topbar-left"><button class="icon-btn mobile-only" data-action="menu" aria-label="${T('Otwórz menu')}">${icon('menu')}</button><span class="breadcrumb">${globalPage?'MatBravo':esc(t.name||'MatBravo')}</span>${icon('right','crumb-arrow')}<span class="breadcrumb current">${title}</span></div><div class="topbar-right">${isDemo?'<span class="demo-badge">DEMO</span>':''}<button class="text-btn" data-action="refresh" aria-label="${T('Odśwież dane')}">${icon('refresh')}<span>${saving?T('Zapisywanie…'):isDemo?T('Zapis lokalny'):T('Dane z serwera')}</span></button>${langSwitch()}<span class="avatar organizer small" title="${esc(roleName(user.role))}">${initials(club?.name||T('Klub'))}</span></div></header><main id="main" class="main"><div class="page-heading"><div><div class="eyebrow">${globalPage?T('PRZESTRZEŃ MATBRAVO'):T('CENTRUM TURNIEJU')}</div><h1>${title}</h1><p>${subtitle}</p></div><div class="heading-actions">${actions}</div></div>${content}</main>${footer()}</div></div>`;
+ return `<div class="app-shell"><aside class="sidebar ${ui.menu?'open':''}" aria-label="${T('Nawigacja główna')}"><a href="#${home}" class="brand" data-page="${home}" aria-label="${member?'MatBravo':T('MatBravo — turnieje')}">${logo}</a><nav>${nav(globalNav)}</nav>${member?'':`<div class="nav-divider"></div><label class="sidebar-label" for="active-tournament">${T('AKTYWNY TURNIEJ')}</label><select id="active-tournament" class="tournament-switch" data-control="tournament">${workspace.tournaments.map(x=>`<option value="${x.id}" ${t.id===x.id?'selected':''}>${esc(x.name)}</option>`).join('')||'<option>'+T('Brak turniejów')+'</option>'}</select>`}<nav>${nav(eventNav)}${t.id&&!member&&user.role!=='club'?`<button class="nav-link" data-action="project">${icon('screen')}<span>${T('Ekran hali')}</span>${icon('external','nav-end')}</button>`:''}</nav><div class="sidebar-bottom"><div class="demo-note"><span class="pulse-dot"></span><strong>${isDemo?T('Podgląd demonstracyjny'):T('Połączono z serwerem')}</strong><p>${isDemo?T('Dane i konta testowe w tej przeglądarce.'):T('Wspólna baza zawodników i turniejów.')}</p></div>${member?'':`<button class="nav-link" data-page="rules">${icon('settings')}<span>${T('Zasady turnieju')}</span></button><button class="nav-link" data-page="architecture">${icon('info')}<span>${T('O projekcie')}</span></button>`}<div class="profile"><span class="avatar organizer" data-self-avatar>${initials(club?.name||T('Klub'))}</span><div><strong>${esc(roleName(user.role))}</strong><span>${esc(club?.name||'')}</span></div></div><button class="nav-link compact-nav" data-action="my-account">${icon('settings')}<span>${T('Moje konto')}</span></button><button class="nav-link compact-nav" data-action="logout">${icon('left')}<span>${T('Wyloguj się')}</span></button></div></aside>${ui.menu?'<button class="nav-backdrop" data-action="menu" aria-label="'+T('Zamknij menu')+'"></button>':''}<div class="main-shell"><header class="topbar"><div class="topbar-left"><button class="icon-btn mobile-only" data-action="menu" aria-label="${T('Otwórz menu')}">${icon('menu')}</button><span class="breadcrumb">${globalPage?'MatBravo':esc(t.name||'MatBravo')}</span>${icon('right','crumb-arrow')}<span class="breadcrumb current">${title}</span></div><div class="topbar-right">${isDemo?'<span class="demo-badge">DEMO</span>':''}<button class="text-btn" data-action="refresh" aria-label="${T('Odśwież dane')}">${icon('refresh')}<span>${saving?T('Zapisywanie…'):isDemo?T('Zapis lokalny'):T('Dane z serwera')}</span></button>${langSwitch()}<span class="avatar organizer small" title="${esc(roleName(user.role))}">${initials(club?.name||T('Klub'))}</span></div></header><main id="main" class="main"><div class="page-heading"><div><div class="eyebrow">${globalPage?T('PRZESTRZEŃ MATBRAVO'):T('CENTRUM TURNIEJU')}</div><h1>${title}</h1><p>${subtitle}</p></div><div class="heading-actions">${actions}</div></div>${content}</main>${footer()}</div></div>`;
 }
 function roundName(index,total){const remaining=total-index;return remaining===1?T('Finał'):remaining===2?T('Półfinały'):remaining===3?T('Ćwierćfinały'):remaining===4?T('1/8 finału'):remaining===5?T('1/16 finału'):T('1/32 finału');}
 function matchHtml(m,{interactive=true,compact=false}={}){
@@ -109,14 +109,15 @@ function render(){
   ui.page=member?registry.defaultPage(role):'tournaments';history.replaceState(null,'',registry.routeHash(ui.page));
  }
  document.body.classList.remove('projection');
- if(member&&!registry.allows(registry.page(ui.page),role))ui.page=registry.defaultPage(role);
+ if(member&&!registry.allows(registry.page(ui.page),role)){ui.page=registry.defaultPage(role);history.replaceState(null,'',registry.routeHash(ui.page));}
  if(ui.page==='accounts'&&workspace.user.role!=='admin')ui.page='tournaments';
  if(['overview','checkin','draws','screen'].includes(ui.page)&&workspace.user.role==='club')ui.page='athletes';
  if(['overview','athletes','checkin','draws'].includes(ui.page)&&!state.tournament.id)ui.page='tournaments';
  const pages={tournaments:tournamentsPage,database:databasePage,accounts:accountsPage,draws:drawsPage,overview:overviewPage,athletes:()=>rosterPage(false),checkin:()=>rosterPage(true),rules:rulesPage,architecture:architecturePage};
  // Registered pages first (with their roles), then the built-in pages; a member never falls back to the tournaments page.
- const reg=registry.page(ui.page),own=registry.allows(reg,role);
- document.querySelector('#app').innerHTML=String(own?reg.render(registry.parseRoute(location.hash).params):member?memberHome():(pages[ui.page]||tournamentsPage)());
+ // Registered pages must return SafeHtml (plan §5.9): setHtml throws for a plain string instead of injecting it unescaped.
+ const reg=registry.page(ui.page),own=registry.allows(reg,role),app=document.querySelector('#app');
+ if(own)registry.setHtml(app,reg.render(registry.parseRoute(location.hash).params));else app.innerHTML=member?memberHome():(pages[ui.page]||tournamentsPage)();
  document.title='MatBravo — '+(own?registry.title(ui.page):member?T('Czat'):({tournaments:T('Turnieje'),database:T('Baza zawodników'),accounts:T('Konta i role'),draws:T('Drabinki'),athletes:T('Zgłoszenia'),checkin:T('Kontrola startowa'),overview:T('Przegląd'),rules:T('Zasady turnieju'),architecture:T('O projekcie')}[ui.page]||T('Turnieje')));
  registry.emit('painted',{view:'app',page:ui.page});
 }
@@ -255,7 +256,7 @@ function renderPublic(){
 }
 function fetchGuest(id){
  const known=upcoming.data?.tournaments?.find(t=>t.id===id)||(guest?.id===id?guest.known:null);
- const current=guest={id,known,status:'loading',data:null,unlocked:false,category:null};
+ const current=guest={id,known,status:'loading',data:null,unlocked:false,category:null,memberPreview:workspace?.user?.role==='member'};
  Client.publicTournament(id).then(data=>{current.data=data;current.status='ready';},error=>{current.status='error';current.notFound=error?.status===404;}).finally(()=>{
   if(guest!==current||(workspace&&!guest.memberPreview))return;
   if(promo?.id===id){const next=document.querySelector('.promo-next span');if(next)next.innerHTML=promoNext();}
@@ -351,9 +352,10 @@ async function commit(type,payload,expected=Number(document.querySelector('.moda
  finally{saving=false;}
 }
 async function handleError(error,form){
- if(error.status===401){workspace=null;closeModal();renderLogin(error.message);return;}
+ // An expired session (401) drops the previous person's state like a sign-out does (me.js and modules listen to 'logout').
+ if(error.status===401){if(workspace)registry.emit('logout',{expired:true});workspace=null;closeModal();renderLogin(error.message);return;}
  if(error.status===402)registry.emit('payment-required',{message:error.message});
- if(error.status===409){try{workspace=await Client.bootstrap();syncState();render();if(form)form.dataset.revision=workspace.revision;const dialog=document.querySelector('.modal');if(dialog)dialog.dataset.revision=workspace.revision;}catch{}}
+ if(error.status===409&&error.code!=='client_outdated'){try{workspace=await Client.bootstrap();syncState();render();if(form)form.dataset.revision=workspace.revision;const dialog=document.querySelector('.modal');if(dialog)dialog.dataset.revision=workspace.revision;}catch{}}
  const message=translateMessage(error.message),box=form?.querySelector('.form-error')||document.querySelector('.form-error');if(box)box.textContent=message;else toast(message);
 }
 function entryPayload(f){return {age:Number(f.get('age')),weight:Number(f.get('weight')),height:Number(f.get('height')),gradeType:f.get('gradeType'),grade:Number(f.get('grade')),events:f.getAll('events'),champion:f.has('champion')};}

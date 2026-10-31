@@ -103,3 +103,11 @@ test('dictionary merge: first wins, a collision is listed (no exception), the sh
  assert.deepEqual(collisions,[]);
  assert.equal(DICTIONARY['Członek'],'Member');assert.equal(DICTIONARY['Turnieje'],'Tournaments');
 });
+
+test('app.js paints registered pages through setHtml, so a page that returns a plain string throws instead of injecting it',async()=>{
+ const {readFileSync}=await import('node:fs');const app=readFileSync(new URL('../dist/app.js',import.meta.url),'utf8');
+ assert.match(app,/if\(own\)registry\.setHtml\(app,reg\.render\(registry\.parseRoute\(location\.hash\)\.params\)\);/);
+ assert.ok(!/innerHTML=String\(own\?/.test(app),'no direct innerHTML for registered pages');
+ registerPage({id:'qa-plain-string',label:'QA',roles:['member'],render:()=>'<img src=x onerror="alert(1)">'});
+ const el={innerHTML:''};assert.throws(()=>setHtml(el,page('qa-plain-string').render(new URLSearchParams())),TypeError);assert.equal(el.innerHTML,'');
+});
