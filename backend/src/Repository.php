@@ -42,7 +42,8 @@ final class Repository {
  private function load():array {
   $db=['schemaVersion'=>2,'revision'=>(int)$this->pdo->query('SELECT revision FROM app_meta WHERE id=1')->fetchColumn(),'clubs'=>[],'users'=>[],'profiles'=>[],'tournaments'=>[]];
   $db['clubs']=$this->pdo->query('SELECT id,name FROM clubs ORDER BY name,id')->fetchAll();
-  foreach($this->pdo->query('SELECT * FROM users ORDER BY email,id') as $u)$db['users'][]=['id'=>$u['id'],'clubId'=>$u['club_id'],'email'=>$u['email'],'role'=>$u['role'],'active'=>(bool)$u['active'],'passwordHash'=>$u['password_hash'],'authVersion'=>(int)$u['auth_version']];
+  // Members (community accounts, plan §3.3) never enter the workspace: Domain and the JS workspace see staff only.
+  foreach($this->pdo->query("SELECT * FROM users WHERE role<>'member' ORDER BY email,id") as $u)$db['users'][]=['id'=>$u['id'],'clubId'=>$u['club_id'],'email'=>$u['email'],'role'=>$u['role'],'active'=>(bool)$u['active'],'passwordHash'=>$u['password_hash'],'authVersion'=>(int)$u['auth_version']];
   foreach($this->pdo->query('SELECT * FROM profiles ORDER BY id') as $a)$db['profiles'][]=array_replace(self::decode($a['data']),['id'=>$a['id'],'clubId'=>$a['club_id'],'createdBy'=>$a['created_by'],'archived'=>(bool)$a['archived']]);
   $index=[];
   foreach($this->pdo->query('SELECT * FROM tournaments ORDER BY event_date,id') as $t){$index[$t['id']]=count($db['tournaments']);$db['tournaments'][]=['id'=>$t['id'],'createdBy'=>$t['created_by'],'name'=>$t['name'],'city'=>$t['city'],'date'=>$t['event_date'],'mat'=>$t['mat'],'status'=>$t['status'],'activity'=>self::decode($t['activity']),'entries'=>[],'draws'=>[]];}
@@ -67,10 +68,22 @@ final class Repository {
   foreach(['draws'=>'category_key','entries'=>'profile_id'] as $table=>$key)foreach(array_diff_key($a[$table],$b[$table]) as $row)$this->pdo->prepare("DELETE FROM $table WHERE tournament_id=? AND $key=?")->execute([$row['tournament_id'],$row[$key]]);
   foreach($b as $table=>$rows)foreach($rows as $id=>$row){
    if(isset($a[$table][$id])&&$a[$table][$id]===$row)continue;
+   if($table==='users'){$this->persistUser($row,isset($a['users'][$id]));continue;}
    $cols=array_keys($row);$update=implode(',',array_map(fn($c)=>"$c=VALUES($c)",$cols));
    $sql="INSERT INTO $table (".implode(',',$cols).') VALUES ('.implode(',',array_fill(0,count($cols),'?')).") ON DUPLICATE KEY UPDATE $update";
    $this->pdo->prepare($sql)->execute(array_values($row));
   }
   $this->pdo->prepare('UPDATE app_meta SET revision=? WHERE id=1')->execute([$after['revision']]);
+ }
+ /**
+  * Accounts are never upserted (§2.6): an upsert hitting the unique e-mail of a member, which load() does not see,
+  * would take over that row. New ids are inserted, changed rows are updated only while they are not members, and a
+  * duplicate key on this statement is the friendly 409 (transaction() then rolls everything back).
+  */
+ private function persistUser(array $u,bool $exists):void {
+  try{
+   if($exists)$this->pdo->prepare("UPDATE users SET club_id=?,email=?,role=?,active=?,password_hash=?,auth_version=? WHERE id=? AND role<>'member'")->execute([$u['club_id'],$u['email'],$u['role'],$u['active'],$u['password_hash'],$u['auth_version'],$u['id']]);
+   else $this->pdo->prepare('INSERT INTO users (id,club_id,email,role,active,password_hash,auth_version) VALUES (?,?,?,?,?,?,?)')->execute([$u['id'],$u['club_id'],$u['email'],$u['role'],$u['active'],$u['password_hash'],$u['auth_version']]);
+  }catch(\PDOException $e){if(($e->errorInfo[1]??null)===1062)throw new AppError('Konto z tym adresem e-mail już istnieje.',409);throw $e;}
  }
 }
