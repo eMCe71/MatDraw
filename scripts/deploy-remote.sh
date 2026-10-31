@@ -129,7 +129,7 @@ if [[ $cmd == server-check ]]; then
   if(function_exists("gd_info")){$g=gd_info();foreach(["WebP Support","JPEG Support","PNG Support"] as $k)echo "  GD $k: ",!empty($g[$k])?"tak":"NIE","\n";}
   foreach(["memory_limit","max_execution_time","upload_max_filesize","post_max_size","disable_functions"] as $k)echo "  $k=",ini_get($k),"\n";
   echo "  shell_exec (ukryte wpisywanie hasła przez stty): ",function_exists("shell_exec")&&!in_array("shell_exec",array_map("trim",explode(",",(string)ini_get("disable_functions"))),true)?"tak":"NIE","\n";
-  echo "  session.save_handler=",ini_get("session.save_handler")," session.save_path=",ini_get("session.save_path")," (PHP CLI; PHP strony: panel Admina, Diagnostyka)\n";'
+  echo "  session.save_handler=",ini_get("session.save_handler")," session.save_path=",ini_get("session.save_path")," (PHP CLI; PHP strony: api/index.php?route=diagnostics po zalogowaniu jako Administrator)\n";'
  for b in mysqldump mariadb-dump gzip tar crontab; do echo "$b: $(command -v $b || echo BRAK)"; done
  crontab -l >/dev/null 2>&1 && echo 'crontab -l: dostępny' || echo 'crontab -l: niedostępny lub pusty (cron w DirectAdmin: DEPLOY-PL.md)'
  [[ -d $base/shared/sessions ]] && echo "Pliki sesji w shared/sessions: $(find "$base/shared/sessions" -maxdepth 1 -name 'sess_*' 2>/dev/null | wc -l)"
