@@ -162,6 +162,14 @@ test('username prefill and suggestions never show the full surname by default (p
  assert.deepEqual(flow.shownSuggestions(server,{last:'Kowalska',full:false}),['marta.k2']);
  assert.deepEqual(flow.shownSuggestions(server,{last:'Kowalska',full:true}),['marta.kowalska','marta_kowalska','marta.k2']);
  assert.deepEqual(flow.shownSuggestions(null,{last:'K'}),[]);
+ // A short surname is also a substring of the initial-only candidates: those stay, only the full-surname ones are hidden.
+ for(const [first,last,want] of [['Alicja','Li',['alicja.l2','alicja.l3']],['Ewa','Wa',['ewa.w2','ewa.w3']],['Marta','Kowalska',['marta.k2','marta.k3']]]){
+  const username=suggestUsernames(first,last,'',{full:false})[0],sent=suggestUsernames(first,last,username);
+  assert.deepEqual(flow.shownSuggestions(sent,{first,last,username,full:false}),want,first+' '+last);
+  for(const x of flow.shownSuggestions(sent,{first,last,username,full:false}))assert.ok(!x.includes(slugName(first)+'.'+slugName(last))&&!x.includes(slugName(first)+'_'+slugName(last))&&x!==slugName(first)+slugName(last),x);
+ }
+ assert.deepEqual(flow.shownSuggestions(['alicja.li','alicja_li','alicja.l2','alicjali'],{first:'Alicja',last:'Li',username:'alicja.l',full:false}),['alicja.l2']);
+ assert.deepEqual(flow.shownSuggestions(['marta.kowalska2'],{first:'Marta',last:'Kowalska',username:'marta.kowalska',full:false}),['marta.kowalska2'],'what the person typed is theirs to extend');
  const html=String(flow.fieldsView(flow.newFields(null,['pl-PL']),{id:'t',signup:true}));
  assert.match(html,/Nazwę użytkownika widzą członkowie czatu\./,'the sign-up says who sees the username');
 });

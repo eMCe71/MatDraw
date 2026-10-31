@@ -76,10 +76,15 @@ export function fieldsError(f){
 /** The username filled in while the sign-up field is untouched (§7.7, privacy by default): the first name and the surname's initial
  * only (marta.k), never the full surname, whatever the full-name box says; the person may still type any valid name. */
 export const prefillUsername=f=>suggestUsernames(f?.first,f?.last,'',{full:false})[0]||'';
-/** Server suggestions for a taken name, as shown: without the full surname unless "show my full name" is ticked. */
+/**
+ * Server suggestions for a taken name, as shown: without the full surname unless "show my full name" is ticked. A suggestion that
+ * is one of our own initial-only candidates (or built from what the person typed) stays even when it happens to contain the
+ * surname letters, so a short surname (Alicja Li: alicja.l2) does not hide every suggestion.
+ */
 export function shownSuggestions(list,f){
  const last=slugName(f?.last||''),hide=!f?.full&&last.length>1;
- return (Array.isArray(list)?list:[]).filter(x=>typeof x==='string'&&validateUsername(x)==='valid'&&!(hide&&x.includes(last))).slice(0,3);
+ const safe=hide?new Set(suggestUsernames(f?.first,f?.last,normalizeUsername(f?.username||'')??'',{full:false})):null;
+ return (Array.isArray(list)?list:[]).filter(x=>typeof x==='string'&&validateUsername(x)==='valid'&&!(hide&&x.includes(last)&&!safe.has(x))).slice(0,3);
 }
 /** Only an https address on exactly this origin (Checkout or the portal) may be opened (plan §6.2); otherwise null. */
 export function stripeUrl(value,origin){
