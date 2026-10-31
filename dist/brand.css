@@ -1,4 +1,6 @@
-/* MatBravo brand kit 1.0: Manrope and the official logo (the belt mark serves the smallest surfaces).
+/* MatBravo brand kit 1.0: Manrope, the official logo and the Matbravo character.
+   Roles (kit, REVIEW-POSTACI): the character welcomes, guides, invites and confirms success; navigation, lists, tables,
+   brackets, results, prints and the hall screen carry only the logo; the belt mark serves the smallest surfaces.
    Self-hosted files only (CSP): fonts/ (SIL OFL 1.1, see fonts/OFL-Manrope.txt) and brand/. */
 @font-face{font-family:Manrope;font-style:normal;font-weight:400 800;font-display:swap;src:url(./fonts/manrope-latin.woff2) format("woff2");unicode-range:U+0000-024F,U+0259,U+02B0-036F,U+1E00-1EFF,U+2000-206F,U+20A0-20CF,U+2100-22FF,U+2500-25FF,U+FEFF,U+FFFD}
 @font-face{font-family:Manrope;font-style:normal;font-weight:400 800;font-display:swap;src:url(./fonts/manrope-cyrillic.woff2) format("woff2");unicode-range:U+0400-052F,U+1C80-1C8F,U+2DE0-2DFF,U+A640-A69F}
@@ -13,3 +15,46 @@
 .arena .brand-logo{height:28px}
 @media(max-width:1250px){.sidebar .brand-logo{height:22px}}
 @media(max-width:650px){.login-story .brand-logo{height:26px}.guest-brand .brand-logo{height:30px}.arena .brand-logo{height:24px}}
+
+/* Decorative character images (alt="", aria-hidden): never interactive, never in the print-out. */
+.mascot{display:block;width:auto;max-width:none;pointer-events:none;user-select:none}
+
+/* Login: Matbravo waves from behind the "Upcoming tournaments" card (the card hides his legs). Subtle breathing loop
+   (kit motion: 6.4 s, scale 1.006/1.008, 0.16 deg) with the pivot at his feet below the cropped image; pause button;
+   static under prefers-reduced-motion. --mascot-h is the height of the cropped image (head to mid-thigh). */
+.upcoming-stage{--mascot-h:256px;position:relative;width:100%;padding-top:calc(var(--mascot-h) * .78)}
+.upcoming-stage>.upcoming-card{position:relative;z-index:1}
+.login-mascot{position:absolute;top:0;right:46px;height:var(--mascot-h)}
+.login-mascot:before{content:'';position:absolute;left:50%;top:calc(var(--mascot-h) * .2);width:calc(var(--mascot-h) * .86);aspect-ratio:1;transform:translateX(-50%);border-radius:50%;background:radial-gradient(circle,#4ac1ed38 0%,#00aeef1a 45%,transparent 70%)}
+.login-mascot-img{position:relative;height:100%;transform-origin:50% 139%;animation:mb-breathe var(--mb-motion) ease-in-out infinite;will-change:transform}
+.login-mascot.is-paused .login-mascot-img{animation-play-state:paused}
+@keyframes mb-breathe{0%,100%{transform:none}50%{transform:scale(1.006,1.008) rotate(-.16deg)}}
+.motion-toggle{position:absolute;right:6px;top:calc(var(--mascot-h) * .78 - 44px);z-index:2;width:32px;height:32px;padding:0;border-radius:50%;display:grid;place-items:center;background:#ffffff12;border:1px solid #ffffff2e;color:#b7cfe9;transition:background .18s,color .18s}
+.motion-toggle:hover{background:#ffffff24;color:#fff}
+.motion-toggle:focus-visible{outline:2px solid #4ac1ed;outline-offset:2px}
+.motion-toggle .icon{width:14px;height:14px}
+.login-upcoming{padding-top:clamp(36px,7vh,96px);padding-bottom:clamp(36px,7vh,96px)}
+@media(max-width:1199px){.login-upcoming{padding-top:8px}.upcoming-stage{max-width:560px}}
+@media(max-width:650px){.upcoming-stage{--mascot-h:196px}.login-mascot{right:40px}.login-upcoming{padding-top:12px}}
+@media(prefers-reduced-motion:reduce){.login-mascot-img{animation:none;will-change:auto}.motion-toggle{display:none}}
+
+/* Guest preview: the guide pose points at "Log in" in the access card. */
+.access-card{position:relative;padding-right:196px}
+.access-mascot{position:absolute;right:26px;bottom:0;height:170px}
+@media(max-width:1180px){.access-card{padding-right:172px}.access-mascot{right:16px;height:160px}}
+@media(max-width:650px){.access-card{padding-right:18px;padding-top:24px}.access-copy{padding-right:104px}.access-mascot{bottom:auto;right:6px;top:-14px;height:132px;-webkit-mask-image:linear-gradient(#000 72%,transparent 96%);mask-image:linear-gradient(#000 72%,transparent 96%)}}
+
+/* Empty states: the round avatar (face visible from 64 px, kit rule) instead of a grey icon. */
+.empty-mascot{width:88px;height:88px;margin:0 auto 22px;border-radius:50%;background:var(--mb-ice);box-shadow:0 0 0 6px #f4f9fe,0 0 0 7px #d8e8f6}
+
+/* Champion of a category: the success pose next to the banner, outside the bracket itself. */
+.winner-banner{position:relative;padding-right:124px;min-height:104px}
+.winner-mascot{position:absolute;right:20px;bottom:0;height:100px}
+@media(max-width:650px){.winner-banner{padding-right:96px}.winner-mascot{right:10px;height:84px}}
+
+/* About page: Matbravo (master pose) stands on the edge of the introduction panel. */
+.architecture-intro{position:relative}
+.about-mascot{position:absolute;right:56px;bottom:0;height:252px}
+@media(max-width:1180px){.about-mascot{display:none}}
+
+@media print{.mascot,.motion-toggle{display:none!important}}

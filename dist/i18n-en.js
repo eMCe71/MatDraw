@@ -443,6 +443,9 @@ export default {
  'Terminarz jest chwilowo niedostępny.':'The schedule is temporarily unavailable.',
  'Spróbuj ponownie':'Try again',
  'Wczytywanie turniejów…':'Loading tournaments…',
+ // Pause control for the waving Matbravo character above the list
+ 'Zatrzymaj animację postaci':'Pause the character animation',
+ 'Wznów animację postaci':'Resume the character animation',
 
  // Sponsor pop-up before the guest preview (texts of the advertisement itself are in the promo.js section below)
  'Dalej: podgląd turnieju {name}':'Next: preview of {name}',
