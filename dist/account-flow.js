@@ -138,6 +138,14 @@ const sportLabel=slug=>SPORTS.find(s=>s[0]===slug)?.[1]||slug;
 const initials=f=>((f?.first||'').trim()[0]||'')+((f?.last||'').trim()[0]||'');
 const goChat=()=>{const role=getMe()?.user?.role||workspace()?.user?.role;ui()?.navigate?.(registry.allows(registry.page('chat'),role)?'chat':registry.defaultPage(role));};
 const planStep=()=>!!publicConfig()?.billing;
+/** After a page change that a person did not trigger by moving focus (account created, forced password change, password changed),
+ * focus goes to what the page is about once it is drawn, instead of staying on <body> (WCAG 2.4.3); never steals focus already placed. */
+function focusWhenDrawn(selector,fallback=null,tries=40){
+ const a=document.activeElement;if(a&&a!==document.body&&a!==document.documentElement)return;
+ const el=document.querySelector(selector)||(tries>0?null:fallback&&document.querySelector(fallback));
+ if(el){if(!el.hasAttribute('tabindex'))el.tabIndex=-1;el.focus();return;}
+ if(tries>0)setTimeout(()=>focusWhenDrawn(selector,fallback,tries-1),50);
+}
 
 // ---- Shared fields (sign-up step 2 and the profile tab) ----
 function statusView(f){
@@ -349,7 +357,7 @@ function profileTab(m){
 function securityView(m){
  const member=m.user?.role==='member',must=!!m.profile?.mustChangePassword,pwa=registry.use('pwa');
  const standalone=!!pwa?.standalone?.(),install=!standalone&&!!pwa?.canInstall?.();
- return h`${must?h`<div class="notice acct-must" role="alert">${icon('alert')}<p><strong>${T('Ustaw nowe hasło.')}</strong> ${T('Logujesz się hasłem tymczasowym. Do czasu zmiany pozostałe strony są niedostępne.')}</p></div>`:''}
+ return h`${must?h`<div class="notice acct-must" role="alert" tabindex="-1">${icon('alert')}<p><strong>${T('Ustaw nowe hasło.')}</strong> ${T('Logujesz się hasłem tymczasowym. Do czasu zmiany pozostałe strony są niedostępne.')}</p></div>`:''}
 <form id="acct-password-form" class="acct-form acct-block" novalidate><h2>${T('Zmień hasło')}</h2><label class="field-label">${must?T('Hasło tymczasowe'):T('Obecne hasło')}<input name="currentPassword" type="password" required autocomplete="current-password"></label>${passwordField({name:'password',id:'acct-new-pw',label:T('Nowe hasło'),autocomplete:'new-password',meter:true})}<p class="acct-hint">${T('Pozostałe sesje zostaną wylogowane.')}</p><div class="form-error" role="alert"></div><div class="acct-actions"><button type="submit" class="btn primary">${T('Zmień hasło')}</button></div></form>
 ${member&&!must?h`<form id="acct-email-form" class="acct-form acct-block" novalidate><h2>${T('Adres e-mail')}</h2><p class="acct-lead">${T('Obecny adres:')} <strong>${m.user?.email||''}</strong></p><label class="field-label">${T('Nowy adres e-mail')}<input name="email" type="email" inputmode="email" autocomplete="email" autocapitalize="none" spellcheck="false" required maxlength="254"></label><label class="field-label">${T('Obecne hasło')}<input name="currentPassword" type="password" required autocomplete="current-password"></label><p class="acct-hint">${T('Po zmianie adresu inne urządzenia zostaną wylogowane.')}</p><div class="form-error" role="alert"></div><div class="acct-actions"><button type="submit" class="btn secondary">${T('Zapisz adres e-mail')}</button></div></form>`:''}
 ${standalone||install?h`<section class="acct-block acct-install"><h2>${T('Aplikacja MatBravo')}</h2>${standalone?h`<p class="acct-lead">${icon('check')} ${T('MatBravo działa na tym urządzeniu jako aplikacja.')}</p>`:h`<p class="acct-lead">${T('Drabinki i czat jednym stuknięciem, z ekranu głównego.')}</p><div class="acct-actions"><button type="button" class="btn secondary" data-acct-act="install">${icon('download')} ${T('Zainstaluj aplikację')}</button></div>`}</section>`:''}
@@ -383,7 +391,7 @@ async function savePassword(form){
   }
  }
  form.reset();form.removeAttribute('data-dirty');ui()?.toast?.(T('Hasło zostało zmienione. Pozostałe sesje zostały wylogowane.'));
- if(must)goChat();else repaint();
+ if(must){goChat();focusWhenDrawn('[data-chat-mount] .chat-log','#main h1');}else repaint();
 }
 async function saveEmail(form){
  const el=form.elements,email=el.email.value.trim();
@@ -418,7 +426,7 @@ function render(page,el){
  if(!m){setHtml(el,h`<section class="panel empty-state">${ui()?.emptyMascot?.()??''}<h3>${T('Funkcje konta są chwilowo niedostępne.')}</h3><p>${T('Spróbuj ponownie później.')}</p></section>`);el.removeAttribute('aria-busy');return;}
  if(page==='profile'){ensureDraft(m);setHtml(el,profileView(m));}
  else if(page==='billing')setHtml(el,h`<div class="acct-wrap acct-narrow">${S.payment&&!S.ret?h`<div class="notice">${icon('alert')}<p>${S.payment}</p></div>`:''}${S.ret?.view?returnView(S.ret):planView(m)}</div>`);
- else if(page==='signup')setHtml(el,h`<div class="acct-wrap acct-narrow">${stepsView(3,3)}<div class="notice info-notice acct-created">${icon('check')}<p>${T('Konto utworzone. Możesz czytać czaty; pisanie włączy aktywacja konta.')}</p></div>${planView(m,{signup:true})}</div>`);
+ else if(page==='signup')setHtml(el,h`<div class="acct-wrap acct-narrow">${stepsView(3,3)}<div class="notice info-notice acct-created" tabindex="-1">${icon('check')}<p>${T('Konto utworzone. Możesz czytać czaty; pisanie włączy aktywacja konta.')}</p></div>${planView(m,{signup:true})}</div>`);
  el.removeAttribute('aria-busy');
 }
 /** Signed-in pages profile, billing and signup (step 3); el is the [data-acct-page] placeholder of the shell. */
@@ -433,6 +441,8 @@ export async function mount(page,el){
  }
  if(page==='billing'){const p=takePaymentMessage();if(p)S.payment=p;const ret=readReturn();if(ret&&!S.ret?.running){startReturn(ret);return;}}
  render(page,el);
+ if(page==='signup')focusWhenDrawn('.acct-created');
+ else if(page==='profile'&&m?.profile?.mustChangePassword)focusWhenDrawn('.acct-must');
 }
 
 // ---- Events (installed once) ----

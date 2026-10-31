@@ -364,6 +364,7 @@ test('PHP build in a browser: sign-up, Checkout and return, portal, cancel, prof
   // Step 3 after the reload: plan in PLN, the mark still set.
   await page.waitForSelector('.acct-plan .acct-pay',{timeout:20000});assert.ok(await mark(page),'mark kept in step 3');
   assert.match(spaces(await page.textContent('.acct-plan')),/8,99 zł/);assert.match(await page.textContent('.acct-steps-label'),/Krok 3 z 3/);
+  await page.waitForFunction(()=>document.activeElement?.classList.contains('acct-created'),null,{timeout:5000});// focus on "Konto utworzone", not <body>
   await shot(page,'php-signup3-1440');
   const checkout=page.waitForRequest(r=>r.url().includes('route=billing-checkout'));
   await page.click('[data-acct-act="checkout"]');
@@ -416,10 +417,13 @@ test('PHP build in a browser: sign-up, Checkout and return, portal, cancel, prof
   await page.goto(app);await page.fill('#login-form [name="email"]',m.email);await page.fill('#login-form [name="password"]',reset.data.temporaryPassword);
   await page.click('#login-form button[type="submit"]');await page.waitForSelector('.acct-must',{timeout:20000});
   assert.equal(await page.evaluate(()=>location.hash),'#profile?tab=security');
+  await page.waitForFunction(()=>document.activeElement?.classList.contains('acct-must'),null,{timeout:5000});// focus on the notice, not <body>
   await page.evaluate(()=>{location.hash='#chat';});await page.waitForFunction(()=>location.hash==='#profile?tab=security');
   assert.ok(await page.isDisabled('#acct-tab-profile'));await noOverflow(page,'temporary password 390');await shot(page,'php-temporary-390');
   await page.fill('#acct-password-form [name="currentPassword"]',reset.data.temporaryPassword);await page.fill('#acct-password-form [name="password"]','Pomaranczowy-Rower-2028');
   await page.click('#acct-password-form button[type="submit"]');await page.waitForFunction(()=>location.hash!=='#profile?tab=security',null,{timeout:20000});
+  await page.waitForFunction(()=>document.activeElement&&document.activeElement!==document.body,null,{timeout:5000});
+  assert.match(await page.evaluate(()=>document.activeElement.className+' '+document.activeElement.tagName),/chat-log|H1/,'focus on the chat after the change');
   await ctx.close();
 
   // Staff banner: free until a date within 14 days (requireFrom), then grace.
