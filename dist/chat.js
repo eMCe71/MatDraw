@@ -403,10 +403,14 @@ function paint(v,{open:opening=false,others=0}={}){
 function swap(el,safe){
  if(!el||el.chatHtml===safe.html)return false;
  const a=doc()?.activeElement,inside=!!a&&a!==el&&!!el.contains?.(a),key=inside?a.dataset?.key:undefined,act=inside?a.dataset?.chatAct:undefined;
+ // controls without data-chat-act: the archive toggle (<summary>) and the phone menu button (data-action)
+ const summary=inside&&!act&&!!a.matches?.('details.chat-arch>summary'),action=inside&&!act&&!summary?a.dataset?.action:undefined;
  const arch=el.querySelector?.('details.chat-arch')?.open;
  setHtml(el,safe);el.chatHtml=safe.html;
  if(arch){const d=el.querySelector('details.chat-arch');if(d)d.open=true;}
- if(inside&&act){const n=[...el.querySelectorAll('[data-chat-act]')].find(x=>x.dataset.chatAct===act&&x.dataset.key===key);n?.focus?.({preventScroll:true});}
+ const n=!inside?null:act?[...el.querySelectorAll('[data-chat-act]')].find(x=>x.dataset.chatAct===act&&x.dataset.key===key)
+  :summary?el.querySelector('details.chat-arch>summary'):action?[...el.querySelectorAll('[data-action]')].find(x=>x.dataset.action===action):null;
+ n?.focus?.({preventScroll:true});
  return true;
 }
 function unreadDot(c){if(!c?.id)return false;const read=readMap()[c.id];return signedIn()?(c.n>0):(read!==undefined?(c.known||0)>read:false);}

@@ -1,5 +1,5 @@
 // Browser regressions found in the integration QA (plan §11, manual list): the static demo (dist/ served with the production CSP)
-// in Chromium. Keyboard focus on the chat channel tabs survives the polling repaints; the demo moderation page renders (its tab
+// in Chromium. Keyboard focus on the chat channel tabs, the archive toggle and the phone menu button survives the repaints; the demo moderation page renders (its tab
 // strip was a plain string); the print preview ends when the address changes; a member's shell avatar shows the member's own
 // initials; the phone menu has a language switch (the full-screen chat covers the top bar); no console error, CSP violation or
 // horizontal scroll on the main demo pages at 360 px.
@@ -66,6 +66,30 @@ test('demo in a browser: tab focus across repaints, moderation page, print previ
     assert.equal(await page.evaluate(()=>document.body.classList.contains('print-preview')),false,'a new address leaves the print preview');
     assert.ok(await page.locator('#main').isVisible());
     assert.equal(await page.evaluate(async()=>{const m=await import('./account-boot.js');return [m.selfInitials({user:{role:'member'},profile:{firstName:' marta',lastName:'Kowalska'}}),m.selfInitials({user:{role:'admin'},profile:{firstName:'Anna',lastName:'Demo'}}),m.selfInitials(null)].join('|');}),'MK||');
+    assert.deepEqual(await page.evaluate(()=>window.__csp),[]);
+    await ctx.close();}
+  // 2b. Chat page: when an unread count changes, the rail is rewritten and the focus stays on the archive toggle (a <summary>
+  // without data-chat-act) with the archive kept open; on a phone a rewrite of the conversation header keeps the focus on the menu
+  // button (data-action="menu"). The demo lists only upcoming tournaments, so the test adds an archived one to the chat lists.
+  for(const [width,height,part,sel] of [[1440,900,'rail','.chat-rail details.chat-arch>summary'],[360,780,'convhead','.chat-conv-head [data-action="menu"]']]){
+    const {ctx,page}=await open({width,height});await demoLogin(page,0);
+    await page.goto(url+'#chat');await page.waitForSelector('[data-chat-part="'+part+'"] *');await sleep(800);
+    await page.evaluate(async()=>{
+     const chat=await import('./chat.js'),S=chat._state(),row=k=>{const c=S.channels.get(k);return c.kind==='lobby'?{id:Number(k),slug:c.slug,scope:c.scope,st:c.st,last:c.known||0,count:c.count||0}:{id:Number(k),tournamentId:c.tid,title:c.title,date:c.date,city:c.city,st:c.st,last:c.known||0,count:c.count||0};};
+     chat._internals.applyLists({lobby:S.lobby.map(row),tournaments:[...S.tours.map(row),{id:990,tournamentId:'qa-past',title:'Puchar 2020',date:'2020-03-01',city:'Kraków',st:'archive',last:0,count:0}]});
+     window.dispatchEvent(new Event('offline'));window.dispatchEvent(new Event('online'));
+    });
+    await page.waitForSelector(sel);await page.locator(sel).focus();
+    if(part==='rail'){await page.keyboard.press('Enter');assert.equal(await page.evaluate(()=>document.querySelector('.chat-rail details.chat-arch').open),true,'Enter opens the archive');}
+    await page.evaluate(async part=>{
+     const chat=await import('./chat.js'),S=chat._state(),v=document.querySelector('.chat-full').closest('[data-chat-mount]')?.chatView;
+     window.__before=document.activeElement;
+     if(part==='rail')S.channels.get(S.lobby.find(k=>k!==v?.key)).n=7;else document.querySelector('[data-chat-part="convhead"]').chatHtml='';
+     window.dispatchEvent(new Event('offline'));window.dispatchEvent(new Event('online'));
+    },part);
+    const st=await page.evaluate(sel=>({replaced:!window.__before.isConnected,on:document.activeElement===document.querySelector(sel),open:document.querySelector('.chat-rail details.chat-arch')?.open??null}),sel);
+    assert.equal(st.replaced,true,part+' was rewritten');assert.equal(st.on,true,'focus stays on '+sel+' after the '+part+' repaint');
+    if(part==='rail')assert.equal(st.open,true,'the archive stays open');
     assert.deepEqual(await page.evaluate(()=>window.__csp),[]);
     await ctx.close();}
   // 3. 360 px: home, public chat, guest preview and the demo club pages without horizontal scroll.
