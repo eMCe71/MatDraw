@@ -19,6 +19,14 @@ final class Migrator {
  private const LOCK_SQL="CONCAT('matdraw_migrate:',LEFT(IFNULL(DATABASE(),''),48))";
  /** The lock name run() takes on this connection (tests and diagnostics hold it to simulate a migration in progress). */
  public static function lockName(PDO $pdo):string{return (string)$pdo->query('SELECT '.self::LOCK_SQL)->fetchColumn();}
+ /**
+  * The driver message of a database error for the operator (migrate.php prints it; the deploy copies it into
+  * ~/matdraw/logs and the CI log) without the row values MySQL/MariaDB quote in it: a duplicate key "Duplicate entry
+  * '<e-mail>' for key …" or a rejected "… value: '<text>' …" becomes '…', so no personal data reaches a log (§10).
+  */
+ public static function safeMessage(\PDOException $e):string {
+  return (string)preg_replace("/(Duplicate entry |value: )'.*?'(?= for (?:key|column) |\\s*$)/s","$1'…'",$e->getMessage());
+ }
  private ?array $list=null;private bool $dry=false;private $log=null;
  public function __construct(private PDO $pdo,private string $dir){}
  /** id => path of every migration file, sorted; no database needed. */

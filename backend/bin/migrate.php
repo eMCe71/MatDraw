@@ -28,5 +28,5 @@ try{
 }catch(PDOException $e){
  // 1205 lock wait timeout (also metadata locks), 1213 deadlock: the old release is writing right now.
  if(in_array($e->errorInfo[1]??null,[1205,1213],true)){fwrite(STDERR,"Baza jest chwilowo zajęta. Ponów wdrożenie za kilka minut.\n");exit(1);}
- fwrite(STDERR,'Błąd bazy danych (SQLSTATE '.($e->errorInfo[0]??$e->getCode()).', kod '.($e->errorInfo[1]??'?').'): '.$e->getMessage()."\n");exit(1);
+ fwrite(STDERR,'Błąd bazy danych (SQLSTATE '.($e->errorInfo[0]??$e->getCode()).', kod '.($e->errorInfo[1]??'?').'): '.Migrator::safeMessage($e)."\n");exit(1);
 }catch(Throwable $e){fwrite(STDERR,$e->getMessage()."\n");exit(1);}
