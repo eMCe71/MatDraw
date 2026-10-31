@@ -114,4 +114,41 @@ export function parseRoute(hash){
 /** '#page' or '#page?query' for a page and optional params (object or URLSearchParams). */
 export function routeHash(pageId,params){const q=params?new URLSearchParams(params).toString():'';return '#'+pageId+(q?'?'+q:'');}
 
-export const registry={SafeHtml,h,setHtml,trustedHtml,escapeHtml,registerPage,registerPublicPage,registerAction,page,publicPage,allows,navItems,title,handle,defaultPage,setBadge,badge,badgeText,on,emit,provide,use,parseRoute,routeHash};
+// ---- Keyboard focus inside dialogs (WCAG 2.1.2, 2.4.3) ----
+const FOCUSABLE='a[href],area[href],button,input:not([type=hidden]),select,textarea,iframe,audio[controls],video[controls],[tabindex],[contenteditable]:not([contenteditable="false"]),details>summary:first-of-type';
+/** Elements of root that Tab stops on, in document order: enabled, not tabindex=-1, rendered (not hidden, display:none, inert or in a
+ * closed <details> other than its summary) and, for a radio group, only the checked radio (or the first one when none is checked). */
+export function tabbables(root){
+ const win=root?.ownerDocument?.defaultView,seen=new Set(),out=[];if(!root?.querySelectorAll)return out;
+ for(const el of root.querySelectorAll(FOCUSABLE)){
+  if(el.tabIndex<0||el.matches(':disabled')||el.closest('[inert],[hidden]')||!el.getClientRects().length)continue;
+  if(win&&win.getComputedStyle(el).visibility==='hidden')continue;
+  const closed=el.parentElement?.closest('details:not([open])');if(closed&&!(el.matches('summary')&&el.parentElement===closed))continue;
+  if(el.type==='radio'&&el.name){
+   const key=(el.form?.id||'')+'|'+el.name;if(seen.has(key))continue;
+   const group=[...root.querySelectorAll('input[type=radio]')].filter(r=>r.name===el.name&&r.form===el.form&&!r.matches(':disabled'));
+   const pick=group.find(r=>r.checked)||group[0];if(pick!==el&&group.some(r=>r.checked))continue;seen.add(key);out.push(pick);continue;
+  }
+  out.push(el);
+ }
+ return out;
+}
+/** Keeps Tab and Shift+Tab inside root (a modal, a sheet): from the last stop to the first and back, and from anywhere outside
+ * (or from an element inside that is not a tab stop, such as the dialog itself) to the nearest stop in that direction. Returns
+ * true when it moved the focus. Between the edges the browser's own order is kept (textareas, canvases, radio groups, links). */
+export function trapTab(event,root){
+ if(event?.key!=='Tab'||!root)return false;
+ const doc=root.ownerDocument,items=tabbables(root),active=doc.activeElement,first=items[0],last=items.at(-1);
+ if(!items.length){event.preventDefault();return true;}
+ let target=null;
+ if(!root.contains(active)||active===root)target=event.shiftKey?last:first;
+ else if(event.shiftKey?active===first:active===last)target=event.shiftKey?last:first;
+ else if(!items.includes(active)){
+  const after=items.filter(el=>active.compareDocumentPosition(el)&4);// DOCUMENT_POSITION_FOLLOWING
+  if(event.shiftKey&&after.length===items.length)target=last;else if(!event.shiftKey&&!after.length)target=first;
+ }
+ if(!target)return false;
+ event.preventDefault();target.focus();return true;
+}
+
+export const registry={SafeHtml,h,setHtml,trustedHtml,escapeHtml,tabbables,trapTab,registerPage,registerPublicPage,registerAction,page,publicPage,allows,navItems,title,handle,defaultPage,setBadge,badge,badgeText,on,emit,provide,use,parseRoute,routeHash};

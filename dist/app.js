@@ -502,7 +502,7 @@ document.addEventListener('keydown',event=>{
  }
  const modalEl=document.querySelector('.modal');if(!modalEl)return;
  if(event.key==='Escape'){event.preventDefault();closeModal();}
- if(event.key==='Tab'){const focusable=[...modalEl.querySelectorAll('button:not([disabled]),input:not([disabled]),select:not([disabled]),a[href]')],first=focusable[0],last=focusable.at(-1),inside=focusable.includes(document.activeElement);if(event.shiftKey&&(document.activeElement===first||!inside)){event.preventDefault();last?.focus();}else if(!event.shiftKey&&(document.activeElement===last||!inside)){event.preventDefault();first?.focus();}}
+ if(event.key==='Tab')registry.trapTab(event,modalEl);
 });
 window.addEventListener('storage',async e=>{if(e.key===LANGUAGE_KEY&&LANGUAGES.includes(e.newValue)){setLanguage(e.newValue,{persist:false});return;}if(!workspace||e.key!==Client.dataKey)return;try{workspace=await Client.bootstrap();if(!document.querySelector('.modal'))render();}catch(error){await handleError(error);}});
 /** Page from the hash (registry.parseRoute: query in params, #czat normalized to #chat); #screen and #guest keep their own handling. */

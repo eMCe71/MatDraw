@@ -324,11 +324,7 @@ if(browser){
   if(!view.sheet)return;
   const sheet=regions?.sheet;if(!sheet)return;
   if(event.key==='Escape'){event.preventDefault();event.stopImmediatePropagation();closeSheet();return;}
-  if(event.key!=='Tab')return;
-  const items=[...sheet.querySelectorAll('button:not([disabled]),a[href],input:not([disabled])')],first=items[0],last=items.at(-1),inside=items.includes(doc.activeElement);
-  if(!items.length){event.preventDefault();return;}
-  if(event.shiftKey&&(doc.activeElement===first||!inside)){event.preventDefault();last.focus();}
-  else if(!event.shiftKey&&(doc.activeElement===last||!inside)){event.preventDefault();first.focus();}
+  if(event.key==='Tab')registry.trapTab(event,sheet);
  },true);
 
  // -- the card: evaluated on a slow heartbeat and on events --
