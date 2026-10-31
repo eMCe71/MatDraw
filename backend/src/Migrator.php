@@ -12,7 +12,10 @@ use PDO;
  * helpers come only from constants in migration files and are still checked against a strict pattern.
  */
 final class Migrator {
+ /** Lock name prefix; the lock is per schema (matdraw_migrate:<database>), so staging and production, or parallel
+  *  test databases on one server, never block each other. 16 + 48 characters stay within MySQL's 64-character limit. */
  public const LOCK='matdraw_migrate';
+ private const LOCK_SQL="CONCAT('matdraw_migrate:',LEFT(IFNULL(DATABASE(),''),48))";
  private ?array $list=null;private bool $dry=false;private $log=null;
  public function __construct(private PDO $pdo,private string $dir){}
  /** id => path of every migration file, sorted; no database needed. */
@@ -58,7 +61,7 @@ final class Migrator {
   if($this->current()===0)throw new \RuntimeException('Baza jest pusta. Najpierw uruchom instalator (backend/bin/install.php).');
   $all=$this->migrations();
   $this->pdo->exec('SET SESSION lock_wait_timeout=30');$this->pdo->exec('SET SESSION innodb_lock_wait_timeout=30');
-  if((int)$this->pdo->query("SELECT GET_LOCK('".self::LOCK."',0)")->fetchColumn()!==1)throw new \RuntimeException('Inna migracja jest właśnie w toku. Ponów za chwilę.');
+  if((int)$this->pdo->query('SELECT GET_LOCK('.self::LOCK_SQL.',0)')->fetchColumn()!==1)throw new \RuntimeException('Inna migracja jest właśnie w toku. Ponów za chwilę.');
   $this->dry=$dry;$this->log=$log;$done=[];
   try{
    $cur=$this->current();
@@ -70,7 +73,7 @@ final class Migrator {
     if(!$dry)$this->pdo->prepare('UPDATE app_meta SET schema_version=? WHERE id=1 AND schema_version<?')->execute([$id,$id]);
     $done[]=$id;
    }
-  }finally{$this->dry=false;$this->log=null;try{$this->pdo->query("SELECT RELEASE_LOCK('".self::LOCK."')")->fetchAll();}catch(\Throwable){}}
+  }finally{$this->dry=false;$this->log=null;try{$this->pdo->query('SELECT RELEASE_LOCK('.self::LOCK_SQL.')')->fetchAll();}catch(\Throwable){}}
   return $done;
  }
  // Helpers for migration files. All existence checks use information_schema with TABLE_SCHEMA=DATABASE().
