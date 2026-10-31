@@ -23,6 +23,7 @@ const letters=n=>Array.from(randomBytes(n),b=>'abcdefghijklmnopqrstuvwxyz'[b%26]
 const RUN=letters(6);let seq=0;
 const cid=()=>randomBytes(16).toString('base64url');
 const now=()=>Math.floor(Date.now()/1000);
+const day=n=>new Intl.DateTimeFormat('en-CA',{timeZone:'Europe/Warsaw'}).format(new Date(Date.now()+n*864e5));
 
 /** GET with query parameters and an optional cookie; never stores cookies. text is the raw body. */
 async function get(route,params={},cookie){
@@ -215,7 +216,8 @@ test('privacy sweep: no public or guest answer carries an e-mail, username, name
   const s=fixture('accounts-state',{userId:p.id});
   secrets.push(p.email,p.email.split('@')[0],p.id,p.publicId,s.profile.username,s.profile.first_name,s.profile.last_name,...(s.profile.club_text?[s.profile.club_text]:[]));
  }
- const tid=fixture('tournament',{name:'Turniej prywatności',city:'Prywatnowo',date:'2032-03-14'}).id;
+ // Tomorrow: route=public lists only the 6 nearest tournaments and the other files plant many later ones.
+ const tid=fixture('tournament',{name:'Turniej prywatności',city:'Prywatnowo',date:day(1)}).id;
  const sessions=await Promise.all(people.map(p=>signIn(p.email)));
  const lobby=['general','taekwondo-pl','karate'].map(channel);
  for(const [i,c] of sessions.entries()){
@@ -227,9 +229,12 @@ test('privacy sweep: no public or guest answer carries an e-mail, username, name
  const hidden=await send(sessions[1],{ch:general.id},'Usunie moderator');await moderate({action:'delete',messageId:hidden.data.m.id,note:'test'});
  const tch=fixture('chat-channel',{tournamentId:tid}),ids=[...lobby.map(c=>c.id),tch.id],last=channel('general').last_message_id;
  const answers=[];
- const check=async(label,route,params={},cookie)=>{const r=await get(route,params,cookie);answers.push([label,r]);return r;};
- await check('public','public');
- await check('public-tournament','public-tournament',{id:tid});
+ // Every answer has its expected status, so a route that stops answering (an empty 404) cannot pass the sweep.
+ const check=async(label,route,params={},cookie,status=200)=>{const r=await get(route,params,cookie);assert.equal(r.status,status,label+': '+r.text);answers.push([label,r]);return r;};
+ const pub=await check('public','public');
+ assert.ok(pub.data.tournaments.some(t=>t.id===tid&&t.name==='Turniej prywatności'),'the planted tournament is public: '+pub.text);
+ const one=await check('public-tournament','public-tournament',{id:tid});
+ assert.deepEqual([one.data.tournament.id,one.data.tournament.name,one.data.tournament.city],[tid,'Turniej prywatności','Prywatnowo']);
  await check('public-config','public-config');
  await check('session','session');
  const lists=await check('public-chat-channels','public-chat-channels');
@@ -247,13 +252,12 @@ test('privacy sweep: no public or guest answer carries an e-mail, username, name
  // Signed in without full access: the guest projection through chat-feed and chat-channels.
  const cn=await signIn(nopay.email);
  const feed=await check('chat-feed without payment','chat-feed',{ch:all,cv:'0'},cn.cookie);
- assert.equal(feed.status,200,feed.text);assert.equal(feed.data.people,undefined);
+ assert.equal(feed.data.people,undefined);
  for(const id of ids)for(const m of feed.data.ch[id].m)assert.deepEqual(Object.keys(m),'b' in m?GUEST_FIELDS:GUEST_TOMB);
  await check('chat-channels without payment','chat-channels',{},cn.cookie);
- await check('chat-feed without a session','chat-feed',{ch:all});
- await check('avatar for a guest','avatar',{id:people[0].publicId,v:'0123456789ab',s:'64'});
+ await check('chat-feed without a session','chat-feed',{ch:all},undefined,401);
+ await check('avatar for a guest','avatar',{id:people[0].publicId,v:'0123456789ab',s:'64'},undefined,404);
  for(const [label,r] of answers){
-  assert.ok([200,204,401,404].includes(r.status),label+': '+r.status);
   // Only the legacy session route hands out a cookie (an anonymous session id, no identity).
   const headers=[...r.headers.entries()].map(([k,v])=>k+': '+v).join('\n');if(label!=='session')assert.equal(r.headers.get('set-cookie'),null,label+': Set-Cookie');
   const hay=(r.text+'\n'+headers).toLowerCase();
