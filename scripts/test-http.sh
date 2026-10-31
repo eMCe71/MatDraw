@@ -7,6 +7,10 @@
 #   the release with `php -S 127.0.0.1:<port>` and runs tests/http.test.mjs first, then the given files or the glob
 #   tests/*.http.test.mjs, one file at a time. Distinct ports and database names allow parallel runs.
 # Needs a local server reachable as `mariadb -uroot` (or `mysql -uroot`); override with MATDRAW_TEST_DB_ROOT.
+# A server in a container (CI services): MATDRAW_TEST_DB_HOST (default 127.0.0.1) and MATDRAW_TEST_DB_PORT (3306) go
+# into the app DSN; MATDRAW_TEST_DB_USER_HOST lists the host parts of the test user mt_<port> (default
+# 'localhost 127.0.0.1'; set '%' when the server sees the client through docker NAT), e.g.
+#   MATDRAW_TEST_DB_ROOT='mysql -h127.0.0.1 -P3306 -uroot -pci-root' MATDRAW_TEST_DB_USER_HOST='%' scripts/test-http.sh 8110
 # Exports MATDRAW_CONFIG, MATDRAW_TEST_SHARED_DIR, MATDRAW_TEST_URL, MATDRAW_TEST_AUX_DB, MATDRAW_TEST_RELEASE, PHP_BIN.
 # KEEP=1 keeps the work directory after a successful run. Test credentials and config never leave the work directory.
 set -uo pipefail
@@ -16,6 +20,9 @@ dbn=${1:-matdraw_test_$port}; [[ $# -gt 0 ]] && shift
 repo=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 php=${PHP_BIN:-$(command -v php)}; stub_port=$((port+1)); aux=${dbn}_aux
 root=${MATDRAW_TEST_DB_ROOT:-$(command -v mariadb >/dev/null && echo 'mariadb -uroot' || echo 'mysql -uroot')}
+dbhost=${MATDRAW_TEST_DB_HOST:-127.0.0.1}; dbport=${MATDRAW_TEST_DB_PORT:-3306}; read -ra uhosts <<<"${MATDRAW_TEST_DB_USER_HOST:-localhost 127.0.0.1}"
+[[ $dbhost =~ ^[A-Za-z0-9._:-]+$ && $dbport =~ ^[0-9]+$ && ${#uhosts[@]} -gt 0 ]] || { echo "Invalid MATDRAW_TEST_DB_HOST, MATDRAW_TEST_DB_PORT or MATDRAW_TEST_DB_USER_HOST." >&2; exit 2; }
+for h in "${uhosts[@]}"; do [[ $h =~ ^[A-Za-z0-9._%:-]+$ ]] || { echo "Invalid MATDRAW_TEST_DB_USER_HOST entry: $h" >&2; exit 2; }; done
 work=$(mktemp -d "${TMPDIR:-/tmp}/matdraw-http.XXXXXX"); shared=$work/shared
 srv=; stub=
 cleanup(){ [[ -n $srv ]] && kill "$srv" 2>/dev/null; [[ -n $stub ]] && kill "$stub" 2>/dev/null; wait 2>/dev/null; }
@@ -25,13 +32,12 @@ if ! $root -e 'SELECT 1' >/dev/null 2>&1 && command -v mysqld_safe >/dev/null; t
  (mysqld_safe --user=mysql >"$work/mysqld.log" 2>&1 &)
  for _ in $(seq 1 30); do $root -e 'SELECT 1' >/dev/null 2>&1 && break; sleep 1; done
 fi
-pass=$(openssl rand -hex 16)
+pass=$(openssl rand -hex 16); grants=
+for h in "${uhosts[@]}"; do grants+="CREATE USER IF NOT EXISTS 'mt_$port'@'$h' IDENTIFIED BY '$pass'; ALTER USER 'mt_$port'@'$h' IDENTIFIED BY '$pass';
+ GRANT ALL ON \`$dbn\`.* TO 'mt_$port'@'$h'; GRANT ALL ON \`$aux\`.* TO 'mt_$port'@'$h'; "; done
 $root -e "DROP DATABASE IF EXISTS \`$dbn\`; CREATE DATABASE \`$dbn\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
  DROP DATABASE IF EXISTS \`$aux\`; CREATE DATABASE \`$aux\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
- CREATE USER IF NOT EXISTS 'mt_$port'@'localhost' IDENTIFIED BY '$pass'; CREATE USER IF NOT EXISTS 'mt_$port'@'127.0.0.1' IDENTIFIED BY '$pass';
- ALTER USER 'mt_$port'@'localhost' IDENTIFIED BY '$pass'; ALTER USER 'mt_$port'@'127.0.0.1' IDENTIFIED BY '$pass';
- GRANT ALL ON \`$dbn\`.* TO 'mt_$port'@'localhost'; GRANT ALL ON \`$dbn\`.* TO 'mt_$port'@'127.0.0.1';
- GRANT ALL ON \`$aux\`.* TO 'mt_$port'@'localhost'; GRANT ALL ON \`$aux\`.* TO 'mt_$port'@'127.0.0.1'; FLUSH PRIVILEGES;" || { echo "Database setup failed." >&2; exit 2; }
+ $grants FLUSH PRIVILEGES;" || { echo "Database setup failed." >&2; exit 2; }
 (cd "$repo" && node scripts/build-php.mjs "$work/matdraw-php" >/dev/null) || { echo "Build failed." >&2; exit 3; }
 mkdir -p "$shared/uploads" "$shared/sessions"; chmod 700 "$shared" "$shared/uploads" "$shared/sessions"
 # Test values from plan §9.9 (billing in test mode against the local Stripe stub; nothing real).
@@ -39,7 +45,7 @@ cat > "$shared/config.php" <<PHP
 <?php
 return [
  'app_url'=>'http://127.0.0.1:$port',
- 'db'=>['dsn'=>'mysql:host=127.0.0.1;port=3306;dbname=$dbn;charset=utf8mb4','user'=>'mt_$port','password'=>'$pass'],
+ 'db'=>['dsn'=>'mysql:host=$dbhost;port=$dbport;dbname=$dbn;charset=utf8mb4','user'=>'mt_$port','password'=>'$pass'],
  'app_key'=>'$(openssl rand -hex 32)',
  'allow_insecure_http'=>true,'session_idle_seconds'=>1800,'session_max_seconds'=>43200,
  'uploads_dir'=>'$shared/uploads',

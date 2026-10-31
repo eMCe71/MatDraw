@@ -18,13 +18,15 @@ function fixture_billing(PDO $pdo,string $userId,array $fields):array {
 $jobs=[
  // A community account (role member, no workspace club). profile: false (no row; created lazily later), true
  // (complete default profile) or an object with camelCase fields; exempt: true or a reason (free account).
+ // The default username is unique and valid under §7.2 (<local part, 15 chars>_<6 random>); a test that needs a
+ // specific name passes profile.username.
  'member'=>function(PDO $pdo,array $p):array{
   $email=mb_strtolower(trim((string)($p['email']??'')));if(!filter_var($email,FILTER_VALIDATE_EMAIL))throw new RuntimeException('member: email required');
   $id=Domain::id();$now=time();$publicId=null;
   $pdo->prepare("INSERT INTO users (id,club_id,email,role,active,password_hash,auth_version) VALUES (?,NULL,?,'member',?,?,1)")->execute([$id,$email,($p['active']??true)?1:0,Domain::password((string)($p['password']??'TestPassword2026!'))]);
   if(!empty($p['profile'])){
    $f=is_array($p['profile'])?$p['profile']:[];$publicId=fixture_public_id();
-   $user=preg_replace('/[^a-z0-9._]/','',strtolower(strstr($email,'@',true)));$user=substr(preg_match('/^[a-z]/',$user)?$user:'u'.$user,0,24);
+   $user=preg_replace('/[^a-z0-9]/','',strtolower(strstr($email,'@',true)));$user=substr(preg_match('/^[a-z]/',$user)?$user:'u'.$user,0,15).'_'.substr(strtolower(fixture_public_id()),0,6);
    $pdo->prepare('INSERT INTO user_profiles (user_id,public_id,username,first_name,last_name,country,sports,club_text,show_club,name_display,avatar,username_changed_at,created_at,updated_at,last_login_at,pw_reset_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
     ->execute([$id,$publicId,array_key_exists('username',$f)?$f['username']:$user,$f['firstName']??'Test',$f['lastName']??'Członek',$f['country']??'PL',implode(',',$f['sports']??['taekwondo']),$f['clubText']??null,!empty($f['showClub'])?1:0,$f['nameDisplay']??'initial',$f['avatar']??null,$f['usernameChangedAt']??null,$f['createdAt']??$now,$now,$f['lastLoginAt']??null,$f['pwResetAt']??null]);
   }

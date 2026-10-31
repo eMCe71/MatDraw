@@ -4,7 +4,7 @@
 import test,{before} from 'node:test';
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
-import {mkdirSync,mkdtempSync,readdirSync,statSync,utimesSync} from 'node:fs';
+import {closeSync,existsSync,mkdirSync,mkdtempSync,openSync,readdirSync,statSync,unlinkSync,utimesSync,writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {fileURLToPath} from 'node:url';
@@ -81,6 +81,10 @@ test('migrations from empty and from version 1, rollback floor, dump.php --auto 
   // Version 1 (the frozen baseline) with existing staff data, as in production before 0002.
   sql('$pdo->exec(file_get_contents($in));$pdo->exec("INSERT INTO clubs (id,name) VALUES (\'c1\',\'Klub bazowy\')");$pdo->exec("INSERT INTO users (id,club_id,email,role,active,password_hash,auth_version) VALUES (\'u1\',\'c1\',\'admin@aux.example\',\'admin\',1,\'x\',1),(\'u2\',\'c1\',\'klub@aux.example\',\'club\',1,\'y\',3)");return true;',env,JSON.stringify(path.join(backend,'database','schema.sql')));
   assert.equal(status(),`STATE=ready CURRENT=1 TARGET=${target} PENDING=${target-1} DESTRUCTIVE=0 FLOOR=1`);
+  // Re-running the installer on a database in use changes nothing: no account and no migration without a backup.
+  const v1=sql(HASH,env),again=run('install.php',['--email=nowy@aux.example','--club=Klub drugi','--password-stdin'],env,'InstallAgain2026!\n');
+  assert.equal(again.code,1,again.out);assert.match(again.err,/Already initialized/);assert.doesNotMatch(again.out,/Migracja/);
+  assert.match(status(),/^STATE=ready CURRENT=1 /);assert.deepEqual(sql(HASH,env),v1);
   const old=sql('return [$pdo->query("SELECT id,club_id,email,role,active,password_hash,auth_version FROM users ORDER BY id")->fetchAll(),$pdo->query("SELECT id,name FROM clubs ORDER BY id")->fetchAll()];',env);
   const dry=run('migrate.php',['--dry-run'],env);assert.equal(dry.code,0,dry.err);assert.match(dry.out,/\[dry-run\] Migracja 0002_accounts/);assert.match(dry.out,/CREATE TABLE IF NOT EXISTS user_profiles/);
   assert.match(status(),/^STATE=ready CURRENT=1 /,'--dry-run changes nothing');
@@ -90,13 +94,19 @@ test('migrations from empty and from version 1, rollback floor, dump.php --auto 
   assert.deepEqual(sql('return $pdo->query("SELECT user_id,billing_exempt,exempt_reason,exempt_until FROM billing_accounts ORDER BY user_id")->fetchAll();',env),[{user_id:'u1',billing_exempt:1,exempt_reason:'grandfathered',exempt_until:null},{user_id:'u2',billing_exempt:1,exempt_reason:'grandfathered',exempt_until:null}]);
   assert.deepEqual(sql('return $pdo->query("SELECT COLUMN_TYPE,IS_NULLABLE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=\'users\' AND COLUMN_NAME IN (\'role\',\'club_id\') ORDER BY COLUMN_NAME")->fetchAll(PDO::FETCH_NUM);',env),[['varchar(40)','YES'],["enum('admin','editor','club','member')",'NO']]);
   assert.equal(sql('return $pdo->query("SELECT COLUMN_DEFAULT FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=\'user_profiles\' AND COLUMN_NAME=\'name_display\'")->fetchColumn();',env).replace(/'/g,''),'initial');
-  const hash=sql(HASH,env),again=run('migrate.php',[],env);assert.equal(again.code,0,again.err);assert.match(again.out,/^Schemat aktualny/);assert.deepEqual(sql(HASH,env),hash,'second run changes nothing');
+  const hash=sql(HASH,env),twice=run('migrate.php',[],env);assert.equal(twice.code,0,twice.err);assert.match(twice.out,/^Schemat aktualny/);assert.deepEqual(sql(HASH,env),hash,'second run changes nothing');
  }
  // Rollback floor: 1 while no member exists, 2 (migration 0002) as soon as one does.
  const members=sql('return (int)$pdo->query("SELECT COUNT(*) FROM users WHERE role=\'member\'")->fetchColumn();',env);
  if(!members)assert.equal(floor(),1);
  fixture('member',{email:'floor@aux.example',profile:{firstName:'Ewa',lastName:'Nowak',username:'ewa.floor'}},env);
  assert.equal(floor(),2);assert.match(status(),/ FLOOR=2$/);
+ // Generated columns are recomputed on import, but a column with an expression default (MySQL EXTRA DEFAULT_GENERATED)
+ // is ordinary data and must survive the dump; the probe table is dropped after the restore.
+ sql('$pdo->exec("DROP TABLE IF EXISTS dump_probe");$pdo->exec("CREATE TABLE dump_probe (id INT PRIMARY KEY,a INT NOT NULL,v INT AS (a*2) VIRTUAL,s INT AS (a+1) STORED,d VARCHAR(20) NOT NULL DEFAULT (CONCAT(\'x\',\'y\')),b VARBINARY(8) NULL)");$pdo->exec("INSERT INTO dump_probe (id,a,d,b) VALUES (1,5,\'kept\',0x00ff0a),(2,7,DEFAULT,NULL)");return true;',env);
+ // STDOUT mode: a failed write (here a full disk) ends the dump with exit code 1 instead of a silent partial copy.
+ const full=openSync('/dev/full','w'),broken=spawnSync(php,[path.join(backend,'bin','dump.php')],{encoding:'utf8',env:{...process.env,...env},stdio:['ignore',full,'pipe']});closeSync(full);
+ assert.equal(broken.status,1,broken.stderr);assert.match(broken.stderr,/Błąd zapisu kopii na STDOUT/);
  // dump.php --auto: a 600 file in a 700 directory next to shared/, valid gzip with the marker, restorable with equal data.
  const backups=path.join(dir,'backups'),hash=sql(HASH,env);
  const d=run('dump.php',['--auto'],env);assert.equal(d.code,0,d.err);assert.match(d.out,/Kopia bazy: /);
@@ -115,12 +125,36 @@ test('migrations from empty and from version 1, rollback floor, dump.php --auto 
  assert.equal(sql('return count($pdo->query("SHOW TABLES")->fetchAll());',env),0);
  sql('foreach(explode(";\\n",gzdecode(file_get_contents($in))) as $s){if(trim(preg_replace("/^--.*$/m","",$s))!=="")$pdo->exec($s);}return true;',env,JSON.stringify(file));
  assert.deepEqual(sql(HASH,env),hash,'restored data equals the dumped data');
+ assert.deepEqual(sql('return $pdo->query("SELECT id,a,v,s,d,HEX(b) h FROM dump_probe ORDER BY id")->fetchAll(PDO::FETCH_NUM);',env),[[1,5,10,6,'kept','00FF0A'],[2,7,14,8,'xy',null]]);
+ sql('$pdo->exec("DROP TABLE dump_probe");return true;',env);
  assert.match(status(),/ PENDING=0 DESTRUCTIVE=0 FLOOR=2$/);
+ // Partial copies of a killed run: older than 6 h are deleted, a fresh one (a run in progress) stays.
+ const stale=path.join(backups,'db-20200101000000-daily.sql.gz.tmp'),fresh=path.join(backups,'db-20990101000000-daily.sql.gz.tmp');
+ writeFileSync(stale,'partial',{mode:0o600});writeFileSync(fresh,'partial',{mode:0o600});utimesSync(stale,Date.now()/1000-86400,Date.now()/1000-86400);
  // Retention: copies older than 30 days go, but the newest copy always stays.
  const old=t=>{const f=path.join(backups,`db-2020010${t}000000-daily.sql.gz`);spawnSync('cp',[file,f]);const s=Date.now()/1000-(40+t)*86400;utimesSync(f,s,s);return f;};
  const o1=old(1),o2=old(2);utimesSync(file,Date.now()/1000-21*3600,Date.now()/1000-21*3600);
  const third=run('dump.php',['--auto'],env);assert.equal(third.code,0,third.err);
+ assert.ok(!existsSync(stale),'stale partial copy deleted');assert.match(third.out,/Usunięto niedokończoną kopię: db-20200101000000/);assert.ok(existsSync(fresh));unlinkSync(fresh);
  const left=readdirSync(backups).filter(f=>f.endsWith('.sql.gz')).sort();
  assert.equal(left.length,2,left.join());assert.ok(left.includes(files[0])&&!left.includes(path.basename(o1))&&!left.includes(path.basename(o2)),left.join());
  for(const f of left)assert.equal(statSync(path.join(backups,f)).mode&0o777,0o600);
+});
+
+test('the migration lock is per database: another schema migrates, the same schema waits',{skip:!base||!process.env.MATDRAW_TEST_AUX_DB},()=>{
+ const aux=process.env.MATDRAW_TEST_AUX_DB;
+ const r=sql(`require_once dirname(getenv("B")).chr(47)."src/Migrator.php";$c=require getenv("MATDRAW_CONFIG");$auxCfg=$c;$auxCfg["db"]["dsn"]=preg_replace("/dbname=[^;]+/","dbname=".$in,$c["db"]["dsn"]);
+  $name=$pdo->query("SELECT CONCAT('matdraw_migrate:',DATABASE())")->fetchColumn();$held=(int)$pdo->query("SELECT GET_LOCK('$name',0)")->fetchColumn();
+  $try=function(array $cfg){try{(new MatDraw\\Migrator(matdraw_database($cfg),getenv("B")))->run(fn($l)=>null);return "ok";}catch(RuntimeException $e){return $e->getMessage();}};
+  $out=[$name,$held,$try($auxCfg),$try($c)];$pdo->query("SELECT RELEASE_LOCK('$name')")->fetchAll();$out[]=$try($c);return $out;`,{B:path.join(backend,'migrations')},JSON.stringify(aux));
+ assert.match(r[0],/^matdraw_migrate:/);assert.equal(r[1],1);
+ assert.equal(r[2],'ok','a lock on the main database does not block the second database');
+ assert.match(r[3],/Inna migracja jest właśnie w toku/);assert.equal(r[4],'ok','free again after RELEASE_LOCK');
+});
+
+test('fixture members get unique, valid default usernames',{skip:!base},()=>{
+ const a=fixture('member',{email:'jan@a.test',profile:true}),b=fixture('member',{email:'jan@b.test',profile:true}),c=fixture('member',{email:'9.x@c.test',profile:true});
+ const names=sql('$q=$pdo->prepare("SELECT username FROM user_profiles WHERE user_id IN (?,?,?) ORDER BY username");$q->execute($in);return $q->fetchAll(PDO::FETCH_COLUMN);',{},JSON.stringify([a.id,b.id,c.id]));
+ assert.equal(new Set(names).size,3);
+ for(const n of names)assert.match(n,/^[a-z][a-z0-9._]{2,23}$/),assert.doesNotMatch(n,/\.\.|\._|_\.|\.$/);
 });
