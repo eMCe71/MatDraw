@@ -7,7 +7,8 @@
  *          render(params) returns SafeHtml synchronously (usually ui.shell(placeholder)); modules fill it after 'painted'.
  * Public:  registerPublicPage({id,render(params)}) – a page without a workspace (guest); it writes #app itself.
  * Actions: registerAction(name,handler(el,id,ctx),{public:false}) – the last rung of the data-action ladder in app.js.
- * Events:  'ready','painted','login','logout','language','saved','payment-required','client-outdated' (and module events).
+ * Events:  'ready','painted','upcoming-painted','login','logout','language','saved','payment-required','client-outdated' (and module
+ *          events). 'upcoming-painted' {view:'login',tournaments:[ids]} fires after the async upcoming list is (re)painted.
  * Safe HTML (plan §5.9): h`…${x}…` escapes every interpolation unless it is SafeHtml from another h (arrays are joined);
  *          setHtml(el,safe) is the only innerHTML assignment and rejects plain strings.
  * Helpers: provide(name,value)/use(name); app.js provides 'ui' (T, esc, icon, button, badge, modal, closeModal, toast, navigate,
