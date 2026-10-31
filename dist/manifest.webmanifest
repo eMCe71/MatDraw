@@ -22,5 +22,11 @@
  "shortcuts": [
   {"name": "Czat", "short_name": "Czat", "url": "./?source=shortcut#chat", "icons": [{"src": "brand/shortcut-chat-96.png", "sizes": "96x96", "type": "image/png"}]},
   {"name": "Turnieje", "short_name": "Turnieje", "url": "./?source=shortcut#tournaments", "icons": [{"src": "brand/shortcut-tournaments-96.png", "sizes": "96x96", "type": "image/png"}]}
+ ],
+ "screenshots": [
+  {"src": "screenshots/wide-chat.webp", "sizes": "1280x800", "type": "image/webp", "form_factor": "wide", "label": "Czat na żywo i najbliższe turnieje"},
+  {"src": "screenshots/wide-bracket.webp", "sizes": "1280x800", "type": "image/webp", "form_factor": "wide", "label": "Drabinka turniejowa z wynikami"},
+  {"src": "screenshots/narrow-chat.webp", "sizes": "1080x1920", "type": "image/webp", "form_factor": "narrow", "label": "Czat MatBravo na telefonie"},
+  {"src": "screenshots/narrow-tournaments.webp", "sizes": "1080x1920", "type": "image/webp", "form_factor": "narrow", "label": "Lista turniejów na telefonie"}
  ]
 }

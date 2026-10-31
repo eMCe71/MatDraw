@@ -22,5 +22,11 @@
  "shortcuts": [
   {"name": "Chat", "short_name": "Chat", "url": "./?source=shortcut#chat", "icons": [{"src": "brand/shortcut-chat-96.png", "sizes": "96x96", "type": "image/png"}]},
   {"name": "Tournaments", "short_name": "Tournaments", "url": "./?source=shortcut#tournaments", "icons": [{"src": "brand/shortcut-tournaments-96.png", "sizes": "96x96", "type": "image/png"}]}
+ ],
+ "screenshots": [
+  {"src": "screenshots/wide-chat-en.webp", "sizes": "1280x800", "type": "image/webp", "form_factor": "wide", "label": "Live chat and upcoming tournaments"},
+  {"src": "screenshots/wide-bracket-en.webp", "sizes": "1280x800", "type": "image/webp", "form_factor": "wide", "label": "Tournament bracket with results"},
+  {"src": "screenshots/narrow-chat-en.webp", "sizes": "1080x1920", "type": "image/webp", "form_factor": "narrow", "label": "MatBravo chat on a phone"},
+  {"src": "screenshots/narrow-tournaments-en.webp", "sizes": "1080x1920", "type": "image/webp", "form_factor": "narrow", "label": "Tournament list on a phone"}
  ]
 }
