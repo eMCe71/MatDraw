@@ -205,11 +205,14 @@ function renderPublic(focusTitle=false){
  if(lang)document.querySelector(`.lang-switch [data-set-lang="${lang}"]`)?.focus();
  else if(focusTitle)document.getElementById('acct-step-title')?.focus();
 }
+const onSignup=()=>!!document.querySelector('[data-acct-public]')&&!workspace();
 async function begin(){
  const s=S.signup;s.begin='pending';s.beginError='';
- try{await Client.request('signup-begin',{method:'POST',body:s.invite?{invite:s.invite}:{}});s.begin='ok';flowStart();}
- catch(error){s.begin=Client.isDemo?'demo':error?.status===404?'off':'error';s.beginError=message(error);flowEnd();}
- if(document.querySelector('[data-acct-public]')&&!workspace())renderPublic(true);
+ // An answer for a sign-up that was left meanwhile (Back, logo, another page) must not set the flow mark again (§9.4).
+ const current=()=>s===S.signup&&onSignup();
+ try{await Client.request('signup-begin',{method:'POST',body:s.invite?{invite:s.invite}:{}});s.begin='ok';if(current())flowStart();}
+ catch(error){s.begin=Client.isDemo?'demo':error?.status===404?'off':'error';s.beginError=message(error);if(current())flowEnd();}
+ if(current())renderPublic(true);
 }
 /** Public #signup (steps 1-2). An invite token from the address is kept in memory and removed from the address bar. */
 export async function mountPublic(app,params){
@@ -224,7 +227,7 @@ export async function mountPublic(app,params){
 }
 /** Re-renders the visible account view from the module state (language switch, state changes). */
 export function repaint(){
- if(document.querySelector('[data-acct-public]')&&!workspace()){renderPublic();return;}
+ if(onSignup()){renderPublic();return;}
  const el=document.querySelector('[data-acct-page]');if(el)render(el.dataset.acctPage,el);
 }
 function submitStepOne(form){
@@ -539,4 +542,12 @@ function wire(){
   if(!(view==='app'&&page==='profile')){S.draft=null;S.draftFor=null;}
  });
  registry.on('logout',()=>{S.signup=newSignup();S.draft=null;S.draftFor=null;S.ret=null;S.del=null;S.payment='';});
+ // Back/forward cache: a page left for another site keeps its DOM and no 'painted' follows its return, so the typed sign-up
+ // and the passwords are dropped before it is stored, and a sign-up shown again starts over (§8.3 point 8).
+ addEventListener('pagehide',forget);
+ addEventListener('pageshow',event=>{if(event.persisted&&onSignup())ui()?.render?.();});
+}
+function forget(){
+ S.signup=newSignup();if(S.del)S.del.password='';
+ for(const el of document.querySelectorAll('[data-acct-public] input:not([type=hidden]):not([type=checkbox]):not([type=radio]),[data-acct-public] textarea,[data-acct-page] input[type=password],#acct-delete-form input[type=password]'))el.value='';
 }

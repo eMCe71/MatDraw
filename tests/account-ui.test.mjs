@@ -300,6 +300,21 @@ test('PHP build in a browser: sign-up, Checkout and return, portal, cancel, prof
   await page.click('.acct-join-cta');await page.waitForSelector('#acct-signup-1');
   await page.fill('#acct-signup-1 [name="email"]','someone.else@example.test');await page.fill('#acct-signup-1 [name="password"]','Cudzy-Sekret-2026');
   await page.evaluate(()=>{location.hash='';});await page.waitForSelector('#login-form');
+  // The back/forward cache (another site, then Back) keeps the DOM without a 'painted': what was typed is dropped on pagehide and the
+  // sign-up starts over on pageshow (Playwright's Chromium has no real bfcache, so the events are dispatched).
+  await page.click('.acct-join-cta');await page.waitForSelector('#acct-signup-1');
+  await page.fill('#acct-signup-1 [name="email"]','someone.else@example.test');await page.fill('#acct-signup-1 [name="password"]','Cudzy-Sekret-2026');
+  assert.deepEqual(await page.evaluate(()=>{dispatchEvent(new PageTransitionEvent('pagehide',{persisted:true}));document.querySelector('#acct-signup-1').dataset.stale='1';
+   return [...document.querySelectorAll('#acct-signup-1 [name="email"],#acct-signup-1 [name="password"]')].map(el=>el.value);}),['',''],'pagehide clears the typed e-mail and password');
+  await page.evaluate(()=>dispatchEvent(new PageTransitionEvent('pageshow',{persisted:true})));await page.waitForSelector('#acct-signup-1:not([data-stale])');
+  assert.equal(await page.inputValue('#acct-signup-1 [name="password"]'),'','the restored sign-up starts over');assert.ok(await mark(page),'the restored sign-up sets the mark again');
+  // A signup-begin answer that arrives after the sign-up was left does not set the flow mark again (pwa.js would hold back updates).
+  await page.evaluate(()=>{location.hash='';});await page.waitForSelector('#login-form');assert.equal(await mark(page),null,'mark removed on leaving');
+  let release;const held=new Promise(resolve=>{release=resolve;}),isBegin=u=>new URL(u).searchParams.get('route')==='signup-begin';
+  await page.route(isBegin,async route=>{await held;await route.continue();});
+  const asked=page.waitForRequest(r=>isBegin(r.url()));await page.click('.acct-join-cta');await asked;await page.evaluate(()=>{location.hash='';});await page.waitForSelector('#login-form');
+  const answered=page.waitForResponse(r=>isBegin(r.url()));release();await answered;await page.unroute(isBegin);
+  await page.evaluate(()=>new Promise(r=>setTimeout(r,200)));assert.equal(await mark(page),null,'a late signup-begin answer leaves no mark');
   // Step 1.
   await page.click('.acct-join-cta');await page.waitForSelector('#acct-signup-1');
   assert.equal(await page.inputValue('#acct-signup-1 [name="email"]'),'','e-mail of the left sign-up is gone');assert.equal(await page.inputValue('#acct-signup-1 [name="password"]'),'','password of the left sign-up is gone');
