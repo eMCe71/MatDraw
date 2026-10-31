@@ -26,8 +26,9 @@ export const AD={
  disclaimer:'Przykładowa reklama. Marka KYORUVO i jej oferta są fikcyjne.'
 };
 
-/** Encouragement in the guest preview. Today it leads to the login form (kind 'login'); a later paid-access offer can
- * reuse the same slot with kind 'paid', its own copy and a price in the note, plus a handler for the 'access-cta' action. */
+/** Encouragement in the guest preview (access card). The top-level texts are the shown ones; account-boot.js picks the variant at
+ * run time from public-config (plan §6.10: kind 'login' without sign-up, 'paid' with sign-up and payments, 'free' with sign-up
+ * without payments) through setAccessKind(). Every text, the variants included, needs an English entry (tests/i18n.test.mjs). */
 export const ACCESS={
  kind:'login',
  eyebrow:'Więcej po zalogowaniu',
@@ -35,5 +36,28 @@ export const ACCESS={
  text:'W podglądzie gościa zawodnicy są oznaczeni inicjałami. Po zalogowaniu zobaczysz dane zgodne z uprawnieniami Twojego konta.',
  benefits:['Pełne imiona i nazwiska zawodników','Zgłoszenia i kontrola startowa','Wyniki walk, wydruki i ekran hali'],
  cta:'Zaloguj się',
- note:'Konto zakłada Administrator turnieju.'
+ note:'Konto zakłada Administrator turnieju.',
+ // The note of 'paid' carries the monthly price ({price}, formatted for the interface language by account-boot.js).
+ variants:{
+  paid:{eyebrow:'Konto MatBravo',title:'Dołącz do rozmowy o turnieju',
+   text:'Załóż konto, aby pisać na czacie turnieju i widzieć, kto rozmawia. Konta klubów nadal zakłada Administrator turnieju.',
+   benefits:['Pisanie we wszystkich czatach','Pełne profile uczestników','Czaty turniejów'],cta:'Załóż konto',note:'{price} / mies. · anulujesz w dowolnym momencie'},
+  free:{eyebrow:'Konto MatBravo',title:'Dołącz do rozmowy o turnieju',
+   text:'Załóż konto, aby pisać na czacie turnieju i widzieć, kto rozmawia. Konta klubów nadal zakłada Administrator turnieju.',
+   benefits:['Pisanie we wszystkich czatach','Pełne profile uczestników','Czaty turniejów'],cta:'Załóż konto',note:'Rejestracja zajmuje około minuty.'}
+ }
 };
+const FIELDS=['eyebrow','title','text','benefits','cta','note'],INITIAL=Object.fromEntries(FIELDS.map(k=>[k,ACCESS[k]]));
+/** Switches the access card to kind 'login' | 'paid' | 'free' (unknown kinds give 'login'). options.price() returns the formatted
+ * monthly price for the current language and options.translate is T(); the note of 'paid' is then computed when it is read, so
+ * a language switch shows the right price (the computed note is final text: T() of it changes nothing). Without a price the
+ * note of 'free' is shown: the card still offers a sign-up. */
+export function setAccessKind(kind,{price,translate}={}){
+ const variant=kind==='paid'||kind==='free'?ACCESS.variants[kind]:INITIAL;
+ ACCESS.kind=variant===INITIAL?'login':kind;
+ for(const k of FIELDS)if(k!=='note')ACCESS[k]=variant[k];
+ const label=typeof price==='function'&&ACCESS.kind==='paid'?price:null,fill=(text,p)=>translate?translate(text,{price:p}):text.replace('{price}',p);
+ delete ACCESS.note;
+ Object.defineProperty(ACCESS,'note',label?{configurable:true,enumerable:true,get:()=>{const p=label();return p?fill(variant.note,p):ACCESS.variants.free.note;}}:{configurable:true,enumerable:true,writable:true,value:variant.note});
+ return ACCESS.kind;
+}
