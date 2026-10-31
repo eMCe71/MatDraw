@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
-import {initialWorkspace} from '../dist/workspace.js';
+import {initialWorkspace,ageAt} from '../dist/workspace.js';
 import {classify} from '../dist/engine.js';
 const php=process.env.PHP_BIN;
 function bridge(input){const r=spawnSync(php,['tests/php-bridge.php'],{input:JSON.stringify(input),encoding:'utf8',maxBuffer:10_000_000});assert.equal(r.status,0,r.stderr||r.stdout);return JSON.parse(r.stdout);}
@@ -54,4 +54,17 @@ test('PHP public projection: allow-listed fields, initials only, no drafts or pa
  const json=JSON.stringify(out);
  for(const field of ['birthDate','legacyAge','"age"','weight','height','"grade"','presence','champion','email','password','clubId','profileId','createdBy','"mat"','activity','revision','signature','createdAt'])assert.ok(!json.includes(field),field);
  for(const e of t.entries){assert.ok(!json.includes(e.name),e.name);for(const part of e.name.split(' '))assert.ok(!new RegExp('(^|[^\\p{L}])'+part+'([^\\p{L}]|$)','u').test(json),part);}
+});
+
+// backend/bin/seed-athletes.php: 90 fictional athletes spread evenly over categories the rules allow.
+test('PHP sample athletes fill 21 categories with no blocked or underfilled ones',{skip:!php},()=>{
+ for(const date of ['2026-11-14','2027-02-28','2028-02-29']){
+  const {clubs,athletes}=bridge({job:'samples',count:90,date,seed:2026});
+  assert.equal(athletes.length,90);assert.equal(new Set(athletes.map(a=>a.name)).size,90);
+  const entries=athletes.map((a,i)=>({...a,id:'s'+i,club:clubs[a.club],age:ageAt(a.birthDate,date),presence:'pending'}));
+  const {items,unassigned}=categories(entries);
+  assert.deepEqual(unassigned,[]);assert.equal(items.length,21);
+  for(const c of items){assert.ok(c.athletes.length>=5,c.id);if(c.type==='bracket')assert.equal(new Set(c.athletes.map(a=>a.club)).size,c.athletes.length,c.id);}
+  assert.ok(clubs.every(c=>c.endsWith(' (demo)')));
+ }
 });
