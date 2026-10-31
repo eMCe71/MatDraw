@@ -128,7 +128,7 @@ dbbackup(){
   ( umask 077; set -o pipefail; MATDRAW_CONFIG=$cfg "$php" "$rel/backend/bin/dump.php" 2>"$base/logs/dump.err" | gzip -6 > "$out.tmp" ) && accept "$out.tmp" && ok=1
   [[ $ok == 1 ]] || { rm -f "$out.tmp"; echo "Kopia bazy nie powstała: $(head -c 300 "$base/logs/dump.err" 2>/dev/null | tr '\n' ' ')" >&2; return 1; }
  fi
- rm -f "$base/logs/dump.err"; mv -f "$out.tmp" "$out"; chmod 600 "$out"; echo "Kopia bazy: $out ($(du -h "$out" | cut -f1))"
+ rm -f "$base/logs/dump.err"; mv -f "$out.tmp" "$out"; chmod 600 "$out"; echo "Kopia bazy: $out ($(stat -c %s "$out") B)"
 }
 # Copy of shared/uploads (avatars are not reproducible). Skipped when the directory is empty.
 filesbackup(){
@@ -136,7 +136,7 @@ filesbackup(){
  backup_dirs; [[ -d $base/shared/uploads ]] && [[ -n $(ls -A "$base/shared/uploads" 2>/dev/null) ]] || { echo 'Kopia plików: katalog shared/uploads jest pusty, pomijam.'; return 0; }
  out="$base/backups/uploads-$(date +%Y%m%d%H%M%S).tar.gz"
  ( umask 077; tar -C "$base/shared" -czf "$out.tmp" uploads ) && gzip -t "$out.tmp" || { rm -f "$out.tmp"; echo 'Kopia plików (shared/uploads) nie powstała.' >&2; return 1; }
- mv -f "$out.tmp" "$out"; chmod 600 "$out"; echo "Kopia plików: $out ($(du -h "$out" | cut -f1))"
+ mv -f "$out.tmp" "$out"; chmod 600 "$out"; echo "Kopia plików: $out ($(stat -c %s "$out") B)"
 }
 # Deletes copies of one kind older than keep_days, always keeping the newest; also partial *.tmp files older than 6 h.
 retain(){
