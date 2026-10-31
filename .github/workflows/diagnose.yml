@@ -12,9 +12,6 @@ jobs:
   diagnose:
     runs-on: ubuntu-24.04
     environment: production
-    env:
-      SITE: /home/meducase/domains/matbravo.com
-      HT: /home/meducase/domains/matbravo.com/public_html/.htaccess
     steps:
       - uses: actions/checkout@v4
       - name: Połączenie SSH
@@ -25,20 +22,10 @@ jobs:
           SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
           SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
         run: bash scripts/deploy-ssh-setup.sh
-      - name: Pliki .htaccess w katalogach nadrzędnych
+      - name: Plik .htaccess hostingu w katalogu domowym
+        run: ssh deploy 'stat -c "%a %U:%G, %s B, zmieniony %y" "$HOME/.htaccess"; ls -la --time-style=full-iso "$HOME/domains" | grep -v "^total"' || true
+      - name: Odpowiedzi domen na tym serwerze
         run: |
-          ssh deploy 'for d in / /home "$HOME" "$HOME/domains" "$HOME/domains/matbravo.com" "$HOME/domains/mdcse.com" "$HOME/domains/mdcse.com/public_html"; do f="$d/.htaccess"; if [ -e "$f" ]; then echo "--- $f ($(stat -c "%a %U" "$f"), $(wc -l < "$f") linii)"; grep -inE "rewrite|429|require|deny|allow|options|<(if|directory|files)" "$f" | head -20; else echo "brak: $f"; fi; done' || true
-      - name: Warianty .htaccess (każdy przywraca stan)
-        run: |
-          probe(){ for u in "https://matbravo.com/" "https://matbravo.com/favicon.svg" "https://matbravo.com/api/index.php?route=session" "http://matbravo.com/" "https://www.matbravo.com/"; do printf '  %-50s %s\n' "$u" "$(curl -sk -o /dev/null --max-time 15 -w '%{http_code} %{size_download}B %{redirect_url}' "$u")"; done; }
-          variant(){ echo "== $1"; printf '%s\n' "$2" | ssh deploy "cp -p $HT $HT.diag && cat > $HT"; sleep 5; probe; ssh deploy "mv -f $HT.diag $HT"; }
-          echo "== A: obecny stan"; probe
-          variant "F: Options +SymLinksIfOwnerMatch + obecny plik" "$(printf 'Options +SymLinksIfOwnerMatch\n'; cat backend/public/.htaccess)"
-          variant "G: Options +FollowSymLinks + obecny plik" "$(printf 'Options +FollowSymLinks\n'; cat backend/public/.htaccess)"
-          variant "H: tylko RewriteEngine On" "RewriteEngine On"
-          variant "I: RewriteEngine On + RewriteOptions Inherit" "$(printf 'RewriteEngine On\nRewriteOptions Inherit\n')"
-          variant "J: Options +SymLinksIfOwnerMatch + RewriteEngine On" "$(printf 'Options +SymLinksIfOwnerMatch\nRewriteEngine On\n')"
-          echo "== K: po przywróceniu"; sleep 5; probe
-      - name: Przywrócenie stanu (zawsze)
-        if: always()
-        run: ssh deploy "[ -f $HT.diag ] && mv -f $HT.diag $HT; head -3 $HT" || true
+          for h in matbravo.com matdraw.mdcse.com test429.mdcse.com mdcse.com gogo.doclert.com; do
+            for s in http https; do printf '  %-40s %s\n' "$s://$h/" "$(curl -sk -o /dev/null --max-time 15 -w '%{http_code} %{size_download}B %{redirect_url}' "$s://$h/")"; done
+          done
