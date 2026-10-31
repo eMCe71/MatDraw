@@ -49,8 +49,8 @@ jobs:
           node --check dist/client.js
       - name: Składnia PHP
         run: find backend tests -name '*.php' -print0 | xargs -0 -n1 php -l
-      - name: Testy reguł i workspace
-        run: node --test tests/engine.test.mjs tests/workspace.test.mjs
+      - name: Testy reguł, workspace i tłumaczeń PL/EN
+        run: node --test tests/engine.test.mjs tests/workspace.test.mjs tests/i18n.test.mjs
       - name: Testy PHP (zgodność z JS)
         run: PHP_BIN="$(command -v php)" node --test tests/php.test.mjs
 
