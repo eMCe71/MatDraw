@@ -573,6 +573,63 @@ test('checkout on a cached ongoing status without access asks Stripe first: past
  const f=await paidMember('fast-lock');t=Date.now();r=await f.c.req('billing-checkout',{});assert.deepEqual([r.status,r.data.portal],[409,true]);assert.deepEqual(await since(t),[]);
 });
 
+test('a replaced customer: its open Checkout sessions are expired first, so an old tab cannot be paid; a superseded pending session too',{skip},async()=>{
+ // A former PLN subscriber opens Checkout (session A on the PLN customer), then moves to the US and clicks again.
+ const p=await paidMember('replace-open');await stub({op:'subscription',id:p.sub,status:'canceled'});assert.equal(run('sync',{userId:p.id}).sub_status,'canceled');
+ let r=await p.c.req('billing-checkout',{});assert.equal(r.status,200,JSON.stringify(r.data));const a=sessionOf(r.data.url);
+ fixture('billing-country',{userId:p.id,country:'US'});
+ let t=Date.now();r=await p.c.req('billing-checkout',{});assert.equal(r.status,200,JSON.stringify(r.data));const b=sessionOf(r.data.url);
+ const lists=await since(t,'GET',/^\/v1\/checkout\/sessions$/);assert.deepEqual(lists.map(x=>[x.query.customer,x.query.status]),[[p.customer,'open']]);
+ assert.deepEqual((await since(t,'POST',/\/expire$/)).map(x=>x.path),['/v1/checkout/sessions/'+a+'/expire'],'expired before the customer is replaced');
+ const swapped=row(p.id);assert.notEqual(swapped.stripe_customer_id,p.customer);
+ let st=await stub({op:'state'});assert.deepEqual([st.sessions[a].status,st.sessions[b].status,st.sessions[b].customer],['expired','open',swapped.stripe_customer_id]);
+ // The old tab can no longer be paid (Stripe, like the stub, refuses a session that is not open): no subscription on
+ // the old customer, charged every month without access.
+ await assert.rejects(stub({op:'pay',sessionId:a}),/no longer active/);
+ assert.ok(audit(p.id,'checkout.expire').some(x=>x.detail===a));
+ // Both customers are remembered for the account deletion.
+ assert.deepEqual(fixture('billing-customers',{userId:p.id}).map(x=>x.customer_id).sort(),[p.customer,swapped.stripe_customer_id].sort());
+ // A subscription that still appears on the old customer (e.g. paid just before the expiry) is an orphan the Admin sees
+ // in the account's audit, not an anonymous one.
+ const stray=await stub({op:'create-subscription',customer:p.customer,status:'active'});
+ const wh=await webhook(event('customer.subscription.created',{id:stray.id,object:'subscription',customer:p.customer}));assert.equal(wh.status,200);
+ assert.ok(audit(p.id,'orphan').some(x=>x.detail===`${stray.id} ${p.customer}`),'orphan audit with the account');
+ // Same customer, no replacement: the pending session in another currency is ended before the new one is created.
+ const q=member('supersede'),cq=await signIn(q.email);const x=sessionOf((await cq.req('billing-checkout',{})).data.url);
+ fixture('billing-country',{userId:q.id,country:'DE'});
+ t=Date.now();r=await cq.req('billing-checkout',{});assert.equal(r.status,200,JSON.stringify(r.data));const y=sessionOf(r.data.url);
+ assert.deepEqual((await since(t,'POST',/\/expire$/)).map(x=>x.path),['/v1/checkout/sessions/'+x+'/expire']);
+ // A pending session about to expire (less than 5 minutes left) is not reused but ended too.
+ fixture('billing',{userId:q.id,pending_checkout_expires:now()+200});
+ t=Date.now();r=await cq.req('billing-checkout',{});assert.equal(r.status,200);const z=sessionOf(r.data.url);
+ assert.deepEqual((await since(t,'POST',/\/expire$/)).map(x=>x.path),['/v1/checkout/sessions/'+y+'/expire']);
+ st=await stub({op:'state'});assert.deepEqual([st.sessions[x].status,st.sessions[y].status,st.sessions[z].status],['expired','expired','open']);
+ // A pending session paid in another tab after the sync but before its expiry: Stripe refuses the expiry, the payment is
+ // written to the account and the click answers with the Portal instead of a second session.
+ fixture('billing',{userId:q.id,pending_checkout_expires:now()+200});await stub({op:'delay',method:'POST',path:'/expire$',ms:1500});
+ t=Date.now();const pending=cq.req('billing-checkout',{});
+ assert.equal((await eventually(async()=>(await since(t,'POST',/\/expire$/)).length,1)),1);await stub({op:'pay',sessionId:z});
+ r=await pending;assert.deepEqual([r.status,r.data.portal],[409,true],JSON.stringify(r.data));
+ assert.deepEqual(await since(t,'POST',/^\/v1\/checkout\/sessions$/),[]);const paid=row(q.id);assert.deepEqual([paid.sub_status,paid.pending_checkout_id],['active',null]);
+});
+
+test('account deletion deletes every Stripe customer the account ever had; a failed deletion of a replaced one is retried by billing-due',{skip},async()=>{
+ const p=await paidMember('erase-replaced');await stub({op:'subscription',id:p.sub,status:'canceled'});assert.equal(run('sync',{userId:p.id}).sub_status,'canceled');
+ fixture('billing-country',{userId:p.id,country:'US'});assert.equal((await p.c.req('billing-checkout',{})).status,200);
+ const current=row(p.id).stripe_customer_id;assert.notEqual(current,p.customer);
+ // The old customer's deletion is refused once: the account is still deleted, the old customer waits for billing-due.
+ await stub({op:'fault',method:'DELETE',path:'^/v1/customers/'+p.customer+'$',status:400,type:'invalid_request_error',times:1});
+ let t=Date.now();const del=await p.c.req('account-delete',{password:PASSWORD});assert.equal(del.status,200,JSON.stringify(del.data));
+ assert.deepEqual((await since(t,'DELETE')).map(x=>x.path).sort(),['/v1/customers/'+current,'/v1/customers/'+p.customer].sort());
+ assert.equal((await stub({op:'customer',id:current})).deleted,true);assert.notEqual((await stub({op:'customer',id:p.customer})).deleted,true);
+ let rw=row(p.id);assert.deepEqual([rw.stripe_redact_pending,rw.deleted_at>0],[1,true]);
+ assert.ok(audit(p.id,'customer.redact.pending').some(x=>x.detail===p.customer));
+ t=Date.now();const due=run('due',{limit:5});assert.ok(due.redacted>=1,JSON.stringify(due));
+ assert.deepEqual((await since(t,'DELETE')).map(x=>x.path),['/v1/customers/'+p.customer],'only the one still pending');
+ assert.equal((await stub({op:'customer',id:p.customer})).deleted,true);rw=row(p.id);assert.deepEqual([rw.stripe_redact_pending,rw.sync_error],[0,null]);
+ assert.ok(fixture('billing-customers',{userId:p.id}).every(x=>x.redacted_at>0),'both deletions confirmed');
+});
+
 test('billing-due: refused customer deletions take at most half of the slots and then wait; due accounts are still synced',{skip},async()=>{
  const p=await paidMember('due-share');fixture('billing',{userId:p.id,next_sync_at:now()-1});
  const stuck=Array.from({length:5},(_,i)=>{const s=member('stuck'+i);fixture('billing',{userId:s.id,stripe_customer_id:`cus_stuck${process.pid}x${i}`,stripe_redact_pending:1,deleted_at:now(),livemode:0,updated_at:now()-7200+i});return s;});

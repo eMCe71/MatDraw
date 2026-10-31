@@ -12,7 +12,8 @@
 //   pay {sessionId, status='active', invoice='paid', created?}      completes a Checkout Session with a new subscription
 //   subscription {id, status?, cancel_at_period_end?, current_period_start?, current_period_end?, invoice?, created?, event?}
 //   create-subscription {customer, status='active', created?, lookup_key='matbravo_monthly_pln', metadata?, invoice?}
-//   expire-session {sessionId}   event {type, object, created?}   bulk-events {type, objects} → ids   events {}   customer {id}
+//   expire-session {sessionId} (as when it times out; the API's POST /v1/checkout/sessions/{id}/expire answers 400 for a
+//   session that is not open, and pay refuses a session that is not open)   event {type, object, created?}   bulk-events {type, objects} → ids   events {}   customer {id}
 //   (event with an earlier created: an event Stripe lists late, behind events already read)
 //   delete-customer {id} (as in the Dashboard)
 //   A customer keeps the currency of its first paid session (Customer.currency) and Checkout in another currency answers
@@ -127,11 +128,16 @@ function api(m,parts,q,b){
    if(S.customers[b.customer]._currency&&S.customers[b.customer]._currency!==p.currency)throw invalid('You cannot combine currencies on a single customer.','currency');
    if(!String(b.success_url||'').includes('{CHECKOUT_SESSION_ID}'))throw invalid('success_url needs {CHECKOUT_SESSION_ID} in this stub','success_url');
    const id='cs_test_'+rand(24);
-   return S.sessions[id]={id,object:'checkout.session',status:'open',payment_status:'unpaid',mode:'subscription',customer:b.customer,client_reference_id:b.client_reference_id||null,
+   return S.sessions[id]={id,object:'checkout.session',created:now(),_seq:++S.seq,status:'open',payment_status:'unpaid',mode:'subscription',customer:b.customer,client_reference_id:b.client_reference_id||null,
     url:'https://checkout.stripe.com/c/pay/'+id,expires_at:Number(b.expires_at||now()+86400),metadata:b.metadata||{},currency:p.currency,livemode:false,subscription:null,locale:b.locale||null,
     _price:p.id,_subMeta:b.subscription_data?.metadata||{},success_url:b.success_url,cancel_url:b.cancel_url};
   }
   if(m==='GET'&&sid){const s=S.sessions[sid];if(!s)throw missing('checkout.session',sid);return sessionView(s,exp);}
+  if(m==='GET'&&!sid){let all=Object.values(S.sessions).sort(newestFirst);if(q.customer)all=all.filter(s=>s.customer===q.customer);if(q.status)all=all.filter(s=>s.status===q.status);
+   const p=page('/v1/checkout/sessions',all,q);p.data=p.data.map(s=>sessionView(s));return p;}
+  if(m==='POST'&&sid&&parts[3]==='expire'){const s=S.sessions[sid];if(!s)throw missing('checkout.session',sid);
+   if(s.status!=='open')throw invalid('Only Checkout Sessions with a status in ["open"] can be expired.');
+   s.status='expired';event('checkout.session.expired',s);return sessionView(s);}
  }
  if(res==='subscriptions'){
   if(m==='GET'&&!id){let all=Object.values(S.subscriptions).sort(newestFirst);if(q.customer)all=all.filter(s=>s.customer===q.customer);
@@ -167,7 +173,7 @@ function control(b){
   case 'requests':{let r=S.requests;if(b.path)r=r.filter(x=>new RegExp(b.path).test(x.path));if(b.method)r=r.filter(x=>x.method===b.method);const out=clone(r);if(b.clear)S.requests=[];return out;}
   case 'clear':S.requests=[];return {ok:true};
   case 'state':return strip({customers:S.customers,sessions:S.sessions,subscriptions:S.subscriptions,prices:S.prices,products:S.products,portal:S.portal,webhooks:S.webhooks,events:S.events.length});
-  case 'pay':{const s=S.sessions[b.sessionId];if(!s)throw missing('checkout.session',b.sessionId);
+  case 'pay':{const s=S.sessions[b.sessionId];if(!s)throw missing('checkout.session',b.sessionId);if(s.status!=='open')throw invalid('This Checkout Session is no longer active ('+s.status+').');
    const sub=newSubscription({customer:s.customer,priceId:s._price,status:b.status||'active',created:b.created,metadata:s._subMeta,invoiceStatus:b.invoice||(b.status==='incomplete'?'open':'paid')});
    S.customers[s.customer]._currency=S.customers[s.customer].currency=S.prices[s._price].currency;
    Object.assign(s,{status:'complete',payment_status:b.status==='incomplete'?'unpaid':'paid',subscription:sub.id});

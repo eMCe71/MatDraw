@@ -106,6 +106,12 @@ test('migrations from empty and from version 1, rollback floor, dump.php --auto 
   assert.equal(plan.key,'users_role',`${staffQuery}: ${JSON.stringify(plan)}`);assert.equal(plan.type,'range');
   assert.deepEqual(sql('return $pdo->query($in)->fetchAll(PDO::FETCH_COLUMN);',env,JSON.stringify(staffQuery.replace('SELECT *','SELECT id'))),['u1','u2'],'staff only, members never');
   sql('$pdo->exec("DELETE FROM users WHERE id LIKE \'perf%\'");return true;',env);
+  // 0006: billing_customers is created and filled from the current customers; a repeated run changes nothing.
+  sql('$pdo->exec("UPDATE billing_accounts SET stripe_customer_id=\'cus_auxbackfill1\',livemode=1 WHERE user_id=\'u1\'");$pdo->exec("DROP TABLE billing_customers");$pdo->exec("UPDATE app_meta SET schema_version=5");return true;',env);
+  const re=run('migrate.php',[],env);assert.equal(re.code,0,re.err);assert.match(re.out,/0006_billing_customers/);
+  assert.deepEqual(sql('return $pdo->query("SELECT customer_id,user_id,livemode,redacted_at FROM billing_customers")->fetchAll();',env),[{customer_id:'cus_auxbackfill1',user_id:'u1',livemode:1,redacted_at:null}]);
+  const again2=run('migrate.php',[],env);assert.equal(again2.code,0,again2.err);assert.match(again2.out,/^Schemat aktualny/);
+  sql('$pdo->exec("UPDATE billing_accounts SET stripe_customer_id=NULL,livemode=0 WHERE user_id=\'u1\'");$pdo->exec("DELETE FROM billing_customers");return true;',env);
  }
  // Rollback floor: 1 while no member exists, 2 (migration 0002) as soon as one does.
  const members=sql('return (int)$pdo->query("SELECT COUNT(*) FROM users WHERE role=\'member\'")->fetchColumn();',env);

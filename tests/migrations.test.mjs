@@ -54,10 +54,12 @@ test('0002 matches plan §2.3: conditional ALTERs, privacy defaults, floor on me
  assert.match(m,/'floor'=>fn\(PDO \$pdo\):bool=>\(bool\)\$pdo->query\("SELECT 1 FROM users WHERE role='member' LIMIT 1"\)->fetchColumn\(\)/);
 });
 
-test('0005 is additive and needs no floor: the staff index through addIndex, read by the Repository query',()=>{
- const m5=parsed.find(x=>x.id===5);assert.ok(m5);
- assert.equal(m5.destructive,false);assert.ok(!/'floor'\s*=>/.test(m5.code),'an index never needs a newer release, so no floor');
+test('0005 and 0006 are additive and need no floor: the staff index through addIndex, billing_customers filled from billing_accounts',()=>{
+ const m5=parsed.find(x=>x.id===5),m6=parsed.find(x=>x.id===6);assert.ok(m5&&m6);
+ for(const m of [m5,m6]){assert.equal(m.destructive,false,m.name);assert.ok(!/'floor'\s*=>/.test(m.code),`${m.name}: an index or a new table never needs a newer release, so no floor`);}
  assert.match(m5.code,/\$m->addIndex\('users','users_role','role'\)/);assert.equal((m5.code.match(/\$m->/g)||[]).length,1,'0005 only adds the index');
+ assert.match(m6.code,/CREATE TABLE IF NOT EXISTS billing_customers \(/);assert.match(m6.code,/customer_id VARCHAR\(255\) CHARACTER SET ascii COLLATE ascii_bin NOT NULL PRIMARY KEY/);
+ assert.match(m6.code,/INSERT IGNORE INTO billing_customers \(customer_id,user_id,livemode,created_at,redacted_at\)\s+SELECT stripe_customer_id,user_id,livemode,created_at,/);
  // The Repository query reads staff by the index: role IN (…), not role<>'member' (an ENUM index cannot serve <>).
  assert.match(readFileSync('backend/src/Repository.php','utf8'),/SELECT \* FROM users WHERE role IN \('admin','editor','club'\) ORDER BY email,id/);
 });

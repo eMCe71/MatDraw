@@ -183,7 +183,8 @@ final class Members {
  }
  /**
   * Deletes a member account (§3.8, also the Admin's delete): forced payment sync, 409 confirmEnd while a subscription
-  * runs and does not end (unless $endSubscription), Stripe customer deletion (failure → stripe_redact_pending=1),
+  * runs and does not end (unless $endSubscription), deletion of every Stripe customer of the account (failure →
+  * stripe_redact_pending=1),
   * then one transaction: chat messages to tombstones, mutes and profile deleted, users anonymised (kept for foreign
   * keys), billing_accounts kept as a tombstone without personal data, account_audit entry; finally the avatar directory.
   */
@@ -196,7 +197,9 @@ final class Members {
   $running=$row&&in_array(Access::subStatus($row,$c),['active','trialing','past_due'],true)&&empty($row['cancel_at_period_end']);
   if($running&&!$endSubscription)throw new ApiError('Masz aktywną subskrypcję. Usunięcie konta zakończy ją od razu, bez zwrotu za bieżący okres.',409,['confirmEnd'=>true]);
   $redact=0;
-  if($row&&$row['stripe_customer_id']!==null){
+  // customer_seq > 0: a customer was replaced, so an older one may still exist even when the row names none any more;
+  // deleteCustomer deletes every customer the account ever had.
+  if($row&&($row['stripe_customer_id']!==null||(int)$row['customer_seq']>0)){
    try{[$called,$ok]=self::bridge('MatDraw\\Billing','deleteCustomer',$pdo,$c,$userId);$redact=!$called||$ok===false?1:0;}
    catch(\Throwable $e){Routes::logThrowable($e,'MatDraw billing delete');$redact=1;}
   }

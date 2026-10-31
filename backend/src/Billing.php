@@ -63,6 +63,8 @@ final class Billing {
   * writing, BillingSync::fetchCustomer): an ongoing subscription the cache did not know yet (a stale 'incomplete', a
   * session paid in another tab) refuses the checkout, and a customer deleted in the Dashboard or whose Customer.currency
   * (fixed by its first invoice, 03 §3.3) differs from the plan currency is replaced before the session is created.
+  * Sessions that must not be paid any more are expired first (expireSessions): every open session of a customer being
+  * replaced, else the pending session this one supersedes; one completed meanwhile refuses the checkout instead.
   * Then Customer (once) and a new subscription session. Returns {url} on checkout.stripe.com.
   */
  public static function checkout(PDO $pdo,array $c,array $u,mixed $lang=null):array {
@@ -81,14 +83,13 @@ final class Billing {
     if(($s['status']??null)==='open'&&BillingSync::ref($s['customer']??null)===$row['stripe_customer_id']&&self::checkoutUrl($s['url']??null))return ['url'=>$s['url']];
    }catch(StripeError $e){if(!$e->missing())throw $e;}
   }
-  $replace=false;
+  $replace=false;$cur='';
   if($known){
    $r=BillingSync::syncUser($pdo,$c,$u['id'],$client,$u['id']);$row=$r['row']??$row;$cus=$r['customer']??null;
    if($r['outcome']==='busy'){
     // Another sync holds the claim (the lazy sync after me, a double click) and only the cached row came back: Stripe is
     // read here without writing, so a subscription the cache does not know yet still refuses the checkout and the
-    // Customer.currency check below still has the customer.
-    // The cached row may be the stale one this checkout is checking, so Stripe's answer decides here.
+    // Customer.currency check below still has the customer. Stripe's answer decides, not the (possibly stale) row.
     [$subs,$cus]=BillingSync::fetchCustomer($client,(string)$row['stripe_customer_id']);
     if(BillingSync::ongoingIds($c,$subs))self::locked();
     if(!empty($cus['deleted']))$r['outcome']='customer-deleted';
@@ -99,6 +100,11 @@ final class Billing {
    $replace=$r['outcome']==='customer-deleted'||($cur!==''&&$cur!==$currency);
   }
   $row=BillingSync::ensureRow($pdo,$u);$lang=self::lang($lang,$country);
+  // A customer that keeps another currency is replaced, but it still exists: an open session on it could be paid and
+  // would start a subscription on a customer the account no longer uses (charged, no access). Otherwise the pending
+  // session this checkout supersedes (another currency, or expiring within 5 minutes) is ended, so one session stays open.
+  if($replace&&$cur!=='')self::expireSessions($pdo,$c,$client,$u,self::openSessions($client,(string)$row['stripe_customer_id']));
+  elseif(!$replace&&$known&&$row['pending_checkout_id']!==null&&(int)$row['pending_checkout_expires']>$now)self::expireSessions($pdo,$c,$client,$u,[(string)$row['pending_checkout_id']]);
   $customer=self::ensureCustomer($pdo,$c,$client,$u,$row,$country,$replace);
   $params=['mode'=>'subscription','line_items'=>[['price'=>self::resolvePrice($pdo,$c,$client,$currency),'quantity'=>1]],'customer'=>$customer,
    'customer_update'=>['address'=>'auto','name'=>'auto'],'client_reference_id'=>$u['id'],'metadata'=>['matbravo_user_id'=>$u['id'],'matbravo_env'=>$c['billing_mode']],
@@ -112,7 +118,9 @@ final class Billing {
     BillingSync::customerGone($pdo,$customer,$u['id']);$params['customer']=self::ensureCustomer($pdo,$c,$client,$u,$row,$country,true);$s=$client->post('/v1/checkout/sessions',$params);
    }elseif($e->missing()&&($e->param===null||str_contains($e->param,'price'))){$params['line_items'][0]['price']=self::resolvePrice($pdo,$c,$client,$currency,true);$s=$client->post('/v1/checkout/sessions',$params);}
    elseif($e->status===400&&$e->type==='invalid_request_error'&&stripos($e->getMessage(),'currenc')!==false){
-    // Fallback only (Customer.currency above decides first): Stripe refused the customer's currency, so a new Customer.
+    // Fallback only (Customer.currency above decides first): Stripe refused the customer's currency, so a new Customer,
+    // after the open sessions of the old one are ended (as above).
+    self::expireSessions($pdo,$c,$client,$u,self::openSessions($client,$customer));
     $params['customer']=self::ensureCustomer($pdo,$c,$client,$u,$row,$country,true);$s=$client->post('/v1/checkout/sessions',$params);
    }else throw $e;
   }
@@ -126,6 +134,25 @@ final class Billing {
  /** §6.2 point 2: an ongoing subscription is managed in the Portal. */
  private static function locked():never{throw new ApiError('Masz już aktywną subskrypcję.',409,['portal'=>true]);}
  private static function checkoutUrl(mixed $u):bool{return is_string($u)&&str_starts_with($u,'https://checkout.stripe.com/');}
+ /** Ids of the open Checkout Sessions of a customer (one list call). */
+ private static function openSessions(StripeClient $client,string $customer):array {
+  $r=$client->get('/v1/checkout/sessions',['customer'=>$customer,'status'=>'open','limit'=>100]);$ids=[];
+  foreach(is_array($r['data']??null)?$r['data']:[] as $s)if(is_array($s)&&is_string($s['id']??null)&&preg_match('/^cs_(test|live)_[A-Za-z0-9]{10,250}$/D',$s['id'])&&BillingSync::ref($s['customer']??null)===$customer)$ids[]=$s['id'];
+  return $ids;
+ }
+ /**
+  * Expires Checkout Sessions (POST …/expire) so they can no longer be paid. Stripe refuses (400) a session that is not
+  * open: an expired or unknown one is fine; one completed meanwhile (paid in another tab) is written to the account and
+  * the checkout answers 409 {portal:true} instead of opening a second subscription.
+  */
+ private static function expireSessions(PDO $pdo,array $c,StripeClient $client,array $u,array $ids):void {
+  foreach($ids as $id){
+   try{$client->post('/v1/checkout/sessions/'.$id.'/expire',[],'matbravo-expire-'.$id);BillingSync::audit($pdo,$u['id'],$u['id'],'checkout.expire',null,null,$id);continue;}
+   catch(StripeError $e){if($e->missing())continue;if($e->status!==400)throw $e;}
+   $started=time();$s=$client->get('/v1/checkout/sessions/'.$id,['expand'=>['subscription','subscription.latest_invoice']]);
+   if(($s['status']??null)==='complete'){BillingSync::applySession($pdo,$c,$client,$s,$u['id'],$started,$u['id']);self::locked();}
+  }
+ }
  /** The Stripe Customer of the account in this mode, created on the first checkout ($replace: a new one, customer_seq+1). */
  private static function ensureCustomer(PDO $pdo,array $c,StripeClient $client,array $u,array $row,?string $country,bool $replace=false):string {
   $row=Access::row($pdo,$u['id'])??$row;
@@ -136,6 +163,9 @@ final class Billing {
   catch(StripeError $e){if($e->type!=='idempotency_error')throw $e;$seq++;$cus=$client->post('/v1/customers',$params,"matbravo-customer-{$u['id']}-$mode-$seq");}
   $id=(string)($cus['id']??'');if(!preg_match('/^cus_[A-Za-z0-9]{1,250}$/D',$id))throw new StripeError('Unexpected customer',502,'api_error');
   $old=$row['stripe_customer_id'];$otherMode=!self::sameMode($row,$c);
+  // Both are remembered (billing_customers): account deletion deletes every customer the account ever had (§3.8).
+  if($old!==null)BillingSync::remember($pdo,$u['id'],$old,(int)$row['livemode']);
+  BillingSync::remember($pdo,$u['id'],$id,(int)self::live($c));
   // A customer of the other mode (test data after going live) or a replaced one: its subscription fields go with it.
   $pdo->prepare("UPDATE billing_accounts SET stripe_customer_id=?,livemode=?,customer_seq=?,".($otherMode||$replace?"stripe_subscription_id=NULL,sub_status='none',price_lookup_key=NULL,current_period_start=NULL,current_period_end=NULL,cancel_at_period_end=0,cancel_at=NULL,canceled_at=NULL,ended_at=NULL,latest_invoice_status=NULL,pending_checkout_id=NULL,pending_checkout_expires=NULL,last_synced_at=0,":'')."updated_at=? WHERE user_id=?")
    ->execute([$id,(int)self::live($c),$seq,time(),$u['id']]);
@@ -199,15 +229,25 @@ final class Billing {
   catch(StripeError){$pdo->prepare('UPDATE billing_accounts SET next_sync_at=?,updated_at=? WHERE user_id=?')->execute([time(),time(),$userId]);return false;}
  }
  /**
-  * Account deletion (§3.8 step 4): DELETE /v1/customers/{id} (Stripe ends the subscriptions at once and removes the
-  * customer's personal data). A failure (network, 5xx, other mode, payments off) never stops the deletion: the row gets
-  * stripe_redact_pending=1 and billing-due retries it. Never throws for Stripe failures; true when the customer is gone.
+  * Account deletion (§3.8 step 4): DELETE /v1/customers/{id} for every customer the account ever had (the current one
+  * and the replaced ones, billing_customers; Stripe ends their subscriptions at once and removes the customer's personal
+  * data). A failure (network, 5xx, other mode, payments off) never stops the deletion: the row gets
+  * stripe_redact_pending=1 and billing-due retries the ones of this mode. Never throws for Stripe failures; true when
+  * every customer is gone.
   */
  public static function deleteCustomer(PDO $pdo,array $c,string $userId):bool {
-  $row=Access::row($pdo,$userId);if(!$row||$row['stripe_customer_id']===null)return true;$cus=$row['stripe_customer_id'];$ok=false;
-  if(self::enabled($c)&&self::sameMode($row,$c)){try{StripeClient::interactive($c)->delete('/v1/customers/'.$cus);$ok=true;}catch(StripeError $e){$ok=$e->missing();}}
+  $row=Access::row($pdo,$userId);if(!$row)return true;
+  // The current customer may predate the list (created by an older release): it is added first.
+  if($row['stripe_customer_id']!==null)BillingSync::remember($pdo,$userId,$row['stripe_customer_id'],(int)$row['livemode']);
+  $all=BillingSync::customersOf($pdo,$userId);if(!$all)return true;
+  $ok=true;$live=(int)self::live($c);$client=self::enabled($c)?StripeClient::interactive($c):null;
+  foreach($all as $cus=>$mode){
+   $done=false;
+   if($client&&$mode===$live){try{$client->delete('/v1/customers/'.$cus);$done=true;}catch(StripeError $e){$done=$e->missing();}}
+   if($done)BillingSync::redacted($pdo,$cus);
+   BillingSync::audit($pdo,$userId,'system',$done?'customer.redact':'customer.redact.pending',null,null,$cus);$ok=$ok&&$done;
+  }
   $pdo->prepare('UPDATE billing_accounts SET stripe_redact_pending=?,updated_at=? WHERE user_id=?')->execute([$ok?0:1,time(),$userId]);
-  BillingSync::audit($pdo,$userId,'system',$ok?'customer.redact':'customer.redact.pending',null,null,$cus);
   return $ok;
  }
 
