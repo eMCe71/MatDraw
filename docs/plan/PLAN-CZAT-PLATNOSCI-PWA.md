@@ -28,7 +28,7 @@ Zmiana środowiska **nie jest problemem** dla tej pracy [zweryfikowane ponownie 
 
 Cztery rzeczy, o których warto wiedzieć:
 1. `gh` CLI nie działa, bo ma nieważny `GH_TOKEN` (nadal, także w nowym środowisku). Subagenci używają `git` oraz narzędzi `mcp__github__*`.
-2. Remote to `eMCe71/MatDraw`, a `HANDOFF.md` i dokumenty deployu mówią o `Meducase/MatDraw`. Właściciel musi wskazać repozytorium, które ma sekrety środowiska `production` (pytanie P1 w §13). Ta niezgodność nie blokuje implementacji.
+2. Remote to `eMCe71/MatDraw`, a `HANDOFF.md` i dokumenty deployu mówią o `Meducase/MatDraw`. **Rozstrzygnięte (P1):** sekrety środowiska `production` ma `eMCe71/MatDraw` — deploy #32 (2026-10-31 09:48 UTC, gałąź `main`) przeszedł w tym repozytorium przez SSH. `Meducase/MatDraw` w starszych dokumentach jest nieaktualne.
 3. Na serwerze CLI trzeba wywoływać przez `/usr/local/php83/bin/php`. W kontenerze tej ścieżki nie ma; jest `/usr/bin/php`.
 4. **Katalog `docs/` (ten plan, raporty 01–05 i makieta) jest nieśledzony w git** (`git status` pokazuje `?? docs/`). Kontener nowego środowiska odtwarza się z repozytorium, więc pliki nieśledzone mogą przepaść przy kolejnej sesji. **Pierwszy krok orkiestratora przed falą 1:** zatwierdzić `docs/plan/` na gałęzi roboczej (bez push do `main`). Z tego samego powodu harness testów HTTP ze scratchpada (`run-http-test.sh`) zastępuje skrypt w repozytorium `scripts/test-http.sh` (plasterek `backend-data`, fala 1).
 
@@ -1683,7 +1683,7 @@ Alias `#czat…` jest normalizowany przez `replaceState`. Parametry `?billing=su
 - **`INSTALL-PL.md`, `README.md`, `HANDOFF.md`, `VALIDATION.md`** aktualizuje `integration-qa`: wymagania gd/curl/openssl, migracje w instalatorze, płatne konta, procedura resetu hasła, sekcja marki o zdjęciach profilowych.
 
 ### 9.11 Kroki ręczne właściciela (w tej kolejności)
-1. **Repozytorium:** potwierdzić, które repozytorium (`eMCe71/MatDraw` czy `Meducase/MatDraw`) ma środowisko `production` z sekretami `SSH_*` (pytanie P1).
+1. **Repozytorium:** rozstrzygnięte — `eMCe71/MatDraw` ma środowisko `production` z sekretami `SSH_*` (P1).
 2. **Odpowiedzi na pytania-bramki startu** (§13): P2 (czy i od kiedy obecne kluby płacą), P3 (archiwa i dzień po turnieju tylko dla zalogowanych), P7 (domyślnie inicjał nazwiska), P8/P21 (adres pomocy, np. `pomoc@matbravo.com`) i P19 (podatki). Implementacja na nie nie czeka; włączenie płatności tak.
 3. **Wdrożenie (po `integration-qa`, jedno scalenie do `main`), w dzień bez zawodów** (pierwsze wdrożenie wyloguje wszystkich jeden raz). Potem uruchomić workflow „server_check” i odczytać plan AfterMarket (Start/Biznes/Pro) w panelu. Sprawdzić GD i WebP, `mysqldump`, `crontab`, uprawnienia bazy i sondę Stripe. Jeśli połączenie ze Stripe jest zablokowane, płatności na tym hostingu nie zadziałają: zgłosić to do AfterMarket.
 4. **Uprawnienia bazy:** użytkownik bazy musi mieć prawa ALTER, CREATE, INDEX i REFERENCES (domyślnie w DirectAdmin je ma; `server-check` to pokazuje). Ewentualnie w config można podać osobne dane `db_migrate`.
@@ -2108,7 +2108,7 @@ Pełne opisy, listy plików i kryteria akceptacji każdego plasterka są poniże
 
 | # | Pytanie | Przyjęte domyślnie |
 |---|---|---|
-| P1 | Które repozytorium GitHub ma środowisko `production` z sekretami SSH: `eMCe71/MatDraw` (obecny remote) czy `Meducase/MatDraw` (dokumentacja)? | Prace w `eMCe71/MatDraw` na gałęzi integracyjnej; jedno scalenie do `main` dopiero po `integration-qa` i potwierdzeniu (D18). |
+| P1 | Które repozytorium GitHub ma środowisko `production` z sekretami SSH? | **Rozstrzygnięte:** `eMCe71/MatDraw` (deploy #32 z 2026-10-31 przeszedł tam przez SSH). Jedno scalenie do `main` po `integration-qa` i decyzji właściciela (D18). |
 | P2 | **Bramka startu.** Czy obecne konta klubów i sędziów (admin/editor/club) mają płacić, a jeśli tak, od kiedy? Czy nowe konta personelu mają być domyślnie płatne (dosłownie według wymagania 4)? | Obecne konta darmowe przejściowo, do decyzji właściciela; przełączenie narzędziem „Wymagaj płatności od…” z banerem 14 dni wcześniej i 7-dniową karencją. Nowe konta personelu płatne, chyba że Admin zaznaczy „Darmowe konto”. |
 | P3 | **Bramka startu.** Jak długo czat turnieju przyjmuje wiadomości i kto czyta dzień po turnieju oraz archiwum? (To zawęża „czytać może każdy” z wymagania 3.) | Do 23:59 dnia po turnieju; gość widzi czat turnieju tak długo jak podgląd turnieju (do dnia zawodów włącznie); dzień po i archiwum tylko dla zalogowanych. |
 | P4 | Progi moderacji? | Automatyczne ukrycie po 3 zgłoszeniach różnych osób; oryginały usuniętych przez moderatora albo zgłoszonych 30 dni; retencja wiadomości 365 dni. |
