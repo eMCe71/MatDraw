@@ -166,7 +166,7 @@ Gość i osoba niezalogowana albo bez pełnego dostępu widzi wiadomość bez im
 - `g` — jeden z 5 wariantów wyglądu placeholdera. Wariant zależy od autora, kanału **i dnia**, więc wiadomości jednej osoby w jednym kanale tego samego dnia wyglądają tak samo. Ten sam wariant mają średnio co piąta osoba, więc to nie jest identyfikator;
 - `c` — „ta wiadomość jest od tej samej osoby co poprzednia” (mniej niż 5 minut odstępu).
 
-**Co to oznacza w praktyce:** gość może zauważyć, że kilka kolejnych wiadomości napisała jedna osoba (w jednym kanale, jednego dnia). **Nie dowie się, kim jest**, nie powiąże jej wiadomości z innym kanałem ani z innym dniem, nie zobaczy jej danych. To świadomy kompromis (decyzja D6): wariant losowany osobno dla każdej wiadomości sprawiałby, że jedna rozmowa wyglądałaby jak rozmowa wielu osób. Sama treść wiadomości jest publiczna (taka była decyzja produktowa), dlatego pole wiadomości przypomina, żeby nie pisać danych dzieci ani numerów telefonów, a w zgłoszeniach jest powód „dane dziecka”.
+**Co to oznacza w praktyce:** gość może zauważyć, że kilka kolejnych wiadomości napisała jedna osoba (w jednym kanale, jednego dnia). **Nie dowie się, kim jest**, nie powiąże jej wiadomości z innym kanałem ani z innym dniem, nie zobaczy jej danych. To świadomy kompromis (decyzja D6): wariant losowany osobno dla każdej wiadomości sprawiałby, że jedna rozmowa wyglądałaby jak rozmowa wielu osób. Sama treść wiadomości jest publiczna (taka była decyzja produktowa), dlatego pole wiadomości przypomina, żeby nie pisać danych dzieci ani numerów telefonów, a w zgłoszeniach jest powód „Dane osobowe lub wizerunek dziecka”.
 
 ## 6. Wyłączenie czatu i strojenie tempa — bez wdrożenia
 
