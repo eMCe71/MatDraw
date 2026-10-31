@@ -9,7 +9,7 @@
 //   table-hide {table} / table-restore   renames a table away and back (schema-behind-code scenario)
 declare(strict_types=1);
 use MatDraw\Paths;
-const FIXTURE_CORE_CONFIG_KEYS=['job_test_sleep_ms','min_client_api'];
+const FIXTURE_CORE_CONFIG_KEYS=['job_test_sleep_ms','min_client_api','session_idle_seconds'];
 const FIXTURE_CORE_TABLES=['user_profiles','billing_accounts','job_runs'];
 /** Opens the session $sid of the app's own session directory in this CLI process (no cookies, no strict mode). */
 function fixture_core_session(array $c,string $sid,bool $readOnly):?array {

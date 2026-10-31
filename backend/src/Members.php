@@ -121,9 +121,9 @@ final class Members {
   }
  }
  /**
-  * username-check {u, firstName?, lastName?} (§3.4): only signed in or within 2 h of signup-begin; 30 per 10 min per
-  * session and 300 per 10 min per address. Suggestions only for 'taken' (at most 3 free ones). The caller's own name
-  * counts as available.
+  * username-check {u, firstName?, lastName?, nameDisplay?} (§3.4): only signed in or within 2 h of signup-begin; 30 per
+  * 10 min per session and 300 per 10 min per address. Suggestions only for 'taken' (at most 3 free ones), without the
+  * full surname unless nameDisplay is 'full' (Profiles::suggestions). The caller's own name counts as available.
   */
  public static function usernameCheck(PDO $pdo,array $c,?array $u,array $in):array {
   $started=$_SESSION['signup_at']??null;
@@ -134,7 +134,7 @@ final class Members {
   if($status==='valid')$status=Profiles::taken($pdo,$name,$u['id']??null)?'taken':'available';
   $first=$in['firstName']??null;$last=$in['lastName']??null;
   if($status==='taken'&&$u&&!is_string($first)){$p=Accounts::profile($pdo,$u['id']);$first=$p['first_name'];$last=$p['last_name'];}
-  return ['status'=>$status,'suggestions'=>$status==='taken'?Profiles::suggestions($pdo,$first,$last,$name):[]];
+  return ['status'=>$status,'suggestions'=>$status==='taken'?Profiles::suggestions($pdo,$first,$last,$name,3,$in['nameDisplay']??null):[]];
  }
 
  // ---------------------------------------------------------------- own account (§3.8–§3.10)

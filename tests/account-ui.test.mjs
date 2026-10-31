@@ -141,6 +141,7 @@ test('profile fields: "show my full name" is unticked by default and the names t
  assert.deepEqual(flow.countryOptions('en')[0],['PL','Poland']);
  const src=source('account-flow.js');
  assert.match(src,/request\('username-check',\{method:'POST',body:\{u,firstName:/,'username-check is a POST with the names in the body');
+ assert.match(src,/request\('username-check',\{method:'POST',body:\{u,firstName:[^}]*nameDisplay:f\.full\?'full':'initial'\}/,'username-check says whether the full name is shown (the server leaves out full-surname suggestions otherwise)');
  assert.doesNotMatch(src+source('account-boot.js'),/route=username-check|username-check\?|apiUrl\(\{route:'username-check'/);
 });
 test('username prefill and suggestions never show the full surname by default (plan §7.7, §10: minors, "initial" default)',async()=>{

@@ -63,7 +63,7 @@ return [
  // Control: slow work after the response that keeps the session open holds the next request of the same person.
  'zt-hold'=>['method'=>'POST','auth'=>'session','handler'=>function():array{register_shutdown_function(static fn()=>usleep(1500000));return ['ok'=>true];}],
  // The config value this request runs with: the tests poll it after a fixture rewrites config.php (never a fixed sleep).
- 'zt-config'=>['method'=>'GET','auth'=>'public','handler'=>fn(RouteContext $ctx):array=>['jobTestSleepMs'=>$ctx->config['job_test_sleep_ms']]],
+ 'zt-config'=>['method'=>'GET','auth'=>'public','handler'=>fn(RouteContext $ctx):array=>['jobTestSleepMs'=>$ctx->config['job_test_sleep_ms'],'sessionIdle'=>$ctx->config['session_idle_seconds']]],
  'zt-post'=>['method'=>'POST','auth'=>'session','user'=>'optional','max'=>200,'handler'=>$echo],
  'zt-none'=>['method'=>'POST','auth'=>'session','user'=>'optional','handler'=>fn()=>null],
  'zt-fail'=>['method'=>'POST','auth'=>'session','user'=>'optional','handler'=>fn()=>throw new ApiError('Brak uprawnień.',409,['code'=>'zt'])],
@@ -256,6 +256,31 @@ test('a staff session reading the chat (chat-feed with a=1 and a channel on scre
  while(now()<t+3)await sleep(100);
  assert.equal((await reader.req('session')).data.user?.id,reader.login.data.user.id);
  assert.equal((await unattended.req('session')).data.user,null);
+});
+
+test('session_idle_seconds over real polls: a staff member reading the chat (a=1 within the idle window) stays signed in, the same polls without a=1 are signed out',{skip:skipRoutes,timeout:60000},async()=>{
+ const idleNow=async()=>(await raw('zt-config')).data?.sessionIdle;
+ const old=fixture('config-set',{set:{session_idle_seconds:4}});
+ try{
+  assert.equal(await eventually(idleNow,4),4,'the server runs with the short idle limit');
+  // Both sign in under the short limit (sign-in stores it in the session).
+  const reader=await signIn(...ADMIN),unattended=await signIn(...ADMIN);
+  for(const c of [reader,unattended])assert.equal(fixture('session-read',{sid:sid(c)}).data.idle,4);
+  // What dist/chat-transport.js sends: a chat on screen (ch=) every ~0.5 s, with a=1 while the person interacted recently.
+  const start=Date.now(),seen={reader:new Set(),unattended:new Set()};
+  while(Date.now()-start<9000){
+   seen.reader.add((await raw('chat-feed&ch=1:0&a=1',{cookie:reader.cookie})).status);
+   seen.unattended.add((await raw('chat-feed&ch=1:0',{cookie:unattended.cookie})).status);
+   await sleep(500);
+  }
+  assert.ok([...seen.reader].every(s=>[200,204].includes(s)),'the reader is never signed out: '+[...seen.reader]);
+  assert.ok(seen.unattended.has(401),'polling without a=1 does not keep a staff session: '+[...seen.unattended]);
+  assert.equal((await reader.req('session')).data.user?.id,reader.login.data.user.id,'still signed in more than twice session_idle_seconds after sign-in');
+  assert.equal((await unattended.req('session')).data.user,null);
+ }finally{
+  fixture('config-set',{set:{session_idle_seconds:old.session_idle_seconds}});
+  assert.equal(await eventually(idleNow,old.session_idle_seconds??1800),old.session_idle_seconds??1800,'restored');
+ }
 });
 
 test('maintenance file and schema behind code answer 503 with Retry-After; an outdated client gets 409',{skip},async()=>{

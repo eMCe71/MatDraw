@@ -80,7 +80,8 @@ export const prefillUsername=f=>suggestUsernames(f?.first,f?.last,'',{full:false
  * Server suggestions for a taken name, as shown: without the full surname unless "show my full name" is ticked. Then only our own
  * initial-only candidates (and the name the person typed + 2) are shown: an allow-list, because a long name cuts the full-surname
  * forms to 24 characters (katarzyna.szczepanskawis), which no longer contain the whole surname; it also keeps a short surname
- * (Alicja Li: alicja.l2) from hiding every suggestion.
+ * (Alicja Li: alicja.l2) from hiding every suggestion. The server applies the same allow-list (Profiles::suggestions with the
+ * nameDisplay this form sends to username-check); keep both in sync.
  */
 export function shownSuggestions(list,f){
  const last=slugName(f?.last||''),hide=!f?.full&&last.length>1;
@@ -469,7 +470,7 @@ function scheduleCheck(f,form){
  checkTimer=setTimeout(async()=>{
   const abort=checkAbort=typeof AbortController==='function'?new AbortController():null;
   try{
-   const r=await Client.request('username-check',{method:'POST',body:{u,firstName:String(f.first||''),lastName:String(f.last||'')},signal:abort?.signal});
+   const r=await Client.request('username-check',{method:'POST',body:{u,firstName:String(f.first||''),lastName:String(f.last||''),nameDisplay:f.full?'full':'initial'},signal:abort?.signal});
    if(abort?.signal.aborted||normalizeUsername(f.username)!==u)return;
    const state=['available','taken','invalid','reserved'].includes(r?.status)?r.status:'idle';
    setStatus(document.getElementById(form.id),f,{state,suggestions:state==='taken'?shownSuggestions(r.suggestions,f):[]});

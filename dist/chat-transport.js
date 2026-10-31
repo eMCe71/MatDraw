@@ -5,7 +5,8 @@
  * messages; after a new message the pace goes to ms[0] only when the user interacted within cfg.boost seconds, otherwise one level
  * faster and never below ms[1]. bg when no visible tab has the chat on screen (unread counters), paused when every tab is hidden or the
  * browser is offline, +-20% jitter on every delay. One request at a time, 10 s timeout, back-off with Retry-After on 429/503/508, and
- * a report e=<n>:<status> of hosting answers (429/503/508, 0 = not JSON or no answer) sent with the next request.
+ * a report e=<n>:<status> of hosting answers (429/503/508, 0 = not JSON or no answer) sent with the next request. A feed poll of
+ * someone reading (a chat on screen, own interaction within cfg.idle[3] s) carries a=1 (reading(), plan §3.5 step 6).
  * 401 on chat-feed: every tab purges identity and continues on the public route. 409 client_outdated: polling stops for good and every
  * tab (the one that got the answer included, also without a leader) emits registry 'client-outdated' once (plan §5.4, §9.4).
  * The scheduling, report, query and leader helpers are pure exports (tests/chat-client.test.mjs). */
@@ -83,6 +84,14 @@ export function buildQuery({route,ch={},h={},cv=null,e=null}){
  if(hIds.length)q.h=hIds.map(id=>id+':'+Math.max(0,Math.floor(h[id][0]||0))+':'+Math.max(0,Math.floor(h[id][1]||0))).join(',');
  if(Number.isInteger(cv))q.cv=String(cv);if(e)q.e=e;
  return q;
+}
+/**
+ * Someone reading the chat (plan §3.5 step 6): a feed poll with a chat on screen, at least one channel in ch and the person's own
+ * last interaction within the last idle level (cfg.idle[3] s). Such a poll carries a=1, which lets the server keep a staff session
+ * signed in (Chat::active); heads-only and background polls, history pages and the public chat never carry it.
+ */
+export function reading(u,mode,cfg=DEFAULT_CFG,now=Date.now()){
+ return mode==='feed'&&!!u?.onScreen&&Object.keys(u.ch||{}).length>0&&now-(u.interactionAt||0)<=cfg.idle[3]*1000;
 }
 /**
  * Union of the wants of live tabs (init = channels still waiting for their first page): ch = lowest cursor per channel (visible tabs first, at most 6, the rest rotate by `turn`),
@@ -169,6 +178,7 @@ export function createTransport(opts){
   if(!work(u)||!u.visible)return;
   if(!env.online()){setStatus('offline');return;}
   const mode=u.mode,e=reportParam(report),q=buildQuery({route:mode==='feed'?'chat-feed':'public-chat',ch:u.ch,h:u.h,cv,e});
+  if(reading(u,mode,cfg,env.now()))q.a='1';
   inFlight=true;again=false;lastStart=env.now();
   let failed=null;
   try{

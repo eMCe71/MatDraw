@@ -62,6 +62,15 @@ test('username suggestions and transliteration are identical in PHP and JS (§7.
  assert.deepEqual(suggestUsernames('Łukasz','Żółć').slice(0,2),['lukasz.zolc','lukasz_zolc'],'ł→l, ż→z, ó→o, ć→c');
  for(const list of out)for(const c of list){assert.equal(validateUsername(c),'valid',c);assert.ok(c.length<=24,c);}
  assert.ok(!suggestUsernames('Marta','Kowalska','marta.kowalska').includes('marta.kowalska'),'the requested name is never suggested');
+ // Initial only (the server's suggestions unless the full name is shown; the allow-list of shownSuggestions in dist/account-flow.js).
+ const initial=bridge({job:'candidates',cases:PEOPLE,full:false});
+ PEOPLE.forEach(([f,l,r],i)=>{
+  assert.deepEqual(suggestUsernames(f,l,r??'',{full:false}),initial[i],JSON.stringify([f,l,r,'initial']));
+  // Past the first name, at most the surname's initial (the requested name + 2 is the person's own choice).
+  const sf=slugName(f??''),sl=slugName(l??''),req=normalizeUsername(r??'')??'';
+  if(sl.length>1)for(const c of initial[i])if(!req||!c.startsWith(req.slice(0,22)))assert.ok(!(c.startsWith(sf)?c.slice(sf.length):c).includes(sl.slice(0,2)),c+' contains no cut of the surname');
+ });
+ assert.deepEqual(initial[0],['marta_k','marta.k2','martak','marta.k3','marta_k2'],'Marta Kowalska, requested marta.k');
  const slugs=['Łódź','ŻÓŁW','Ærøskøbing','Saldaña','Jean-Luc',"O'Neil",'Øystein','Straße'];const php=bridge({job:'slug',cases:slugs.map(s=>({s}))});
  slugs.forEach((s,i)=>assert.equal(slugName(s),php[i],s));assert.equal(slugName('Łódź'),'lodz');
 });

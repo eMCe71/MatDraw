@@ -13,7 +13,7 @@ $out=match($in['job']){
  'username'=>array_map(fn($c)=>Profiles::usernameStatus($str($c)),$in['cases']),
  'names'=>array_map(fn($c)=>Profiles::cleanName($str($c)),$in['cases']),
  'slug'=>array_map(fn($c)=>Profiles::slug($str($c)),$in['cases']),
- 'candidates'=>array_map(fn($c)=>Profiles::candidates($c[0],$c[1],$c[2]??''),$in['cases']),
+ 'candidates'=>array_map(fn($c)=>Profiles::candidates($c[0],$c[1],$c[2]??'',($in['full']??true)!==false),$in['cases']),
  'clean'=>array_map(fn($c)=>Text::clean($str($c),['multiline'=>!empty($c['multiline'])]),$in['cases']),
  'validate'=>array_map(fn($c)=>attempt(fn()=>Profiles::validate($c['in'],!empty($c['partial']))),$in['cases']),
  'own'=>Profiles::own($in['row'],$in['now']),
