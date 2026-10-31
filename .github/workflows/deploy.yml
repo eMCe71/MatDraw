@@ -41,18 +41,20 @@ jobs:
       - uses: shivammathur/setup-php@v2
         with:
           php-version: '8.3'
-          extensions: pdo_mysql, mbstring
+          extensions: pdo_mysql, mbstring, gd, curl, openssl, intl, exif
           coverage: none
       - name: Składnia JS
-        run: |
-          node --check dist/app.js
-          node --check dist/client.js
+        run: for f in dist/*.js dist/i18n/*.js scripts/*.mjs; do node --check "$f" || exit 1; done
+      - name: Składnia skryptów powłoki
+        run: for f in scripts/*.sh tests/deploy/*.sh; do bash -n "$f" || exit 1; done
       - name: Składnia PHP
         run: find backend tests -name '*.php' -print0 | xargs -0 -n1 php -l
-      - name: Testy reguł, workspace i tłumaczeń PL/EN
-        run: node --test tests/engine.test.mjs tests/workspace.test.mjs tests/i18n.test.mjs
-      - name: Testy PHP (zgodność z JS)
-        run: PHP_BIN="$(command -v php)" node --test tests/php.test.mjs
+      - name: Testy jednostkowe (wszystkie tests/*.test.mjs oprócz testów HTTP)
+        # A glob, so new test files run without editing this workflow; HTTP tests need a database (job http-test).
+        run: |
+          files=()
+          for f in tests/*.test.mjs; do case $f in tests/http.test.mjs|*.http.test.mjs) ;; *) files+=("$f") ;; esac; done
+          PHP_BIN="$(command -v php)" node --test "${files[@]}"
 
   http-test:
     name: Test HTTP na jednorazowej bazie (${{ matrix.db }})
@@ -61,16 +63,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # mariadb:10.6 matches the production server (web9.aftermarket.hosting).
+        # mariadb:10.6 matches the production server (web9.aftermarket.hosting); only MySQL 8.0 catches some
+        # regressions (strict GROUP BY, the chat msg_count), so both run.
         db: ['mysql:8.0', 'mariadb:10.6']
     services:
       mysql:
         image: ${{ matrix.db }}
         env:
           MYSQL_ROOT_PASSWORD: ci-root
-          MYSQL_DATABASE: matdraw_test
-          MYSQL_USER: matdraw
-          MYSQL_PASSWORD: ci-only-password
         ports: ['3306:3306']
         options: >-
           --health-cmd="mysqladmin ping -h 127.0.0.1 -pci-root"
@@ -83,38 +83,168 @@ jobs:
       - uses: shivammathur/setup-php@v2
         with:
           php-version: '8.3'
-          extensions: pdo_mysql, mbstring
+          extensions: pdo_mysql, mbstring, gd, curl, openssl, intl, exif
           coverage: none
-      - name: Build wydania
-        run: node scripts/build-php.mjs ./build/matdraw-php
-      - name: Konfiguracja testowa (tylko CI, poza wydaniem)
+      - name: Klient MySQL
+        run: command -v mysql || { sudo apt-get update -q && sudo apt-get install -yq mysql-client; }
+      - name: Testy HTTP (scripts/test-http.sh)
+        # Builds the release, creates the test database and user, writes the test-only config (billing in test mode
+        # against tests/stubs/stripe-stub.mjs on port 8081), runs install.php and migrate.php twice, then
+        # tests/http.test.mjs first and every tests/*.http.test.mjs in alphabetical order, one file at a time.
+        env:
+          MATDRAW_TEST_DB_ROOT: mysql -h127.0.0.1 -P3306 -uroot -pci-root
+          MATDRAW_TEST_DB_USER_HOST: '%'
+        run: bash scripts/test-http.sh 8080 matdraw_test
+
+  http-compat:
+    name: Zgodność wstecz, stary kod na nowym schemacie (${{ matrix.db }})
+    if: ${{ !inputs.rollback && !inputs.server_check }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        db: ['mysql:8.0', 'mariadb:10.6']
+    services:
+      mysql:
+        image: ${{ matrix.db }}
+        env:
+          MYSQL_ROOT_PASSWORD: ci-root
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -pci-root"
+          --health-interval=5s --health-timeout=5s --health-retries=20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: pdo_mysql, mbstring, gd, curl, openssl, intl, exif
+          coverage: none
+      - name: Klient MySQL
+        run: command -v mysql || { sudo apt-get update -q && sudo apt-get install -yq mysql-client; }
+      - name: Wersja bazowa (poprzedni commit)
+        id: base
+        # push: the commit before this push (the release in .previous usually comes from it); a new branch (zeros) or
+        # a commit missing after a force push: merge-base with origin/main; pull_request: the PR base. Skipped only
+        # when no earlier commit exists (or it is this very commit).
+        env:
+          EVENT: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
         run: |
-          cat > "$RUNNER_TEMP/matdraw-test-config.php" <<PHP
+          base=
+          if [[ $EVENT == pull_request ]]; then base=$PR_BASE
+          elif [[ $EVENT == push && $BEFORE =~ ^[0-9a-f]{40}$ && ! $BEFORE =~ ^0+$ ]]; then base=$BEFORE; fi
+          if [[ -z $base ]] || ! git cat-file -e "$base^{commit}" 2>/dev/null; then base=$(git merge-base origin/main HEAD 2>/dev/null || true); fi
+          if [[ -z $base ]] || ! git cat-file -e "$base^{commit}" 2>/dev/null; then echo "Brak poprzedniego commita: zadanie pominięte."; base=
+          elif [[ $(git rev-parse "$base^{commit}") == "$(git rev-parse HEAD)" ]]; then echo "Wersja bazowa to ten sam commit: zadanie pominięte."; base=
+          else echo "Wersja bazowa: $base"; fi
+          echo "sha=$base" >> "$GITHUB_OUTPUT"
+      - name: Stary kod tworzy dane, nowe migracje ich nie zmieniają, stary kod działa na nowym schemacie
+        if: steps.base.outputs.sha != ''
+        # Database A: install with the old code, its tests/http.test.mjs create data, hash of every old table (explicit
+        # columns, rows hashed and sorted: not CHECKSUM TABLE, which changes with the row format after MODIFY), the NEW
+        # migrate.php twice, the same hash again. Database B: install with the old code, NEW migrate.php, the old code
+        # and its tests/http.test.mjs on the migrated schema (this is what an automatic rollback relies on).
+        env:
+          BASE_SHA: ${{ steps.base.outputs.sha }}
+          ROOT: mysql -h127.0.0.1 -P3306 -uroot -pci-root
+        run: |
+          set -euo pipefail
+          t=$RUNNER_TEMP; prev=$t/prev; git worktree add --detach "$prev" "$BASE_SHA"
+          (cd "$prev" && node scripts/build-php.mjs "$t/old/matdraw-php" >/dev/null)
+          node scripts/build-php.mjs "$t/new/matdraw-php" >/dev/null
+          old=$t/old/matdraw-php new=$t/new/matdraw-php php=$(command -v php); pass=$(openssl rand -hex 16)
+          $ROOT -e "CREATE DATABASE compat_a CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci; CREATE DATABASE compat_b CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+           CREATE USER 'compat'@'%' IDENTIFIED BY '$pass'; GRANT ALL ON compat_a.* TO 'compat'@'%'; GRANT ALL ON compat_b.* TO 'compat'@'%'; FLUSH PRIVILEGES;"
+          conf(){ mkdir -p "$t/$1/uploads" "$t/$1/sessions"; chmod 700 "$t/$1" "$t/$1/uploads" "$t/$1/sessions"
+           printf '%s\n' '<?php' "return ['app_url'=>'http://127.0.0.1:$2','db'=>['dsn'=>'mysql:host=127.0.0.1;port=3306;dbname=$1;charset=utf8mb4','user'=>'compat','password'=>'$pass'],'app_key'=>'$(openssl rand -hex 32)','allow_insecure_http'=>true,'session_idle_seconds'=>1800,'session_max_seconds'=>43200,'uploads_dir'=>'$t/$1/uploads'];" > "$t/$1/config.php"
+           chmod 600 "$t/$1/config.php"; echo "$t/$1/config.php"; }
+          install(){ printf '%s\n' 'AdminForTests2026!' | MATDRAW_CONFIG=$1 "$php" "$old/backend/bin/install.php" --email=admin@test.example --club='Test Warszawa' --password-stdin; }
+          migrate(){ MATDRAW_CONFIG=$1 "$php" "$new/backend/bin/migrate.php"; }
+          serve(){ MATDRAW_CONFIG=$1 PHP_CLI_SERVER_WORKERS=4 "$php" -S "127.0.0.1:$2" -t "$old/public" > "$t/server-$2.log" 2>&1 & echo $! > "$t/server-$2.pid"
+           for _ in $(seq 1 30); do curl -fsS "http://127.0.0.1:$2/api/index.php?route=session" >/dev/null 2>&1 && return 0; sleep 1; done; cat "$t/server-$2.log"; return 1; }
+          oldtests(){ (cd "$prev" && MATDRAW_CONFIG=$1 MATDRAW_TEST_SHARED_DIR=$(dirname "$1") MATDRAW_TEST_URL="http://127.0.0.1:$2/api/index.php" PHP_BIN=$php node --test --test-concurrency=1 tests/http.test.mjs) || { tail -40 "$t/server-$2.log"; return 1; }; }
+          cat > "$t/hash.php" <<'PHP'
           <?php
-          return [
-           'app_url' => 'http://127.0.0.1:8080',
-           'db' => ['dsn' => 'mysql:host=127.0.0.1;port=3306;dbname=matdraw_test;charset=utf8mb4', 'user' => 'matdraw', 'password' => 'ci-only-password'],
-           'app_key' => '$(openssl rand -hex 32)',
-           'allow_insecure_http' => true,
-           'session_idle_seconds' => 1800,
-           'session_max_seconds' => 43200,
-          ];
+          // Data hash, same method as tests/deploy/deploy-script-test.sh: per table the sorted SHA-1 of every row's values.
+          $c=require getenv('MATDRAW_CONFIG');$pdo=new PDO($c['db']['dsn'],$c['db']['user'],$c['db']['password'],[PDO::ATTR_ERRMODE=>PDO::ERRMODE_EXCEPTION]);
+          $opt=$argv[1]??'';
+          if(str_starts_with($opt,'--cols='))$cols=json_decode(file_get_contents(substr($opt,7)),true);
+          else{$cols=[];foreach($pdo->query("SELECT c.TABLE_NAME,c.COLUMN_NAME FROM information_schema.COLUMNS c JOIN information_schema.TABLES t ON t.TABLE_SCHEMA=c.TABLE_SCHEMA AND t.TABLE_NAME=c.TABLE_NAME WHERE c.TABLE_SCHEMA=DATABASE() AND t.TABLE_TYPE='BASE TABLE' ORDER BY c.TABLE_NAME,c.COLUMN_NAME")->fetchAll(PDO::FETCH_NUM) as [$tb,$col])$cols[$tb][]=$col;
+           if(str_starts_with($opt,'--save=')){$cols['app_meta']=array_values(array_diff($cols['app_meta']??[],['schema_version']));file_put_contents(substr($opt,7),json_encode($cols));}}
+          foreach($cols as $tb=>$cs){$rows=[];$q=$pdo->query('SELECT `'.implode('`,`',$cs).'` FROM `'.$tb.'`');while($r=$q->fetch(PDO::FETCH_NUM))$rows[]=sha1(serialize($r));sort($rows);echo $tb,' ',count($rows),' ',sha1(implode("\n",$rows)),"\n";}
           PHP
-          echo "MATDRAW_CONFIG=$RUNNER_TEMP/matdraw-test-config.php" >> "$GITHUB_ENV"
-      - name: Instalacja schematu i konta testowego
-        run: printf '%s\n' 'AdminForTests2026!' | php build/matdraw-php/backend/bin/install.php --email=admin@test.example --club='Test Warszawa' --password-stdin
-      - name: Test HTTP
+          a=$(conf compat_a 8091); install "$a"; serve "$a" 8091; oldtests "$a" 8091; kill "$(cat "$t/server-8091.pid")"
+          MATDRAW_CONFIG=$a "$php" "$t/hash.php" --save="$t/cols.json" > "$t/before.txt"; cat "$t/before.txt"
+          migrate "$a"; migrate "$a" | tee "$t/second.txt"; grep -q '^Schemat aktualny' "$t/second.txt"
+          MATDRAW_CONFIG=$a "$php" "$t/hash.php" --cols="$t/cols.json" > "$t/after.txt"
+          diff "$t/before.txt" "$t/after.txt" || { echo "::error::Nowe migracje zmieniły istniejące dane."; exit 1; }
+          b=$(conf compat_b 8092); install "$b"; migrate "$b"; serve "$b" 8092; oldtests "$b" 8092; kill "$(cat "$t/server-8092.pid")"
+          echo "Stary kod ($BASE_SHA) działa na schemacie po nowych migracjach, dane bez zmian."
+
+  deploy-script-test:
+    name: Test skryptów wdrożenia (sztuczny serwer, mariadb:10.6)
+    if: ${{ !inputs.rollback && !inputs.server_check }}
+    runs-on: ubuntu-24.04
+    services:
+      mysql:
+        image: mariadb:10.6
+        env:
+          MYSQL_ROOT_PASSWORD: ci-root
+        ports: ['3306:3306']
+        options: >-
+          --health-cmd="mysqladmin ping -h 127.0.0.1 -pci-root"
+          --health-interval=5s --health-timeout=5s --health-retries=20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.3'
+          extensions: pdo_mysql, mbstring, gd, curl, openssl, intl, exif
+          coverage: none
+      - name: Klient MySQL
+        run: command -v mysql || { sudo apt-get update -q && sudo apt-get install -yq mysql-client; }
+      - name: check, migrate, activate, verify, rollback, cleanup, kopie (deploy-remote.sh, deploy-verify.sh)
+        # The runner's MySQL 8 mysqldump against MariaDB 10.6 also exercises the --column-statistics=0 branch.
+        env:
+          MATDRAW_TEST_DB_ROOT: mysql -h127.0.0.1 -P3306 -uroot -pci-root
+          MATDRAW_TEST_DB_USER_HOST: '%'
+        run: bash tests/deploy/deploy-script-test.sh 8090 matdraw_deploy
+
+  browser-test:
+    name: Testy przeglądarkowe PWA (Playwright tylko w CI)
+    # Informational: not required by build, so a Playwright download problem never blocks a deploy.
+    if: ${{ !inputs.rollback && !inputs.server_check }}
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Playwright z Chromium (poza repozytorium)
         run: |
-          PHP_CLI_SERVER_WORKERS=4 php -S 127.0.0.1:8080 -t build/matdraw-php/public > "$RUNNER_TEMP/php-server.log" 2>&1 &
-          for i in $(seq 1 30); do curl -fsS 'http://127.0.0.1:8080/api/index.php?route=session' >/dev/null && break; sleep 1; done
-          MATDRAW_TEST_URL='http://127.0.0.1:8080/api/index.php' node --test tests/http.test.mjs
-      - name: Log serwera PHP
-        if: failure()
-        run: cat "$RUNNER_TEMP/php-server.log"
+          mkdir -p "$RUNNER_TEMP/pw" && cd "$RUNNER_TEMP/pw"
+          npm init -y >/dev/null && npm install --no-audit --no-fund --silent playwright@1.63.0
+          npx playwright install --with-deps chromium
+          echo "NODE_PATH=$RUNNER_TEMP/pw/node_modules" >> "$GITHUB_ENV"
+      - name: Testy z MATDRAW_BROWSER_TESTS=1
+        run: |
+          node -e "require('playwright')"
+          mapfile -t files < <(grep -l MATDRAW_BROWSER_TESTS tests/*.test.mjs)
+          MATDRAW_BROWSER_TESTS=1 node --test --test-concurrency=1 "${files[@]}"
 
   build:
     name: Build wydania
-    needs: [test, http-test]
+    needs: [test, http-test, http-compat, deploy-script-test]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -125,11 +255,23 @@ jobs:
         run: node scripts/build-php.mjs ./build/matdraw-php
       - name: Kontrola wydania
         run: |
-          test "$(cat build/matdraw-php/public/runtime-config.js)" = "export const CONFIG={mode:'api',apiBase:'./api/index.php'};"
-          test -f build/matdraw-php/public/.htaccess
-          test -f build/matdraw-php/backend/.htaccess
-          test ! -e build/matdraw-php/backend/config.php
-          test ! -e build/matdraw-php/backend/public
+          r=build/matdraw-php
+          test "$(cat $r/public/runtime-config.js)" = "export const CONFIG={mode:'api',apiBase:'./api/index.php'};"
+          test -f $r/public/.htaccess
+          test -f $r/backend/.htaccess
+          test ! -e $r/backend/config.php
+          test ! -e $r/backend/public
+          # Service worker filled by build-pwa.mjs (no template markers left), release identity, offline page, manifests.
+          test -f $r/public/sw.js
+          if grep -q '/\*@' $r/public/sw.js; then echo "::error::sw.js zawiera znaczniki szablonu."; exit 1; fi
+          node --check $r/public/sw.js
+          node -e "const v=JSON.parse(require('fs').readFileSync(process.argv[1]));if(!/^[0-9a-f]{12}$/.test(v.build))process.exit(1)" $r/public/version.json
+          test -f $r/public/offline.html
+          for m in manifest.webmanifest manifest.en.webmanifest; do node -e "const m=JSON.parse(require('fs').readFileSync(process.argv[1]));if(!m.id||!m.start_url||!(m.icons||[]).length)process.exit(1)" "$r/public/$m"; done
+          # Database tools travel with every release (deploy-remote.sh migrate runs the new release's migrate.php).
+          test -f $r/backend/bin/migrate.php
+          test -f $r/backend/bin/dump.php
+          if ls $r/backend/migrations/*.sql >/dev/null 2>&1; then echo "::error::Migracje muszą być plikami PHP."; exit 1; fi
       - uses: actions/upload-artifact@v4
         with:
           name: matdraw-php-${{ github.sha }}
@@ -140,6 +282,7 @@ jobs:
   deploy:
     name: Deploy na produkcję
     needs: build
+    # Production only from main (plan D18: main gets one merge after integration-qa).
     if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
     runs-on: ubuntu-24.04
     environment:
@@ -169,22 +312,32 @@ jobs:
           echo "RELEASE=$RELEASE" >> "$GITHUB_ENV"
           tar -C build/matdraw-php -czf - public backend | ssh deploy "umask 022 && mkdir -p '$DEPLOY_BASE/releases/$RELEASE' && tar -xzf - -C '$DEPLOY_BASE/releases/$RELEASE'"
           ssh deploy "umask 022 && mkdir -p '$DEPLOY_BASE/bin' && cat > '$DEPLOY_BASE/bin/deploy-remote.sh'" < scripts/deploy-remote.sh
+      - name: Migracje bazy (kopia przed migracją)
+        # Runs the new release's migrate.php while the previous release still serves. A database copy comes first when a
+        # migration waits (or the newest copy is older than 24 h); any error stops the deploy before the switch.
+        # ALLOW_NO_BACKUP=1 (environment variable of "production", only on purpose) lets a migration run without a copy.
+        env:
+          ALLOW_NO_BACKUP: ${{ vars.ALLOW_NO_BACKUP }}
+        run: |
+          anb=; [[ ${ALLOW_NO_BACKUP:-} == 1 ]] && anb=1
+          ssh deploy "ALLOW_NO_BACKUP='$anb' bash -s -- migrate '$DEPLOY_BASE' '$DOCROOT' '$RELEASE'" < scripts/deploy-remote.sh
       - name: Przełączenie na nowe wydanie
         run: ssh deploy bash -s -- activate "$DEPLOY_BASE" "$DOCROOT" "$RELEASE" < scripts/deploy-remote.sh
-      - name: Weryfikacja HTTPS, strony, bazy i API (z serwera)
+      - name: Weryfikacja HTTPS, strony, PWA, bazy i API (z serwera)
         id: verify
         # Runs on the server: the hosting answers 403 to GitHub Actions addresses for every site.
         run: |
           set +e
           sleep 5
-          out=$(ssh deploy "APP_URL='$APP_URL' DOCROOT='$DOCROOT' bash -s" < scripts/deploy-verify.sh); rc=$?
+          out=$(ssh deploy "APP_URL='$APP_URL' DOCROOT='$DOCROOT' DEPLOY_BASE='$DEPLOY_BASE' bash -s" < scripts/deploy-verify.sh); rc=$?
           echo "$out"
           echo "rollback=$(sed -n 's/^ROLLBACK=//p' <<<"$out" | tail -1)" >> "$GITHUB_OUTPUT"
           exit $rc
       - name: Powrót do poprzedniego wydania po nieudanej weryfikacji
+        # Code only; the floor guard in deploy-remote.sh refuses a release older than the data needs (plan §2.8).
         if: failure() && steps.verify.outputs.rollback == 'true' && env.PREVIOUS != ''
         run: ssh deploy bash -s -- rollback "$DEPLOY_BASE" "$DOCROOT" < scripts/deploy-remote.sh
-      - name: Usunięcie starych wydań
+      - name: Usunięcie starych wydań i kopii starszych niż 30 dni
         run: ssh deploy bash -s -- cleanup "$DEPLOY_BASE" "$DOCROOT" < scripts/deploy-remote.sh
 
   server-check:
@@ -215,11 +368,13 @@ jobs:
           [ -f "$DEPLOY_BASE/shared/config.php" ] && echo "config.php: jest, app_url: $(php -r 'echo (require $argv[1])["app_url"] ?? "?";' "$DEPLOY_BASE/shared/config.php" 2>&1)" || echo "config.php: BRAK (krok 4)"
           echo "Aktywne wydanie: $(readlink "$DEPLOY_BASE/current" 2>/dev/null || echo brak)"
           SH
+      - name: PHP 8.3, rozszerzenia, narzędzia kopii, prawa bazy, sonda Stripe, wiek kopii (tylko odczyt)
+        run: ssh deploy bash -s -- server-check "$DEPLOY_BASE" "$DOCROOT" < scripts/deploy-remote.sh
       - name: Stan strony (sprawdzenie z serwera, bez zmian)
         run: |
           host=${APP_URL#https://}
           for h in "$host" "www.$host"; do echo "DNS $h: $(getent ahostsv4 "$h" | awk '{print $1}' | sort -u | tr '\n' ' ')"; done
-          ssh deploy "APP_URL='$APP_URL' DOCROOT='$DOCROOT' bash -s" < scripts/deploy-verify.sh || true
+          ssh deploy "APP_URL='$APP_URL' DOCROOT='$DOCROOT' DEPLOY_BASE='$DEPLOY_BASE' bash -s" < scripts/deploy-verify.sh || true
 
   rollback:
     name: Powrót do poprzedniego wydania
@@ -238,7 +393,7 @@ jobs:
           SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
           SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
         run: bash scripts/deploy-ssh-setup.sh
-      - name: Przywrócenie
+      - name: Przywrócenie (strażnik floor odmawia, gdy dane wymagają nowszego kodu)
         run: ssh deploy bash -s -- rollback "$DEPLOY_BASE" "$DOCROOT" < scripts/deploy-remote.sh
       - name: Weryfikacja (z serwera)
-        run: ssh deploy "APP_URL='$APP_URL' DOCROOT='$DOCROOT' bash -s" < scripts/deploy-verify.sh
+        run: ssh deploy "APP_URL='$APP_URL' DOCROOT='$DOCROOT' DEPLOY_BASE='$DEPLOY_BASE' bash -s" < scripts/deploy-verify.sh
