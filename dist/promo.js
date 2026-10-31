@@ -50,13 +50,14 @@ export const ACCESS={
 const FIELDS=['eyebrow','title','text','benefits','cta','note'],INITIAL=Object.fromEntries(FIELDS.map(k=>[k,ACCESS[k]]));
 /** Switches the access card to kind 'login' | 'paid' | 'free' (unknown kinds give 'login'). options.price() returns the formatted
  * monthly price for the current language and options.translate is T(); the note of 'paid' is then computed when it is read, so
- * a language switch shows the right price (the computed note is final text: T() of it changes nothing). */
+ * a language switch shows the right price (the computed note is final text: T() of it changes nothing). Without a price the
+ * note of 'free' is shown: the card still offers a sign-up. */
 export function setAccessKind(kind,{price,translate}={}){
  const variant=kind==='paid'||kind==='free'?ACCESS.variants[kind]:INITIAL;
  ACCESS.kind=variant===INITIAL?'login':kind;
  for(const k of FIELDS)if(k!=='note')ACCESS[k]=variant[k];
  const label=typeof price==='function'&&ACCESS.kind==='paid'?price:null,fill=(text,p)=>translate?translate(text,{price:p}):text.replace('{price}',p);
  delete ACCESS.note;
- Object.defineProperty(ACCESS,'note',label?{configurable:true,enumerable:true,get:()=>{const p=label();return p?fill(variant.note,p):INITIAL.note;}}:{configurable:true,enumerable:true,writable:true,value:variant.note});
+ Object.defineProperty(ACCESS,'note',label?{configurable:true,enumerable:true,get:()=>{const p=label();return p?fill(variant.note,p):ACCESS.variants.free.note;}}:{configurable:true,enumerable:true,writable:true,value:variant.note});
  return ACCESS.kind;
 }

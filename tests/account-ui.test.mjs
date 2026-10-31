@@ -103,6 +103,7 @@ test('CTA matrix from public-config (§6.10): login / paid / free and the guest 
   assert.equal(ACCESS.cta,'Załóż konto');assert.equal(inLanguage('pl',()=>spaces(ACCESS.note)),'8,99 zł / mies. · anulujesz w dowolnym momencie');
   assert.equal(inLanguage('en',()=>spaces(ACCESS.note)),'8,99 zł / month · cancel at any time','the note is computed when read');
   assert.deepEqual(ACCESS.benefits,['Pisanie we wszystkich czatach','Pełne profile uczestników','Czaty turniejów']);
+  setAccessKind('paid',{price:()=>null,translate:t});assert.equal(ACCESS.note,'Rejestracja zajmuje około minuty.','no price: the sign-up note, never the login one');
   setAccessKind('free',{price:()=>'x',translate:t});assert.equal(ACCESS.kind,'free');assert.ok(!/\{price\}|x/.test(ACCESS.note),'no price without payments');
   setAccessKind('nonsense');assert.equal(ACCESS.kind,'login');
   for(const k of Object.keys(login))assert.deepEqual(ACCESS[k],login[k],'login restores '+k);
@@ -173,6 +174,14 @@ test('return from Stripe keeps the mark until confirm ends, then removes it (suc
  assert.equal(r.out.view,'expired');assert.notEqual(r.mark,null,'kept while the person logs in again');assert.deepEqual(r.pending,{kind:'success',sessionId:id},'confirm replays after login');
  clock=0;r=await run({kind:'success',sessionId:id},[new Error('Brak połączenia z serwerem.')]);assert.equal(r.out.view,'error');assert.equal(r.mark,null);assert.notEqual(r.pending,null,'kept for "try again"');
  clock=0;r=await run({kind:'success',sessionId:null},[active]);assert.deepEqual(r.calls,[['billing-sync',{}]],'without a session id: billing-sync');
+ // Server limits: billing-sync 1 per 10 s (polled every 11 s), billing-confirm 30/h; a 429 waits for data.retry or ends in 'still'.
+ const waits=[];clock=0;r=await run({kind:'success',sessionId:null},Array(20).fill(incomplete),{wait:async ms=>{waits.push(ms);clock+=ms;}});
+ assert.equal(r.out.view,'still');assert.deepEqual(r.calls.map(c=>c[0]),['billing-sync','billing-sync','billing-sync']);assert.deepEqual(waits,[11000,11000]);
+ const limited=retry=>Object.assign(new Error('Zbyt wiele prób płatności. Spróbuj ponownie później.'),{status:429,data:retry==null?{}:{retry}});
+ waits.length=0;clock=0;r=await run({kind:'success',sessionId:null},[limited(7),active],{wait:async ms=>{waits.push(ms);clock+=ms;}});
+ assert.equal(r.out.view,'success');assert.deepEqual(waits,[7000],'waits for Retry-After');assert.equal(r.mark,null);
+ clock=0;r=await run({kind:'success',sessionId:id},[incomplete,limited(3600)]);assert.equal(r.out.view,'still','confirm limit: still processing, not an error');assert.equal(r.mark,null);assert.equal(r.pending,null);
+ clock=0;r=await run({kind:'success',sessionId:id},[limited(null)]);assert.equal(r.out.view,'still');
  clock=0;r=await run({kind:'portal',sessionId:null},[active]);assert.equal(r.out.view,'portal');assert.deepEqual(r.calls,[['billing-sync',{}]]);assert.equal(r.mark,null);
  assert.equal(flow.confirmView({access:{full:true,state:'free'},status:'expired'}),'failed','an expired session is a failure even with free access');
  assert.equal(flow.confirmView({access:{full:false},status:'open'}),'processing');assert.equal(flow.confirmView({access:{full:false},status:'canceled'}),'failed');
@@ -287,8 +296,13 @@ test('PHP build in a browser: sign-up, Checkout and return, portal, cancel, prof
   assert.match(spaces(await page.textContent('.acct-join')),/8,99 zł/);assert.match(spaces(await page.textContent('.acct-join')),/Poza Polską: \$2\.99|Poza Polską: 2,99 USD/);
   await page.click('[data-acct-act="help"]');assert.match(await page.textContent('#acct-help-panel'),/pomoc@example\.test/);
   await shot(page,'php-home-1440');
+  // A sign-up left without the "log in" button (another address, Back) forgets what was typed (shared devices, §8.3 point 8).
+  await page.click('.acct-join-cta');await page.waitForSelector('#acct-signup-1');
+  await page.fill('#acct-signup-1 [name="email"]','someone.else@example.test');await page.fill('#acct-signup-1 [name="password"]','Cudzy-Sekret-2026');
+  await page.evaluate(()=>{location.hash='';});await page.waitForSelector('#login-form');
   // Step 1.
   await page.click('.acct-join-cta');await page.waitForSelector('#acct-signup-1');
+  assert.equal(await page.inputValue('#acct-signup-1 [name="email"]'),'','e-mail of the left sign-up is gone');assert.equal(await page.inputValue('#acct-signup-1 [name="password"]'),'','password of the left sign-up is gone');
   const begun=Date.now();assert.ok(await mark(page),'mark set when the sign-up starts');
   const email='e2e.'+Date.now()+'@example.test',password='Zielony-Rower-2026';
   await page.fill('#acct-signup-1 [name="email"]',email);await page.fill('#acct-signup-1 [name="password"]',password);
@@ -323,7 +337,11 @@ test('PHP build in a browser: sign-up, Checkout and return, portal, cancel, prof
   // Subscription tab and the portal return (billing-sync).
   await page.goto(app+'#profile?tab=subscription');await page.waitForSelector('.acct-sub-state');
   assert.match(await page.textContent('.acct-sub-state'),/Aktywna do/);await shot(page,'php-subscription-1440');
-  await page.click('.acct-sub [data-acct-act="portal"]');await page.waitForFunction(()=>location.hash==='#profile?tab=subscription'&&!!document.querySelector('.acct-sub-state'),null,{timeout:20000});
+  // The page already shows this address: wait for the real round trip (portal, return, billing-sync, toast) before moving on.
+  const portalSync=page.waitForResponse(r=>r.url().includes('route=billing-sync'),{timeout:20000});
+  await page.click('.acct-sub [data-acct-act="portal"]');assert.equal((await portalSync).status(),200,'billing-sync after the portal');
+  await page.waitForFunction(()=>location.hash==='#profile?tab=subscription'&&!!document.querySelector('.acct-sub-state')&&!!document.querySelector('#toast')?.textContent.includes('Zaktualizowano informacje o subskrypcji.'),null,{timeout:20000});
+  assert.equal(await page.evaluate(()=>sessionStorage.getItem('matdraw.billing.return')),null,'portal return handled');
   // Cancel return.
   await page.goto(app+'?billing=cancel');await page.waitForSelector('.acct-return');assert.match(await page.textContent('.acct-return'),/Płatność przerwana/);assert.equal(await mark(page),null);
   // Profile: change the club and the full-name choice.
@@ -332,6 +350,10 @@ test('PHP build in a browser: sign-up, Checkout and return, portal, cancel, prof
   const saved=page.waitForResponse(r=>r.url().includes('route=profile'));await page.click('#acct-profile-form button[type="submit"]');
   const body=(await saved).request().postDataJSON();assert.equal(body.nameDisplay,'full');assert.equal(body.clubText,'UKS Smok');assert.equal((await saved).status(),200);
   await shot(page,'php-profile-1440');
+  // An unsaved edit is dropped once another page is shown: coming back shows the saved profile.
+  await page.fill('#acct-profile-form [name="clubText"]','Niezapisany Klub');await page.evaluate(()=>{location.hash='#billing';});await page.waitForSelector('.acct-plan');
+  await page.evaluate(()=>{location.hash='#profile';});await page.waitForSelector('#acct-profile-form');
+  assert.equal(await page.inputValue('#acct-profile-form [name="clubText"]'),'UKS Smok','the saved value, not the left draft');
   // E-mail and password (members), then deletion with the second confirmation (active subscription).
   await page.click('#acct-tab-security');await page.waitForSelector('#acct-email-form');
   const email2='e2e.new.'+Date.now()+'@example.test';

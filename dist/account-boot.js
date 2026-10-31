@@ -108,7 +108,7 @@ function paintLogin(){
  const join=document.querySelector('[data-account-mount="join"]');if(join)setHtml(join,joinCard());
  const help=document.querySelector('[data-account-mount="login-help"]');
  if(help&&(config?.support||config?.signup)&&!help.querySelector('.acct-help')){help.classList.add('acct-help-host');setHtml(help,helpView());}
- if(readReturn()){const box=document.querySelector('#login-form .form-error');if(box)box.textContent=T('Zaloguj się ponownie, aby dokończyć aktywację konta.');}
+ const ret=readReturn();if(ret){const box=document.querySelector('#login-form .form-error');if(box)box.textContent=ret.kind==='success'?T('Zaloguj się ponownie, aby dokończyć aktywację konta.'):T('Zaloguj się ponownie.');}
 }
 
 // ---- Signed-in shell: banner, own photo, forced password change, pages ----

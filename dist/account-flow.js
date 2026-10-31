@@ -18,7 +18,7 @@ import {COUNTRIES,SPORTS,SPORTS_MAX,CLUB_MAX,validateUsername,normalizeUsername,
 import {openCrop} from './avatar-crop.js';
 import {flowStart,flowEnd,readReturn,clearReturn,formatPrice,formatDate,publicConfig,takePaymentMessage,avatarSrc,KNOWN_DEVICE,NOTICE_KEY} from './account-boot.js';
 
-export const CHECKOUT_ORIGIN='https://checkout.stripe.com',PORTAL_ORIGIN='https://billing.stripe.com',CHECK_DELAY=400,CONFIRM_EVERY=3000,CONFIRM_LIMIT=30000;
+export const CHECKOUT_ORIGIN='https://checkout.stripe.com',PORTAL_ORIGIN='https://billing.stripe.com',CHECK_DELAY=400,CONFIRM_EVERY=3000,SYNC_EVERY=11000,CONFIRM_LIMIT=30000;
 const CODES=new Set(COUNTRIES.map(c=>c[0])),EMAIL=/^[^\s@]+@[^\s@]+\.[^\s@]+$/,COMMON=/pass(?:word)?|has(?:l|\u0142)o|qwert|12345|abcde|matbravo|matdraw|taekwondo/;
 const FAILED=['expired','canceled','incomplete_expired','unpaid','paused','foreign'];
 
@@ -86,12 +86,14 @@ export function confirmView(r){
  return 'failed';
 }
 /**
- * Return from Stripe (05 §11.2): cancel -> 'cancel'; portal -> billing-sync -> 'portal'; success -> billing-confirm (billing-sync
- * without a session id) every 3 s for up to 30 s -> 'success' | 'still' | 'failed'. The flow mark is set while this runs and removed
- * at the end; the pending return is cleared, except after a 401 ('expired': confirm replays after login) or an error without an
- * answer ('error': retried by the button). deps: request(route,options), wait(ms), now(), storage (sessionStorage), onState(view).
+ * Return from Stripe (05 §11.2): cancel -> 'cancel'; portal -> billing-sync -> 'portal'; success -> billing-confirm every 3 s (without
+ * a session id billing-sync every 11 s: the server allows one per 10 s) for up to 30 s -> 'success' | 'still' | 'failed'. A 429 is
+ * not a failure: the next call waits for data.retry when that still fits in the 30 s, otherwise the screen says 'still' (confirm
+ * allows 30 per hour). The flow mark is set while this runs and removed at the end; the pending return is cleared, except after a
+ * 401 ('expired': confirm replays after login) or an error without an answer ('error': retried by the button).
+ * deps: request(route,options), wait(ms), now(), storage (sessionStorage), onState(view).
  */
-export async function handleReturn(ret,{request,wait=ms=>new Promise(r=>setTimeout(r,ms)),now=Date.now,storage,onState=()=>{},every=CONFIRM_EVERY,limit=CONFIRM_LIMIT}={}){
+export async function handleReturn(ret,{request,wait=ms=>new Promise(r=>setTimeout(r,ms)),now=Date.now,storage,onState=()=>{},every=CONFIRM_EVERY,syncEvery=SYNC_EVERY,limit=CONFIRM_LIMIT}={}){
  flowStart(storage);
  const done=(out,keep=false)=>{if(!keep)clearReturn(storage);flowEnd(storage);return out;};
  if(ret?.kind==='cancel')return done({view:'cancel'});
@@ -102,10 +104,15 @@ export async function handleReturn(ret,{request,wait=ms=>new Promise(r=>setTimeo
  const start=now();
  for(;;){
   let r;
+  const step=ret?.sessionId?every:syncEvery;
   try{r=ret?.sessionId?await request('billing-confirm',{method:'POST',body:{sessionId:ret.sessionId}}):await request('billing-sync',{method:'POST',body:{}});}
-  catch(error){if(error?.status===401)return {view:'expired',error};return error?.status===403?done({view:'failed',error}):done({view:'error',error},true);}
+  catch(error){
+   if(error?.status===401)return {view:'expired',error};
+   if(error?.status===429){const ms=(Number(error.data?.retry)||0)*1000;if(ms>0&&now()-start+ms<=limit){onState({view:'processing'});await wait(ms);continue;}return done({view:'still',until:null,state:null});}
+   return error?.status===403?done({view:'failed',error}):done({view:'error',error},true);
+  }
   const view=confirmView(r);
-  if(view==='processing'&&now()-start+every<=limit){onState({view:'processing'});await wait(every);continue;}
+  if(view==='processing'&&now()-start+step<=limit){onState({view:'processing'});await wait(step);continue;}
   return done({view:view==='processing'?'still':view,until:r?.access?.until??null,state:r?.access?.state??null});
  }
 }
@@ -524,6 +531,12 @@ function wire(){
  document.addEventListener('submit',onSubmit);document.addEventListener('input',onInput);document.addEventListener('change',onChange);
  document.addEventListener('click',onClick);document.addEventListener('keydown',onKey);
  // A finished return screen stays while the plan page is re-rendered (language) and is dropped once another page is shown.
- registry.on('painted',({view,page}={})=>{if(view==='app'&&page!=='billing'){S.payment='';if(S.ret&&!S.ret.running)S.ret=null;}});
+ registry.on('painted',({view,page}={})=>{
+  if(view==='app'&&page!=='billing'){S.payment='';if(S.ret&&!S.ret.running)S.ret=null;}
+  // Shared devices (plan §8.3 point 8): the typed e-mail, password and profile of a sign-up that was left (Back, logo, another hash)
+  // are forgotten, and so is an unsaved profile draft once another page is shown (a language re-render keeps the same page).
+  if(!(view==='public'&&page==='signup'))S.signup=newSignup();
+  if(!(view==='app'&&page==='profile')){S.draft=null;S.draftFor=null;}
+ });
  registry.on('logout',()=>{S.signup=newSignup();S.draft=null;S.draftFor=null;S.ret=null;S.del=null;S.payment='';});
 }
