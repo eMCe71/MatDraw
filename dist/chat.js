@@ -219,7 +219,10 @@ function apply(data,from={},sent=null){
    c.loaded=true;c.cursor=Math.max(c.cursor,e.rev||0);
   }else{
    if(e.more||c.cursor<(from[id]??0)){c.cursor=0;c.reload=true;continue;}
-   for(const m of list){if(!c.msgs.has(m.id)&&!m.x&&m.a!==me)others.set(id,(others.get(id)||0)+1);upsert(c,m);}
+   // A change to a message below the loaded window (a deletion, hide or restore far back) is not inserted: it would sit above the
+   // window without a gap and 'older' would ask for history before it, skipping everything between. History brings it in its state.
+   const floor=c.older&&c.msgs.size?sorted(c)[0].id:-Infinity;
+   for(const m of list){if(!c.msgs.has(m?.id)&&m?.id<floor)continue;if(!c.msgs.has(m.id)&&!m.x&&m.a!==me)others.set(id,(others.get(id)||0)+1);upsert(c,m);}
    if(Number.isFinite(e.rev))c.cursor=Math.max(c.cursor,e.rev);
   }
   c.known=Math.max(c.known||0,lastId(c));
