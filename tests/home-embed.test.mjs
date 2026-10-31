@@ -133,7 +133,7 @@ test('home page in a browser: layout, skip links, phone sign-in button, known de
 test('home chat card at tablet widths: readable join prompt, a usable message list, every channel tab visible',{skip:!chromium&&'Playwright is not installed',timeout:120000},async()=>{
  const {server,url}=await serve(),browser=await chromium.launch().catch(e=>{server.close();throw e;}),errors=[];
  try{
-  for(const lang of ['pl','en'])for(const w of [651,700,768,820,900,1000,1024,1200,1440]){
+  for(const lang of ['pl','en'])for(const w of [651,700,768,820,900,1000,1001,1024,1100,1200,1280,1440,1650]){
    const ctx=await browser.newContext({viewport:{width:w,height:1024},locale:lang==='pl'?'pl-PL':'en-GB'});
    await ctx.addInitScript(l=>{try{localStorage.setItem('matdraw.language',l);}catch{}},lang);
    const page=await ctx.newPage();page.on('pageerror',e=>errors.push(e.message));
@@ -144,10 +144,15 @@ test('home chat card at tablet widths: readable join prompt, a usable message li
    const m=await page.evaluate(()=>{const q=s=>document.querySelector(s),r=s=>q(s).getBoundingClientRect(),tabs=q('.chat-card .chat-tabs'),box=tabs.getBoundingClientRect();
     const copy=q('.chat-gate-copy'),act=r('.chat-gate-actions'),c=r('.chat-gate-copy');
     return {copy:c.width,overlap:act.top<c.bottom-1&&act.left<c.right-1,clipped:copy.scrollWidth>copy.clientWidth+1,log:r('.chat-card .chat-log').height,
-     tabs:[...tabs.querySelectorAll('.chat-tab')].every(t=>{const b=t.getBoundingClientRect();return b.left>=box.left-1&&b.right<=box.right+1;}),over:tabs.scrollWidth-tabs.clientWidth,hscroll:document.documentElement.scrollWidth-document.documentElement.clientWidth};});
+     tabs:[...tabs.querySelectorAll('.chat-tab')].every(t=>{const b=t.getBoundingClientRect();return b.left>=box.left-1&&b.right<=box.right+1;}),over:tabs.scrollWidth-tabs.clientWidth,
+     rows:Object.values([...tabs.querySelectorAll('.chat-tab')].reduce((m,t)=>{const y=Math.round(t.getBoundingClientRect().top);m[y]=(m[y]||0)+1;return m;},{})),strip:box.width,hscroll:document.documentElement.scrollWidth-document.documentElement.clientWidth};});
    const at=lang+' '+w+' '+JSON.stringify(m);
    assert.ok(m.copy>=150,'join prompt copy column at least 150 px: '+at);assert.ok(!m.overlap&&!m.clipped,'copy not under the buttons: '+at);
    assert.ok(m.log>=200,'message list at least 200 px: '+at);assert.ok(m.tabs&&m.over<=0,'every tab inside the strip: '+at);assert.equal(m.hscroll,0,at);
+   // Review R2: one row whenever the four tabs fit (laptops at 1100–1650 px), otherwise an even grid, never a 3+1 row with an orphan.
+   if(m.strip>=460)assert.equal(m.rows.length,1,'one tab row on a wide card: '+at);
+   else assert.ok(m.rows.length===1||m.rows.every(n=>n===m.rows[0]),'even tab rows on a narrow card: '+at);
+   if([1100,1280,1440,1650].includes(w))assert.equal(m.rows.length,1,'laptop widths keep one tab row: '+at);
    await ctx.close();
   }
   assert.deepEqual(errors,[]);

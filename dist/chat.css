@@ -28,8 +28,12 @@
 .chat-ch-date strong{font-size:13px}
 .chat-ch-date.is-today{background:var(--chat-edge)}.chat-ch-date.is-today small{color:#0b2a50}.chat-ch-date.is-today strong{color:#0b1d3a}
 /* Home card: channel tabs (desktop, ARIA tabs) and chips (phone). */
-.chat-tabs{display:grid;grid-template-columns:repeat(auto-fit,minmax(148px,1fr));gap:6px;padding:0 14px 12px;border-bottom:1px solid #e9eef5}
-.chat-tab{position:relative;display:flex;align-items:center;gap:8px;padding:7px 10px 7px 8px;border-radius:10px;border:1px solid #dfe7f0;background:#fff;text-align:left;min-width:0;flex:1 0 auto;color:#19324f}
+/* One row while the tabs fit (four need about 450 px), wrapping instead of overflowing; a card narrower than that (about 1001–1050 px and
+   the 1200 px centre column) gets a tidy 2-column grid rather than a 3+1 row. The card is the query container: its width comes from the page grid. */
+.chat-card{container-type:inline-size}
+.chat-tabs{display:flex;flex-wrap:wrap;gap:6px;padding:0 14px 12px;border-bottom:1px solid #e9eef5}
+@container (max-width:455px){.chat-tabs{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}}
+.chat-tab{position:relative;display:flex;align-items:center;gap:6px;padding:7px 8px 7px 7px;border-radius:10px;border:1px solid #dfe7f0;background:#fff;text-align:left;min-width:0;max-width:100%;flex:1 0 auto;color:#19324f}
 .chat-tab:hover{border-color:#a6c9e1;background:#f5fafe}
 .chat-tab-text{min-width:0}
 .chat-tab b,.chat-tab small{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;line-height:1.2}
