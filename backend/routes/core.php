@@ -4,9 +4,10 @@
 //   Capabilities::avatarMode($config): 'gd-webp'|'gd-jpeg'|'off'      (accounts-profiles-backend; absent → 'off')
 //   ChatModeration::mutedUntil(PDO,$userId): null|false (not muted) | true (muted, no end) | int (muted until)
 //   Chat (class present = chat installed); chat_settings.data.on (§2.4) switches posting off from the Admin panel
+//   Billing::currencyFor(PDO,$config,$row,$country,$userId): plan currency incl. the Admin override (billing-backend)
 //   BillingSync::lazy(PDO,$config,$userId) after the response (only once it was sent), when next_sync_at is due (billing-backend)
 declare(strict_types=1);
-use MatDraw\{Access,Accounts,BillingSync,Capabilities,Chat,ChatModeration,Jobs,RouteContext,Routes};
+use MatDraw\{Access,Accounts,Billing,BillingSync,Capabilities,Chat,ChatModeration,Jobs,RouteContext,Routes};
 
 /** Avatar mode of this server: 'off' while avatars are disabled or the avatar code is not installed. */
 $avatarMode=static function(array $c):string{
@@ -31,7 +32,8 @@ return [
   $exempt=$u['role']==='admin'||($row?!empty($row['billing_exempt'])&&($row['exempt_until']===null||(int)$row['exempt_until']>$now):in_array($u['role'],['editor','club'],true));
   $live=$c['billing_mode']==='live';$sameMode=$row&&((int)$row['livemode']===1)===$live;
   $billing=empty($c['billing_enabled'])?['enabled'=>false]:['enabled'=>true,'enforce'=>!empty($c['billing_enforce']),'mode'=>$c['billing_mode'],
-   'currency'=>Access::currency($row,$p['country'],$c),'amounts'=>$c['billing_amounts'],'exempt'=>$exempt,
+   // Billing::currencyFor adds the ongoing subscription and the Admin's currency override (billing-backend); without it, the country rule.
+   'currency'=>class_exists(Billing::class)?Billing::currencyFor($pdo,$c,$row,$p['country'],$u['id']):Access::currency($row,$p['country'],$c),'amounts'=>$c['billing_amounts'],'exempt'=>$exempt,
    'hasCustomer'=>$sameMode&&$row['stripe_customer_id']!==null,'pending'=>$row!==null&&$row['pending_checkout_id']!==null&&(int)$row['pending_checkout_expires']>$now];
   $changeAt=$p['username_changed_at']!==null&&(int)$p['username_changed_at']+30*86400>$now?(int)$p['username_changed_at']+30*86400:null;
   // After the response: jobs and a due payment sync, both releasing the session first (§3.7, §6.3). The sync runs only

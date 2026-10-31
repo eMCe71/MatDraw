@@ -271,7 +271,10 @@ test('account-delete: a running subscription needs confirmEnd; a Stripe customer
  r=await c.req('account-delete',{password:PASSWORD,endSubscription:true});assert.equal(r.status,200,JSON.stringify(r.data));
  const ending=member('ending');fixture('billing',{userId:ending.id,sub_status:'active',livemode:0,current_period_end:now()+86400,cancel_at_period_end:1});
  assert.equal((await (await signIn(ending.email)).req('account-delete',{password:PASSWORD})).status,200,'ending subscriptions do not block');
- const cust=member('cust');const customer='cus_fixture'+uniq('');fixture('billing',{userId:cust.id,stripe_customer_id:customer,sub_status:'canceled',livemode:0});
+ const cust=member('cust');
+ // With billing-backend the account deletion syncs with Stripe first: the customer has to exist in the Stripe stub.
+ const stripe=await fetch(`http://127.0.0.1:${Number(new URL(base).port)+1}/v1/customers`,{method:'POST',headers:{Authorization:'Bearer rk_test_stub','Stripe-Version':'2026-09-30.endive','Idempotency-Key':uniq('fixture-'),'Content-Type':'application/x-www-form-urlencoded'},body:'metadata[matbravo_user_id]='+cust.id}).then(r=>r.json()).catch(()=>null);
+ const customer=stripe?.id??'cus_fixture'+uniq('');fixture('billing',{userId:cust.id,stripe_customer_id:customer,sub_status:'canceled',livemode:0});
  r=await (await signIn(cust.email)).req('account-delete',{password:PASSWORD,endSubscription:true});assert.equal(r.status,200,JSON.stringify(r.data));
  const st=fixture('accounts-state',{userId:cust.id});
  assert.equal(st.billing.stripe_customer_id,customer);assert.ok(st.billing.deleted_at>0);assert.ok([0,1].includes(st.billing.stripe_redact_pending));

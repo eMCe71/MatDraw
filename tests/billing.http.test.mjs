@@ -366,7 +366,8 @@ test('Admin: exempt with audit and warnLive, require, cancel at period end, curr
  const de=member('admin-cur',{country:'DE'});const keys=await prices();
  assert.equal((await admin.req('admin-billing-action',{action:'currency',userId:de.id,currency:'eur'})).status,422);
  assert.equal((await admin.req('admin-billing-action',{action:'currency',userId:de.id,currency:'pln'})).data.account.currency,'pln');
- const cd=await signIn(de.email);const t2=Date.now();await cd.req('billing-checkout',{});
+ const cd=await signIn(de.email);assert.equal((await me(cd)).billing.currency,'pln','me shows the Admin override, not the country rule');
+ const t2=Date.now();await cd.req('billing-checkout',{});
  assert.equal((await since(t2,'POST',/^\/v1\/checkout\/sessions$/))[0].body.line_items[0].price,keys.matbravo_monthly_pln);
  // Not for members or staff, and before reading anything.
  for(const [route,body] of [['admin-billing&list=staff',undefined],['admin-billing&userId='+p.id,undefined],['admin-billing-action',{action:'exempt',userId:p.id,reason:'x'}]]){

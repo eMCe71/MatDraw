@@ -2236,6 +2236,19 @@ Wszystkie uwagi okazały się trafne. Żadnej nie odrzuciłem w całości, czter
 - **Rejestr frontendu:** strona rejestru, która rzuci wyjątek albo zwróci zwykły string, jest tylko logowana i zastępowana stroną wbudowaną. Testy modułów muszą więc sprawdzać, że `render()` zwraca `SafeHtml`. Błąd 401 na `#chat` rysuje publiczną stronę czatu, a moduły reagują na zdarzenie `logout` z `{expired:true}`.
 - **Zdarzenie `upcoming-painted`:** opis w §8.3.
 
+### 14.4 Ustalenia z realizacji fali 3 (orkiestrator, 2026-10-31)
+- **Czat — panel Admina:** usuwanie, przywracanie i odrzucanie zgłoszeń działa także dla wiadomości w kanałach ukrytych dla uczestników, np. gdy turniej wrócił do statusu „Roboczy”. Kolejka moderacji może pokazywać takie pozycje i dalej oferuje dla nich akcje.
+- **Czat — zgłoszenia:** `chat-report` na wiadomość w stanie `hidden_review` odpowiada `200 {ok:true}`, ale nie zapisuje zgłoszenia.
+- **Czat — `cid`:** jest jednorazowy dla jednej wiadomości. Ten sam `cid` w innym kanale daje `400 „Niepoprawny formularz.”`, więc `chat-frontend` generuje nowy `cid` dla każdej wiadomości.
+- **Czat — licznik hostingu:** `ChatSettings::health` szacuje ostatnie 60 minut z kubełków godzinowych (okno przesuwne). Etykieta „Odpowiedzi hostingu w ostatniej godzinie” i próg z DEPLOY-PL.md obowiązują bez zmian.
+- **Płatności — waluta w `me`:** `me.billing.currency` liczy `Billing::currencyFor`, które uwzględnia trwającą subskrypcję i walutę ustawioną przez Admina; reguła kraju działa tylko jako ostatnia. Poprawione przy scalaniu fali 3 i objęte testem.
+- **Płatności — pobieranie zdarzeń:** idzie od kursora do przodu (`ending_before`). Po pełnym przejściu następuje osobny odczyt marginesu 120 s (najwyżej 3 strony po 100). Okno `created` służy tylko przy pierwszym uruchomieniu albo przy nieznanym kursorze. W wyniku zadania i w `stripe-sync.php --events` dochodzi licznik `late=`.
+- **Płatności — atrapa Stripe w testach:** test, który zapisuje `stripe_customer_id`, musi najpierw utworzyć klienta w atrapie (`POST /v1/customers`), bo synchronizacja zapomina klienta nieznanego Stripe.
+- **PWA — znacznik przepływu:** `account-frontend` ustawia i usuwa `sessionStorage['matdraw.flow.active']` na czas rejestracji i płatności (§9.4, kryterium w §12.12). W tym czasie nie pojawia się karta instalacji ani automatyczne przeładowanie.
+- **CI (`deploy-infra`):**
+  - CI uruchamia wszystkie `tests/*.http.test.mjs` przez `scripts/test-http.sh` na `mysql:8.0` i `mariadb:10.6`; skrypt obsługuje bazę w kontenerze przez zmienne środowiskowe. Tylko MySQL 8.0 wychwyci regresję `msg_count` z czatu.
+  - Testy przeglądarkowe (`MATDRAW_BROWSER_TESTS=1`) CI może uruchamiać w osobnym zadaniu z Playwright zainstalowanym wyłącznie w CI. Dziś CI ich nie uruchamia.
+
 ## Załącznik A. Nowe klucze `config.php` (wszystkie opcjonalne; wartości domyślne w `Config::DEFAULTS`)
 
 | Klucz | Domyślnie | Opis |
