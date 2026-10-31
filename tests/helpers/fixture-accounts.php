@@ -16,13 +16,7 @@ const FIXTURE_ACCOUNTS_CONFIG_KEYS=['signup_enabled','signup_invite_token','sign
 function fixture_accounts_one(PDO $pdo,string $sql,array $p):?array{$q=$pdo->prepare($sql);$q->execute($p);$r=$q->fetch(PDO::FETCH_ASSOC);$q->closeCursor();return $r?:null;}
 function fixture_accounts_dir(array $c,string $pid):string{$d=Avatars::dir($c,$pid);if($d===null)throw new RuntimeException('avatar: invalid public id');return $d;}
 return [
- 'accounts-config'=>function(PDO $pdo,array $p):array{
-  $path=getenv('MATDRAW_CONFIG');if(!$path||!is_file($path))throw new RuntimeException('accounts-config: MATDRAW_CONFIG');
-  $c=require $path;$old=[];
-  foreach((array)($p['set']??[]) as $k=>$v){if(!in_array($k,FIXTURE_ACCOUNTS_CONFIG_KEYS,true))throw new RuntimeException("accounts-config: key $k not allowed");$old[$k]=$c[$k]??null;if($v===null)unset($c[$k]);else $c[$k]=$v;}
-  $tmp=$path.'.tmp.'.getmypid();file_put_contents($tmp,"<?php\nreturn ".var_export($c,true).";\n");chmod($tmp,0600);rename($tmp,$path);
-  return $old;
- },
+ 'accounts-config'=>fn(PDO $pdo,array $p):array=>fixture_config_set((array)($p['set']??[]),FIXTURE_ACCOUNTS_CONFIG_KEYS,'accounts-config'),
  'accounts-state'=>function(PDO $pdo,array $p):array{
   $id=(string)($p['userId']??'');$u=fixture_accounts_one($pdo,'SELECT id,club_id,email,role,active,password_hash,auth_version FROM users WHERE id=?',[$id]);
   if($u){$u['password_hash']=substr(hash('sha256',$u['password_hash']),0,16);$u['active']=(int)$u['active'];$u['auth_version']=(int)$u['auth_version'];}

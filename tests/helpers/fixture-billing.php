@@ -41,13 +41,7 @@ return [
    };
   }catch(StripeError $e){return ['stripeError'=>$e->code(),'status'=>$e->status];}
  },
- 'billing-config-set'=>function(PDO $pdo,array $p):array{
-  $path=getenv('MATDRAW_CONFIG');if(!$path||!is_file($path))throw new RuntimeException('billing-config-set: MATDRAW_CONFIG');
-  $c=require $path;$old=[];
-  foreach((array)($p['set']??[]) as $k=>$v){if(!in_array($k,FIXTURE_BILLING_CONFIG_KEYS,true))throw new RuntimeException("billing-config-set: key $k not allowed");$old[$k]=$c[$k]??null;if($v===null)unset($c[$k]);else $c[$k]=$v;}
-  $tmp=$path.'.tmp.'.getmypid();file_put_contents($tmp,"<?php\nreturn ".var_export($c,true).";\n");chmod($tmp,0600);rename($tmp,$path);
-  return $old;
- },
+ 'billing-config-set'=>fn(PDO $pdo,array $p):array=>fixture_config_set((array)($p['set']??[]),FIXTURE_BILLING_CONFIG_KEYS,'billing-config-set'),
  'billing-country'=>function(PDO $pdo,array $p):?string{$uid=(string)($p['userId']??'');MatDraw\Accounts::ensureProfile($pdo,$uid);$pdo->prepare('UPDATE user_profiles SET country=? WHERE user_id=?')->execute([$p['country']??null,$uid]);return $p['country']??null;},
  'billing-user-email'=>function(PDO $pdo,array $p):bool{$pdo->prepare('UPDATE users SET email=? WHERE id=?')->execute([mb_strtolower((string)$p['email']),(string)$p['userId']]);return true;},
  'billing-tombstone'=>function(PDO $pdo,array $p):array{

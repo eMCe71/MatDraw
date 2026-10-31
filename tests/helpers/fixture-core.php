@@ -20,13 +20,7 @@ function fixture_core_session(array $c,string $sid,bool $readOnly):?array {
  session_save_path($dir);session_id($sid);session_start($readOnly?['read_and_close'=>true]:[]);return $_SESSION;
 }
 return [
- 'config-set'=>function(PDO $pdo,array $p):array{
-  $path=getenv('MATDRAW_CONFIG');if(!$path||!is_file($path))throw new RuntimeException('config-set: MATDRAW_CONFIG');
-  $c=require $path;$old=[];
-  foreach((array)($p['set']??[]) as $k=>$v){if(!in_array($k,FIXTURE_CORE_CONFIG_KEYS,true))throw new RuntimeException("config-set: key $k not allowed");$old[$k]=$c[$k]??null;if($v===null)unset($c[$k]);else $c[$k]=$v;}
-  $tmp=$path.'.tmp.'.getmypid();file_put_contents($tmp,"<?php\nreturn ".var_export($c,true).";\n");chmod($tmp,0600);rename($tmp,$path);
-  return $old;
- },
+ 'config-set'=>fn(PDO $pdo,array $p):array=>fixture_config_set((array)($p['set']??[]),FIXTURE_CORE_CONFIG_KEYS,'config-set'),
  'session-read'=>function(PDO $pdo,array $p,array $c):?array{
   $data=fixture_core_session($c,(string)($p['sid']??''),true);if($data===null)return null;
   clearstatcache();return ['data'=>$data,'mtime'=>filemtime(Paths::ownSessions($c).'/sess_'.$p['sid'])];

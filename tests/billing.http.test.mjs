@@ -31,7 +31,7 @@ const stubBase=base?`http://127.0.0.1:${Number(new URL(base).port)+1}`:'';
 const ADMIN=['admin@test.example','AdminForTests2026!'],PASSWORD='MemberPassword2026!',VERSION='2026-09-30.endive',SECRET='whsec_test_secret';
 const ERR={unavailable:'Płatności są chwilowo niedostępne. Spróbuj ponownie później.',confirm:'Nie można potwierdzić tej płatności.'};
 const now=()=>Math.floor(Date.now()/1000),D=86400;
-/** The server may serve a cached config.php for up to ~3 s after a rewrite (opcache.revalidate_freq=2, whole seconds). */
+/** Polls until the server answers `expected` (e.g. after a config rewrite; scripts/test-http.sh re-validates config.php on every request). */
 async function until(probe,expected,ms=8000){let v;for(const end=Date.now()+ms;Date.now()<end;await sleep(250))if((v=await probe())===expected)break;return v;}
 const stub=async body=>{const r=await fetch(stubBase+'/__control',{method:'POST',body:JSON.stringify(body)});const j=await r.json();if(!r.ok)throw Error(JSON.stringify(j));return j;};
 /** Stub requests recorded since a marker (Date.now() before the action), optionally filtered by method and path regex. */

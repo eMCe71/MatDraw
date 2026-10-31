@@ -68,7 +68,10 @@ if [[ -f $repo/tests/stubs/stripe-stub.mjs ]]; then
  node "$repo/tests/stubs/stripe-stub.mjs" "$stub_port" > "$work/stripe-stub.log" 2>&1 & stub=$!
  for _ in $(seq 1 30); do (exec 3<>"/dev/tcp/127.0.0.1/$stub_port") 2>/dev/null && break; sleep 0.2; done
 fi
-PHP_CLI_SERVER_WORKERS=4 "$php" -S "127.0.0.1:$port" -t "$work/matdraw-php/public" > "$work/php-server.log" 2>&1 & srv=$!
+# opcache stays on as in production, but checks every file on every request: with the default revalidate_freq=2 a
+# rewritten config.php (fixture config jobs) is served stale for up to ~3 s (whole-second request time), which made
+# tests flaky. The fixtures also give each rewrite an mtime strictly above the previous one (tests/helpers/fixture.php).
+PHP_CLI_SERVER_WORKERS=4 "$php" -d opcache.validate_timestamps=1 -d opcache.revalidate_freq=0 -S "127.0.0.1:$port" -t "$work/matdraw-php/public" > "$work/php-server.log" 2>&1 & srv=$!
 for _ in $(seq 1 30); do curl -fsS "$MATDRAW_TEST_URL?route=session" >/dev/null 2>&1 && break; sleep 0.5; done
 cd "$repo"
 if [[ $# -gt 0 ]]; then files=(); for f in "$@"; do [[ $(basename "$f") == http.test.mjs ]] || files+=("$f"); done

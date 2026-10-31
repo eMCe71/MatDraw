@@ -5,6 +5,7 @@
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
+import {isDeepStrictEqual} from 'node:util';
 export const base=process.env.MATDRAW_TEST_URL;
 export const CLIENT_API=1;
 export class Client{
@@ -18,6 +19,13 @@ export class Client{
  async login(email,password='TestPassword2026!'){await this.req('session');const r=await this.req('login',{email,password});assert.equal(r.status,200,JSON.stringify(r.data));return this.load();}
  async load(){const r=await this.req('bootstrap');assert.equal(r.status,200,JSON.stringify(r.data));this.data=r.data;return r.data;}
  async cmd(type,payload,status=200,revision=this.data.revision){const r=await this.req('command',{type,payload,expectedRevision:revision});assert.equal(r.status,status,JSON.stringify(r.data));if(status===200)this.data=r.data.workspace;return r.data.result;}
+}
+/**
+ * Polls `probe()` until it returns a value deep-equal to `expected` (or until `ms`); returns the last value, so a test
+ * asserts on it. For changes the server observes asynchronously, e.g. a rewritten config.php (never a fixed sleep).
+ */
+export async function eventually(probe,expected,ms=10000,step=100){
+ let v;for(const end=Date.now()+ms;;){v=await probe();if(isDeepStrictEqual(v,expected)||Date.now()>=end)return v;await new Promise(r=>setTimeout(r,step));}
 }
 export const php=process.env.PHP_BIN||'php';
 const fixtureScript=fileURLToPath(new URL('./fixture.php',import.meta.url));
