@@ -426,7 +426,7 @@ export default {
  'Wydruk i ekran hali':'Printouts and hall screen',
  'WITAJ W MATBRAVO':'WELCOME TO MATBRAVO',
  'Zaloguj się':'Log in',
- 'Użyj konta otrzymanego od Administratora.':'Use the account you received from the Administrator.',
+ 'Użyj konta klubu albo konta członka MatBravo.':'Use your club account or your MatBravo member account.',
  'Podgląd demonstracyjny · konta i dane tylko w tej przeglądarce.':'Demo preview · accounts and data stay in this browser only.',
  'twoj@klub.pl':'you@club.com',
  'Sprawdź przykładową rolę':'Try a sample role',

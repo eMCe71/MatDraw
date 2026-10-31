@@ -165,6 +165,15 @@ test('username prefill and suggestions never show the full surname by default (p
  const html=String(flow.fieldsView(flow.newFields(null,['pl-PL']),{id:'t',signup:true}));
  assert.match(html,/Nazwę użytkownika widzą członkowie czatu\./,'the sign-up says who sees the username');
 });
+test('member shell: own name, @username and initials from the profile; nothing borrowed from a club (F13)',()=>{
+ const me=(profile,role='member')=>({user:{role},profile});
+ assert.deepEqual(boot.selfName(me({firstName:' Marta ',lastName:'Kowalska',username:'marta.k'})),{name:'Marta Kowalska',sub:'@marta.k'});
+ assert.equal(boot.selfName(me(null)),null,'no profile: the role stays');assert.equal(boot.selfName(me({firstName:'A'},'club')),null,'staff keep role and club');
+ assert.equal(boot.selfInitials(me(null)),'');
+ const app=source('app.js');
+ assert.match(app,/data-self-avatar>\$\{member\?'':initials\(club\?\.name\|\|T\('Klub'\)\)\}/,'no club initials for a member');
+ assert.match(app,/member\?T\('Społeczność MatBravo'\):T\('Wspólna baza zawodników i turniejów\.'\)/,'no athlete-database note for members');
+});
 test('flow mark (plan §9.4): set and removed through the contract key, stale after 30 minutes',()=>{
  const s=new Store();assert.equal(boot.FLOW_MARK,'matdraw.flow.active');
  boot.flowStart(s,1000);assert.equal(s.getItem('matdraw.flow.active'),'1000');assert.ok(boot.flowActive(s,1000+29*60e3));assert.ok(!boot.flowActive(s,1000+31*60e3));
@@ -444,6 +453,9 @@ test('PHP build in a browser: sign-up, Checkout and return, portal, cancel, prof
   ({ctx,page}=await context(1440,900));
   await page.goto(app);await page.fill('#login-form [name="email"]',payer.email);await page.fill('#login-form [name="password"]','TestPassword2026!');
   await page.click('#login-form button[type="submit"]');await page.waitForSelector('.app-shell');
+  // A member's shell (F13): the own name and @username instead of the role "Członek", initials from the profile.
+  await page.waitForFunction(()=>document.querySelector('.sidebar [data-self-name]')?.textContent==='Test Członek');
+  assert.match(await page.textContent('.sidebar [data-self-sub]'),/^@e2epayer/);assert.equal(await page.textContent('.sidebar [data-self-avatar]'),'TC');
   await page.goto(app+'#billing');await page.waitForSelector('.acct-plan [data-acct-act="checkout"]');
   const isCheckout=u=>new URL(u).searchParams.get('route')==='billing-checkout';
   await page.route(isCheckout,route=>route.fulfill({status:409,contentType:'application/json',body:JSON.stringify({error:'Masz już aktywną subskrypcję.',portal:true})}));

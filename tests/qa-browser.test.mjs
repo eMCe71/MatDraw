@@ -156,6 +156,11 @@ test('final review in a browser: focus trap in the crop dialog, focus back to me
   const back=[];await page.focus('.acct-crop-canvas');for(let i=0;i<2;i++){await page.keyboard.press('Shift+Tab');back.push(await active(page));}
   assert.deepEqual(back,['Zamknij okno','Zapisz zdjęcie'],'Shift+Tab from the canvas');
   await ctx.close();
+  // The login lead (F13) no longer says accounts come only from the Administrator (public sign-up exists).
+  { const ctx2=await browser.newContext({viewport:{width:1440,height:900},locale:'en-GB',serviceWorkers:'block'});await ctx2.addInitScript(()=>{try{localStorage.setItem('matdraw.language','en');}catch{}});
+    const p2=await ctx2.newPage();await p2.goto(url);await p2.waitForSelector('.login-form-content');
+    assert.match(await p2.textContent('.login-form-content'),/club account or your MatBravo member account/);assert.doesNotMatch(await p2.textContent('.login-form-content'),/received from the Administrator/);
+    await ctx2.close();}
   assert.deepEqual(problems,[],'no page or console errors');
  }finally{await browser.close();server.close();}
 });
