@@ -73,9 +73,14 @@ test('message text: Text::clean (bidi, zero-width, controls), 1–1000 character
  assert.equal(out[10].ok,'a\n\n\nb','at most two empty lines in a row');assert.equal(out[11].ok.split('\n').length,20,'at most 20 lines');
 });
 
-test('cont: previous message visible, same author, under 5 minutes',{skip},()=>{
+test('cont: previous message visible, same author, under 5 minutes, same UTC day',{skip},()=>{
  const prev=(f={})=>({user_id:'u',created_ms:1000,state:'visible',...f});
  assert.deepEqual(bridge({job:'cont',cases:[{prev:prev(),user:'u',now:300999},{prev:prev(),user:'u',now:301000},{prev:prev(),user:'v',now:2000},{prev:prev({state:'deleted_author'}),user:'u',now:2000},{prev:prev({state:'hidden_review'}),user:'u',now:2000},{prev:null,user:'u',now:2000}]}),[1,0,0,0,0,0]);
+ // Across UTC midnight c stays 0: guests get a new variant g that day, and c=1 would link it to yesterday's one.
+ const mid=Date.UTC(2026,9,31,0,0,0),before=prev({created_ms:mid-90_000});
+ assert.deepEqual(bridge({job:'cont',cases:[{prev:before,user:'u',now:mid+60_000},{prev:before,user:'u',now:mid-1},{prev:prev({created_ms:mid}),user:'u',now:mid+60_000}]}),[0,1,1]);
+ const guest=bridge({job:'guest',cases:[{row:row({id:10,user_id:'u',created_ms:mid-90_000,cont:0}),channel:3,key:KEY},{row:row({id:11,user_id:'u',created_ms:mid+60_000,cont:bridge({job:'cont',cases:[{prev:before,user:'u',now:mid+60_000}]})[0]}),channel:3,key:KEY}]});
+ assert.deepEqual(guest.map(m=>m.c),[0,0],'no c=1 that bridges two variants of one author');
 });
 
 test('send limits: the gap, per minute and per day give the seconds to wait',{skip},()=>{

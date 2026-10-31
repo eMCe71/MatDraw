@@ -21,7 +21,7 @@ This file says what was tested, how it can be repeated, and what can only be ver
 
 - **Local:** PHP 8.3.6 (gd with WebP, curl, openssl, intl, exif, pdo_mysql, mbstring, zlib, sodium), MariaDB 10.11.14, Node 22. The HTTP harness uses a throw-away database and a Stripe stub on `<port+1>`; nothing leaves 127.0.0.1.
 - **CI (GitHub Actions):** `ubuntu-24.04`, PHP 8.3 with `pdo_mysql, mbstring, gd, curl, openssl, intl, exif`; the HTTP job and the back-compat job run on **MySQL 8.0 and MariaDB 10.6** (the production engine is MariaDB 10.6; only MySQL 8.0 catches some regressions, for example strict `GROUP BY` and the chat message counter); the deploy-script test runs on MariaDB 10.6 with the runner's MySQL 8 `mysqldump` (this also exercises the `--column-statistics=0` branch); the browser job is informational and does not block a deploy.
-- **Migrations:** `backend/migrations` (0002 accounts, 0003 chat, 0004 billing) are linted (`tests/migrations.test.mjs`) to the SQL subset common to MariaDB 10.6 and MySQL 8.0, only add, and run twice in every HTTP job (the second run changes nothing).
+- **Migrations:** `backend/migrations` (0002 accounts, 0003 chat, 0004 billing, 0005 staff index, 0006 billing customers) are linted (`tests/migrations.test.mjs`) to the SQL subset common to MariaDB 10.6 and MySQL 8.0, only add, and run twice in every HTTP job (the second run changes nothing).
 
 ## 3. Measured at the base of the documentation task (commit `aa5598b`, MariaDB 10.11.14)
 

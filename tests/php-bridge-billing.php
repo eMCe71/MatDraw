@@ -57,6 +57,7 @@ $out=match($in['job']){
  })(),
  'probe'=>array_map(fn($b)=>StripeClient::probe($cfg(['stripe_api_base'=>$b])),$in['bases']),
  'bad-path'=>attempt(fn()=>StripeClient::interactive($cfg(['stripe_api_base'=>$in['base']]))->get($in['path'])),
+ 'grandfathered'=>array_map(fn($c)=>[MatDraw\Billing::grandfatheredMin($c['now']),MatDraw\Billing::dayStart($c['date'])],$in['cases']),
  'bad-base'=>array_map(fn($b)=>attempt(fn()=>StripeClient::interactive($cfg(['stripe_api_base'=>$b[0],'allow_insecure_http'=>$b[1]]))),$in['bases']),
 };
 echo json_encode($out,JSON_THROW_ON_ERROR|JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);

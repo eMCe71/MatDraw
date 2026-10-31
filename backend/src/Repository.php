@@ -42,8 +42,10 @@ final class Repository {
  private function load():array {
   $db=['schemaVersion'=>2,'revision'=>(int)$this->pdo->query('SELECT revision FROM app_meta WHERE id=1')->fetchColumn(),'clubs'=>[],'users'=>[],'profiles'=>[],'tournaments'=>[]];
   $db['clubs']=$this->pdo->query('SELECT id,name FROM clubs ORDER BY name,id')->fetchAll();
-  // Members (community accounts, plan §3.3) never enter the workspace: Domain and the JS workspace see staff only.
-  foreach($this->pdo->query("SELECT * FROM users WHERE role<>'member' ORDER BY email,id") as $u)$db['users'][]=['id'=>$u['id'],'clubId'=>$u['club_id'],'email'=>$u['email'],'role'=>$u['role'],'active'=>(bool)$u['active'],'passwordHash'=>$u['password_hash'],'authVersion'=>(int)$u['auth_version']];
+  // Members (community accounts, plan §3.3) never enter the workspace: Domain and the JS workspace see staff only. The
+  // staff roles are listed (not role<>'member', which MySQL/MariaDB cannot read through an ENUM index): with the
+  // users_role index (migration 0005) this is a range read of the staff rows, whatever the number of members.
+  foreach($this->pdo->query("SELECT * FROM users WHERE role IN ('admin','editor','club') ORDER BY email,id") as $u)$db['users'][]=['id'=>$u['id'],'clubId'=>$u['club_id'],'email'=>$u['email'],'role'=>$u['role'],'active'=>(bool)$u['active'],'passwordHash'=>$u['password_hash'],'authVersion'=>(int)$u['auth_version']];
   foreach($this->pdo->query('SELECT * FROM profiles ORDER BY id') as $a)$db['profiles'][]=array_replace(self::decode($a['data']),['id'=>$a['id'],'clubId'=>$a['club_id'],'createdBy'=>$a['created_by'],'archived'=>(bool)$a['archived']]);
   $index=[];
   foreach($this->pdo->query('SELECT * FROM tournaments ORDER BY event_date,id') as $t){$index[$t['id']]=count($db['tournaments']);$db['tournaments'][]=['id'=>$t['id'],'createdBy'=>$t['created_by'],'name'=>$t['name'],'city'=>$t['city'],'date'=>$t['event_date'],'mat'=>$t['mat'],'status'=>$t['status'],'activity'=>self::decode($t['activity']),'entries'=>[],'draws'=>[]];}
@@ -68,7 +70,7 @@ final class Repository {
   foreach(['draws'=>'category_key','entries'=>'profile_id'] as $table=>$key)foreach(array_diff_key($a[$table],$b[$table]) as $row)$this->pdo->prepare("DELETE FROM $table WHERE tournament_id=? AND $key=?")->execute([$row['tournament_id'],$row[$key]]);
   foreach($b as $table=>$rows)foreach($rows as $id=>$row){
    if(isset($a[$table][$id])&&$a[$table][$id]===$row)continue;
-   if($table==='users'){$this->persistUser($row,isset($a['users'][$id]));continue;}
+   if($table==='users'){$this->persistUser($row,$a['users'][$id]??null);continue;}
    $cols=array_keys($row);$update=implode(',',array_map(fn($c)=>"$c=VALUES($c)",$cols));
    $sql="INSERT INTO $table (".implode(',',$cols).') VALUES ('.implode(',',array_fill(0,count($cols),'?')).") ON DUPLICATE KEY UPDATE $update";
    $this->pdo->prepare($sql)->execute(array_values($row));
@@ -79,8 +81,13 @@ final class Repository {
   * Accounts are never upserted (§2.6): an upsert hitting the unique e-mail of a member, which load() does not see,
   * would take over that row. New ids are inserted, changed rows are updated only while they are not members, and a
   * duplicate key on this statement is the friendly 409 (transaction() then rolls everything back).
+  * A changed e-mail of a staff account with a Stripe customer (a paying club, §3.9) makes its billing row due now: the
+  * next sync (billing-due, the lazy sync after me) gives the customer the new address, so receipts and payment
+  * reminders do not keep going to the old one until the period ends. No Stripe call runs inside this transaction.
   */
- private function persistUser(array $u,bool $exists):void {
+ private function persistUser(array $u,?array $old):void {
+  $exists=$old!==null;
+  if($exists&&$old['email']!==$u['email'])$this->pdo->prepare('UPDATE billing_accounts SET next_sync_at=?,updated_at=? WHERE user_id=? AND stripe_customer_id IS NOT NULL AND deleted_at IS NULL')->execute([time(),time(),$u['id']]);
   try{
    if($exists)$this->pdo->prepare("UPDATE users SET club_id=?,email=?,role=?,active=?,password_hash=?,auth_version=? WHERE id=? AND role<>'member'")->execute([$u['club_id'],$u['email'],$u['role'],$u['active'],$u['password_hash'],$u['auth_version'],$u['id']]);
    else $this->pdo->prepare('INSERT INTO users (id,club_id,email,role,active,password_hash,auth_version) VALUES (?,?,?,?,?,?,?)')->execute([$u['id'],$u['club_id'],$u['email'],$u['role'],$u['active'],$u['password_hash'],$u['auth_version']]);

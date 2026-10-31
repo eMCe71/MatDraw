@@ -152,6 +152,7 @@ Domyślne `php` w SSH na web9 to 8.1, dlatego instalator i wszystkie skrypty uru
 - Automatycznie: każdy push/scalenie do `main`.
 - Ręcznie: **Actions → Test, build i deploy → Run workflow**, gałąź `main`, bez zaznaczania „Przywróć poprzednie wydanie”.
 - Konkretna starsza wersja: `git revert` niechcianych zmian na `main` (pipeline zbuduje i wdroży wynik).
+- **Nigdy nie usuwaj `dist/sw.js`** (także przy `git revert` do kodu sprzed PWA): przeglądarki, które raz otworzyły nową stronę, trzymają jej service worker i jego kopię aplikacji, dopóki serwer nie poda nowego `sw.js`. Gołe `dist/sw.js` z pustą listą plików (szablon) jest wspieranym wyłącznikiem dla złego wydania frontendu: usuwa pamięć podręczną `matbravo-*`.
 
 ## Kiedy wdrażać
 
@@ -202,6 +203,8 @@ Zapytaj też AfterMarket, jak często i jak długo przechowuje własne kopie kon
 ## Powrót do poprzedniego wydania
 
 **Rollback zmienia tylko kod.** Schemat bazy zmienia się wyłącznie przez dodawanie (nowe tabele i kolumny), więc poprzednie wydanie działa na nowym schemacie. Kopia bazy sprzed ostatniej migracji jest w `~/matdraw/backups`.
+
+**Service worker przy powrocie.** Gdy przywracane wydanie nie ma własnego `sw.js` (kod sprzed PWA), `deploy-remote.sh` zapisuje na stronie `sw.js`-wyłącznik (komunikat „Wydanie bez sw.js: … zapisano sw.js wyłączający service worker”) i dopisuje do `.htaccess` regułę `no-cache` dla niego. Przeglądarki, które otworzyły nowszą wersję, przy najbliższym sprawdzeniu aktualizacji usuwają jej pamięć podręczną, wyrejestrowują service worker i przeładowują otwarte karty z serwera. Bez tego zostałyby na nowszej aplikacji, która rozmawiałaby ze starym API. Następne wdrożenie wydania z własnym `sw.js` zastępuje oba pliki.
 
 - Automatycznie: gdy po przełączeniu strona lub API nie odpowiada poprawnie z winy wydania. Problemy hostingu (429, 503, brak połączenia z bazą) nie cofają wydania, bo poprzednie wydanie by nie pomogło.
 - Ręcznie w GitHub: **Run workflow** na `main` z zaznaczonym „Przywróć poprzednie wydanie” — przywraca na stronę wydanie sprzed ostatniego deployu, bez testów i budowania.
@@ -303,8 +306,8 @@ Inne kombinacje aplikacja odrzuca: `billing_enforce` wymaga `billing_enabled`; r
 5. **Kopie zapasowe (przed startem płatności):** cron z `dump.php --auto` (sekcja „Migracje bazy i kopie zapasowe”), pytanie do AfterMarket o ich własne kopie, comiesięczne pobieranie `~/matdraw/backups` na własny dysk.
 6. **Stripe w trybie testowym** — sekcja „Stripe — konfiguracja krok po kroku”, punkty 1–4.
 7. **Ustawienia w panelu Stripe** — tamże, punkt 5 (osobno dla trybu testowego i na żywo).
-8. **Okno testów:** w `config.php` `billing_enabled=true`, `billing_mode='test'`, `billing_enforce=true`, `signup_enabled=false`, `signup_invite_token` (losowe 32 znaki, np. z `/usr/local/php83/bin/php -r 'echo bin2hex(random_bytes(16)), PHP_EOL;'`) i `support_email`. Zalogowany jako Administrator otwórz w przeglądarce `https://matbravo.com/api/index.php?route=diagnostics&probe=stripe` (dla tej diagnostyki nie ma ekranu w panelu): w odpowiedzi musi być `"stripe":{"reachable":true,…}` (limit 6 sprawdzeń na godzinę). Testy z linku `https://matbravo.com/#signup?invite=TOKEN`: karta testowa 4242 4242 4242 4242, płatność z 3DS, portal klienta, anulowanie, usunięcie konta. Nowe konta personelu zakładane w tym oknie oznaczaj jako darmowe.
-9. **Tryb na żywo:** `stripe-setup.php --mode=live` (ukryte pole, potem Roll key klucza `sk_live_…`), klucz `rk_live_…` w config i `billing_mode='live'`, jedna własna płatność, zwrot w panelu Stripe, usunięcie kont testowych w panelu **Członkowie**. Następnie `signup_enabled=true` i usunięcie `signup_invite_token` — to jest start.
+8. **Okno testów:** w `config.php` `billing_enabled=true`, `billing_mode='test'`, `billing_enforce=true`, `signup_enabled=false`, `signup_invite_token` (losowe 32 znaki, np. z `/usr/local/php83/bin/php -r 'echo bin2hex(random_bytes(16)), PHP_EOL;'`) i `support_email`. Zalogowany jako Administrator otwórz w przeglądarce `https://matbravo.com/api/index.php?route=diagnostics&probe=stripe` (dla tej diagnostyki nie ma ekranu w panelu): w odpowiedzi musi być `"stripe":{"reachable":true,…}` (limit 6 sprawdzeń na godzinę). Sprawdź też `"server":{…,"afterResponse":true}`: przy `false` hosting nie umie wysłać odpowiedzi przed dokończeniem pracy, więc synchronizacja płatności i zadania w tle nie działają przy okazji ruchu i wpis crona `stripe-sync.php --events --due` (sekcja „Cron”) jest **obowiązkowy**. Testy z linku `https://matbravo.com/#signup?invite=TOKEN`: karta testowa 4242 4242 4242 4242, płatność z 3DS, portal klienta, anulowanie, usunięcie konta. Nowe konta personelu zakładane w tym oknie oznaczaj jako darmowe.
+9. **Tryb na żywo:** najpierw, jeszcze przy `billing_mode='test'`, usuń konta testowe w panelu **Członkowie**: usunięcie konta kasuje w Stripe wszystkich klientów tego konta (także zastąpionych przy zmianie waluty), ale tylko w bieżącym trybie, bo `config.php` ma jeden klucz. Konto testowe usunięte dopiero w trybie na żywo zostaje oznaczone jako problem, a jego klienta testowego usuwasz ręcznie w panelu Stripe (identyfikator jest w historii płatności konta). Potem `stripe-setup.php --mode=live` (ukryte pole, potem Roll key klucza `sk_live_…`), klucz `rk_live_…` w config i `billing_mode='live'`, jedna własna płatność i zwrot w panelu Stripe. Następnie `signup_enabled=true` i usunięcie `signup_invite_token` — to jest start.
 10. **(Opcjonalnie) zgłoszenie do AfterMarket** w sprawie webhooków Stripe (treść w sekcji Stripe, punkt 6). W tym samym zgłoszeniu zapytaj o limity żądań na IP i o LSCache.
 11. **(Opcjonalnie) dodatkowe wpisy crona** — sekcja „Cron (zalecany)”.
 12. **Test obciążenia z zewnątrz** po pierwszym wdrożeniu — sekcja „Odpowiedzi hostingu 429/503”.
@@ -312,7 +315,7 @@ Inne kombinacje aplikacja odrzuca: `billing_enforce` wymaga `billing_enabled`; r
 
 ## Stripe — konfiguracja krok po kroku
 
-Płatności działają bez webhooków i bez crona (aplikacja sama pyta Stripe o stan subskrypcji), dlatego blokada adresów centrów danych przez hosting ich nie psuje.
+Płatności działają bez webhooków (aplikacja sama pyta Stripe o stan subskrypcji), dlatego blokada adresów centrów danych przez hosting ich nie psuje. Bez crona działają tylko wtedy, gdy diagnostyka pokazuje `"afterResponse":true` (PHP wysyła odpowiedź przed synchronizacją po niej); przy `false` cron `stripe-sync.php --events --due` jest obowiązkowy, bo inaczej odnowienia subskrypcji nie zostaną zapisane (dostęp zniknie ok. 3 dni po każdym odnowieniu), a nieudane usunięcia klientów Stripe nie będą ponawiane.
 
 1. **Klucz ograniczony.** W panelu Stripe (tryb testowy): **Developers → API keys → Create restricted key**, nazwa „MatBravo serwer”. Uprawnienia: Customers — Write; Checkout Sessions — Write; Customer portal — Write; Subscriptions — Write; Prices i Products — Read; Invoices — Read; Events — Read; wszystko inne — None. Powstaje klucz `rk_test_…`.
 2. **Konfiguracja produktu, cen i portalu.** Przez SSH uruchom:
@@ -344,7 +347,7 @@ W hali wiele telefonów ma ten sam adres IP (wspólne Wi-Fi), więc limity liczo
 | Klucz | Domyślnie | Co liczy |
 |---|---|---|
 | `signup_limit_ip_hour` / `signup_limit_ip_day` | 30 / 100 | nowe konta z jednego IP na godzinę / dobę |
-| `signup_limit_global_hour` | 200 | wszystkie nowe konta na godzinę (hamulec przed botami) |
+| `signup_limit_global_hour` | 200 | wszystkie nowe konta na godzinę (hamulec przed botami); liczą się tylko konta faktycznie założone, nie nieudane próby; `0` wyłącza hamulec |
 | `login_limit_ip` | 100 | próby logowania z jednego IP na 15 minut (para IP + e-mail: 8) |
 | `username_check_limit_session` / `username_check_limit_ip` | 30 / 300 | sprawdzenia nazwy użytkownika na 10 minut |
 
@@ -366,8 +369,8 @@ Jeśli w dniu zawodów ludzie zgłaszają „Zbyt wiele prób…”, dopisz w `c
 
 Hosting (LiteSpeed/CloudLinux) może odrzucać żądania, zanim dotrą do PHP: **429** (za dużo żądań), **503** lub **508** (wyczerpane limity konta). Aplikacja tego nie widzi bezpośrednio, dlatego zgłaszają to przeglądarki.
 
-- **Gdzie to widać:** panel Admina → **Moderacja → Ustawienia czatu** → „Odpowiedzi hostingu w ostatniej godzinie”; DirectAdmin → **Resource Usage** (limity LVE: EP, NPROC, CPU).
-- **Kiedy przełączyć preset:** gdy w ciągu godziny jest ponad 50 zgłoszeń 429 (albo kilka 503/508), przełącz tempo czatu na „Oszczędne”; gdy to nie pomaga — „Awaryjne”. Po zawodach wróć do „Normalne”. Preset nie zmienia się sam.
+- **Gdzie to widać:** panel Admina → **Moderacja → Ustawienia czatu** → „Odpowiedzi hostingu w ostatniej godzinie”; DirectAdmin → **Resource Usage** (limity LVE: EP, NPROC, CPU). Liczby w panelu pochodzą z przeglądarek i może je zawyżyć każdy, kto wyśle spreparowane zapytanie; aplikacja liczy co najwyżej jedno zgłoszenie na minutę i rodzaj odpowiedzi z jednego adresu IP gościa lub jednego konta, a w nim najwyżej 10 odpowiedzi (jeden adres dodaje więc najwyżej 600 na godzinę). Goście w hali za jednym adresem IP liczą się razem, jak jedna osoba. Zanim zgłosisz problem do AfterMarket, potwierdź go w Resource Usage.
+- **Kiedy przełączyć preset:** gdy w ciągu godziny jest ponad 50 odpowiedzi 429 (co najmniej sześć zgłoszeń z różnych minut albo od różnych osób; albo kilka 503/508), przełącz tempo czatu na „Oszczędne”; gdy to nie pomaga — „Awaryjne”. Po zawodach wróć do „Normalne”. Preset nie zmienia się sam.
 - **Test obciążenia z zewnątrz** (po pierwszym wdrożeniu i przed startem). Najpierw z dowolnego komputera:
 
   ```bash
@@ -397,7 +400,7 @@ Hosting (LiteSpeed/CloudLinux) może odrzucać żądania, zanim dotrą do PHP: *
 
 ## Cron (zalecany)
 
-Aplikacja działa poprawnie bez crona: zadania porządkowe (sprzątanie sesji, retencja czatu, synchronizacja płatności) uruchamiają się przy okazji ruchu na stronie. Cron sprawia, że dzieje się to regularnie. DirectAdmin → **Advanced Features → Cron Jobs** (**[do weryfikacji]**, czy pozycja jest dostępna na web9; `server_check` pokazuje, czy jest `crontab`):
+Aplikacja działa poprawnie bez crona, o ile diagnostyka (`?route=diagnostics`) pokazuje `"afterResponse":true`: zadania porządkowe (sprzątanie sesji, retencja czatu, synchronizacja płatności) uruchamiają się wtedy przy okazji ruchu na stronie, po wysłaniu odpowiedzi. Przy `"afterResponse":false` synchronizacja płatności przy okazji ruchu nie działa i wpis `stripe-sync.php --events --due` poniżej jest obowiązkowy. Cron sprawia też, że wszystko dzieje się regularnie. DirectAdmin → **Advanced Features → Cron Jobs** (**[do weryfikacji]**, czy pozycja jest dostępna na web9; `server_check` pokazuje, czy jest `crontab`):
 
 | Kiedy | Polecenie |
 |---|---|

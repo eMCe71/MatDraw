@@ -6,8 +6,9 @@ use PDO;
 /**
  * Chat channels, polling, sending and deleting (plan §5.1–5.5, §2.4). Never touches Repository::transaction/snapshot or
  * app_meta (D5): every write is one short transaction serialized only by the channel row (SELECT … FOR UPDATE), taken
- * before anything else; the only other rows it locks are the message rows it then changes. Writers of one channel queue
- * on that row, writers of different channels never meet. Times are computed in PHP (milliseconds in created_ms and
+ * before anything else; the only other rows it locks are the message rows it then changes and, when sending, the
+ * sender's users row (after the channel row, the order account deletion uses too), so the send limits hold for parallel
+ * sessions of one account. Writers of one channel queue on that row, writers of different channels never meet. Times are computed in PHP (milliseconds in created_ms and
  * changed_ms, seconds elsewhere), never by the database.
  *
  * Visibility (§5.2), one rule for reading and writing (visibleFor): a global channel is visible to everyone; a tournament
@@ -20,7 +21,8 @@ use PDO;
  *
  * Polling (§5.4): ch=<id>:<rev>,… (≤ 6 channels on screen; rev 0 = the last 50 messages, with before=<message id> the 30
  * before it), h=<id>:<lastReadId>:<knownLast>,… (≤ 30 background channels, unread counters only), cv=<settings version>,
- * e=<n>:<status> (hosting answers seen by the client since its last success). One SELECT reads every channel of ch and h,
+ * e=<n>:<status> (hosting answers seen by the client since its last success), a=1 (chat-feed only: someone is reading,
+ * so a staff session's activity is refreshed too, active()). One SELECT reads every channel of ch and h,
  * one the tournaments behind them, one the settings; nothing changed → 204 (also with h). Changes come by rev (LIMIT 101:
  * more=true after 100, the client reloads); unread counts are computed only for channels whose last_message_id differs
  * from knownLast. Answer {cv, cfg (only when cv is stale), ch:{id:{rev, st, more, older?, m}}, heads:{id:{last, n}},
@@ -40,6 +42,8 @@ final class Chat {
  ];
  public const SCOPES=['world'=>'Świat','pl'=>'Polska'];
  public const MAX_CH=6,MAX_H=30,PAGE=50,HISTORY=30,BATCH=100,UNREAD_CAP=100,ARCHIVE=50,UPCOMING=100,BODY_MAX=1000,CONT_MS=300000;
+ /** A hosting report (e) counts once per reporter, status and HEALTH_WINDOW seconds, at most HEALTH_N answers (feed()). */
+ public const HEALTH_WINDOW=60,HEALTH_N=10;
  private const MSG='id,rev,user_id,body,cont,state,created_ms';
  private const CHANNEL='id,kind,slug,scope,tournament_id,rev,last_message_id,msg_count,status';
  private const T_STATUSES="'open','closed','finished'";
@@ -108,13 +112,22 @@ final class Chat {
  }
  /**
   * Viewer of a peek route (chat-feed): Auth::peek, then one query; null for no, stale or blocked session. The database
-  * opens only when the cookie names a live session (a guest's poll costs no connection here).
+  * opens only when the cookie names a live session (a guest's poll costs no connection here). $active (active()) lets
+  * the poll refresh a staff session's activity too.
   */
- public static function peekViewer(array $c,\Closure $pdo,int $now):?array {
-  $s=Auth::peek($c);if(!$s||!is_string($s['userId']))return null;
+ public static function peekViewer(array $c,\Closure $pdo,int $now,bool $active=false):?array {
+  $s=Auth::peek($c,$active);if(!$s||!is_string($s['userId']))return null;
   $v=self::viewer($pdo(),$s['userId'],$c,$now);
   return $v&&$v['authVersion']===$s['authVersion']?$v:null;
  }
+
+ /**
+  * A poll by someone reading the chat (plan §3.5 step 6): a=1, which the client may add only while a chat is on screen
+  * and the person's own last interaction is within the last idle level (cfg.idle[3]), on a poll that carries ch= (a
+  * channel on screen). Background head polls (h= only) never count, whatever they carry, so they cannot keep an
+  * unattended staff tab signed in.
+  */
+ public static function active(array $get,array $q):bool{return ($get['a']??null)==='1'&&$q['ch']!==[];}
 
  // ——— Reading (§5.4) ———
 
@@ -154,9 +167,17 @@ final class Chat {
   foreach($q['ch'] as $id=>$rev)if($rev===0&&$ch[$id]==='same')$ch[$id]='initial';
   return ['ch'=>$ch,'heads'=>$heads,'none'=>$none];
  }
- /** One poll (public-chat with $viewer null, chat-feed otherwise); null = 204. */
+ /**
+  * One poll (public-chat with $viewer null, chat-feed otherwise); null = 204. A hosting report (e) counts once per
+  * reporter (the address bucket of a guest, the account of a signed-in person), status and minute, with at most 10
+  * answers: the route is public and cookie-less and the Admin acts on these figures (DEPLOY-PL.md), so one address adds
+  * at most 600 an hour however often it repeats e=50:503, while a real overload still shows: a member's tab reports
+  * after each recovery and a hall of guests behind one address reports every minute (an hourly window counted that
+  * hall once and kept the runbook's threshold out of reach).
+  */
  public static function feed(PDO $pdo,array $c,array $q,?array $viewer,int $nowMs):?array {
-  if($q['e'])ChatSettings::report($pdo,$q['e'][0],$q['e'][1],intdiv($nowMs,1000));
+  if($q['e']&&RateLimit::hit($pdo,$c['app_key'],'chat-health-'.$q['e'][1],$viewer!==null?'u:'.$viewer['id']:'ip:'.ClientIp::bucket($c),1,self::HEALTH_WINDOW,intdiv($nowMs,1000))===0)
+   ChatSettings::report($pdo,min($q['e'][0],self::HEALTH_N),$q['e'][1],intdiv($nowMs,1000));
   $channels=self::channelRows($pdo,array_values(array_unique([...array_keys($q['ch']),...array_keys($q['h'])])));
   $tours=self::tournamentRows($pdo,$channels);$settings=ChatSettings::get($pdo);$today=self::today();$grace=$settings['data']['graceDays'];
   $state=[];$tour=fn(array $row):?array=>$row['tournament_id']!==null?$tours[$row['tournament_id']]??null:null;
@@ -275,8 +296,15 @@ final class Chat {
   if(mb_strlen($s)>self::BODY_MAX)throw new AppError('Wiadomość może mieć najwyżej 1000 znaków.',422);
   return $s;
  }
- /** cont (§5.3): the previous message of the channel is visible, by the same author and less than 5 minutes older. */
- public static function cont(?array $prev,string $userId,int $nowMs):int{return $prev&&$prev['user_id']===$userId&&$prev['state']==='visible'&&$nowMs-(int)$prev['created_ms']<self::CONT_MS?1:0;}
+ /**
+  * cont (§5.3): the previous message of the channel is visible, by the same author, less than 5 minutes older and of the
+  * same UTC day. The day matters for guests: their variant g is keyed by the UTC day (ChatGuestView), and c=1 across
+  * midnight would tell them that today's variant is yesterday's one of the same person, linking the days.
+  */
+ public static function cont(?array $prev,string $userId,int $nowMs):int {
+  return $prev&&$prev['user_id']===$userId&&$prev['state']==='visible'&&$nowMs-(int)$prev['created_ms']<self::CONT_MS
+   &&intdiv((int)$prev['created_ms'],86400000)===intdiv($nowMs,86400000)?1:0;
+ }
  /**
   * Seconds until the next message is allowed (0 = now), from the sender's last day {day_n, day_first, last_ms, minute_n,
   * minute_first} and the limits {gap s, perMin, perDay} (pure).
@@ -288,7 +316,11 @@ final class Chat {
   if((int)$r['day_n']>=$send['perDay'])$ms=max($ms,(int)$r['day_first']+86400000-$nowMs);
   return $ms>0?(int)ceil($ms/1000):0;
  }
- /** Send limits from one query on the index (user_id, created_ms); 429 with Retry-After and retry. */
+ /**
+  * Send limits from one query on the index (user_id, created_ms); 429 with Retry-After and retry. send() runs it once
+  * before its transaction (a cheap refusal) and again inside it, after locking the sender's users row: parallel requests
+  * from several sessions of one account otherwise all read the same count and all pass.
+  */
  private static function limit(PDO $pdo,string $userId,array $send,int $nowMs):void {
   $minute=$nowMs-60000;
   $q=$pdo->prepare('SELECT COUNT(*) AS day_n,MIN(created_ms) AS day_first,MAX(created_ms) AS last_ms,SUM(created_ms>?) AS minute_n,MIN(CASE WHEN created_ms>? THEN created_ms END) AS minute_first FROM chat_messages WHERE user_id=? AND created_ms>?');
@@ -328,6 +360,8 @@ final class Chat {
   try{
    $l=$pdo->prepare('SELECT rev,status FROM chat_channels WHERE id=? FOR UPDATE');$l->execute([$id]);$cur=$l->fetch(PDO::FETCH_ASSOC);$l->closeCursor();
    if(!$cur||$cur['status']!=='open')throw new AppError('Ten czat jest tylko do odczytu.',409);
+   $u=$pdo->prepare('SELECT id FROM users WHERE id=? FOR UPDATE');$u->execute([$viewer['id']]);$u->fetchAll();
+   self::limit($pdo,$viewer['id'],$d['send'],$nowMs??self::nowMs());
    $prev=self::rows($pdo,'SELECT user_id,created_ms,state FROM chat_messages WHERE channel_id=? ORDER BY id DESC LIMIT 1',[$id])[0]??null;
    $ms=$nowMs??self::nowMs();$rev=(int)$cur['rev']+1;$cont=self::cont($prev,$viewer['id'],$ms);
    $pdo->prepare("INSERT INTO chat_messages (channel_id,rev,user_id,client_id,body,cont,state,created_ms) VALUES (?,?,?,?,?,?,'visible',?)")->execute([$id,$rev,$viewer['id'],$cid,$body,$cont,$ms]);

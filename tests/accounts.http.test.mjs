@@ -1,6 +1,7 @@
 // API core over real PHP and MariaDB/MySQL (plan §11, backend-api): lightweight session/login with unchanged shapes,
 // member isolation, me for every role, public-config, the payment gate for staff, read-only peek sessions (no file, no
-// cookie, activity refresh after idle/4), maintenance and schema-behind 503, client_outdated, the session lock during
+// cookie, activity refresh after idle/4 for members, for staff only on a chat-feed poll of someone reading the chat),
+// maintenance and schema-behind 503, client_outdated, the session lock during
 // background jobs, login timing and limits, and session housekeeping through bin/cron.php. Run through scripts/test-http.sh.
 // Routes::dispatch paths that no route of this slice uses yet (session POST, upload, webhook, chat-off, null → 204, user
 // rules, work after a session POST) run against test-only routes (TEST_ROUTES) written into the disposable release.
@@ -199,19 +200,62 @@ test('peek routes never send cookies or create session files; activity is refres
  const idle=await raw('me',{cookie:c.cookie});assert.equal(idle.status,401);assert.equal(idle.headers.get('set-cookie'),null);
  assert.equal(fixture('session-read',{sid:id}).data.last,t-1801,'peek never clears or rewrites a session');assert.deepEqual(sessionFiles(),files);
  fixture('session-edit',{sid:id,set:{last:t,created:t-43201}});assert.equal((await raw('me',{cookie:c.cookie})).status,401);
- // Below idle/4 (450 s for staff): no write. Above it: one write of last, same id, no cookie.
+ // Staff (admin, editor, club): a peek route never refreshes activity, below or above idle/4 (450 s): the 30-minute
+ // idle limit counts from the last session request, so background polls cannot keep an unattended staff tab signed in.
  t=now();fixture('session-edit',{sid:id,set:{last:t-60,created:t-60}});
  assert.equal((await raw('me',{cookie:c.cookie})).status,200);assert.equal(fixture('session-read',{sid:id}).data.last,t-60);
- fixture('session-edit',{sid:id,set:{last:t-451}});const t0=now();
- const refreshed=await raw('me',{cookie:c.cookie});assert.equal(refreshed.status,200);assert.equal(refreshed.headers.get('set-cookie'),null);
- const after=fixture('session-read',{sid:id}).data;assert.ok(after.last>=t0,JSON.stringify(after));assert.equal(after.userId,c.login.data.user.id);
- assert.deepEqual(sessionFiles(),files);
+ fixture('session-edit',{sid:id,set:{last:t-451}});
+ const staffPeek=await raw('me',{cookie:c.cookie});assert.equal(staffPeek.status,200);assert.equal(staffPeek.headers.get('set-cookie'),null);
+ assert.equal(fixture('session-read',{sid:id}).data.last,t-451,'a staff session is not refreshed by peek');assert.equal(fixture('session-read',{sid:id}).data.kind,'staff');
  assert.equal((await c.req('session')).data.user.id,c.login.data.user.id,'the same cookie keeps working');
- // Members: idle/4 of 14 days.
+ assert.ok(fixture('session-read',{sid:id}).data.last>=t,'a session request refreshes staff activity');
+ // Members: idle/4 of 14 days; above it one write of last, same id, no cookie, no new file.
  fixture('member',{email:'peek.member@test.example',password:PASSWORD,profile:true,exempt:true});
- const m=await signIn('peek.member@test.example');t=now();
+ const m=await signIn('peek.member@test.example');t=now();const files2=sessionFiles();
+ assert.equal(fixture('session-read',{sid:sid(m)}).data.kind,'member');
  fixture('session-edit',{sid:sid(m),set:{last:t-86400}});assert.equal((await raw('me',{cookie:m.cookie})).status,200);assert.equal(fixture('session-read',{sid:sid(m)}).data.last,t-86400);
- fixture('session-edit',{sid:sid(m),set:{last:t-302401}});assert.equal((await raw('me',{cookie:m.cookie})).status,200);assert.ok(fixture('session-read',{sid:sid(m)}).data.last>=t);
+ fixture('session-edit',{sid:sid(m),set:{last:t-302401}});const refreshed=await raw('me',{cookie:m.cookie});
+ assert.equal(refreshed.status,200);assert.equal(refreshed.headers.get('set-cookie'),null);
+ const after=fixture('session-read',{sid:sid(m)}).data;assert.ok(after.last>=t,JSON.stringify(after));assert.equal(after.userId,m.login.data.user.id);
+ assert.deepEqual(sessionFiles(),files2);
+ // A member session signed in before the kind was stored: its idle limit above the staff one marks it.
+ fixture('session-edit',{sid:sid(m),set:{kind:null,last:t-302401}});assert.equal((await raw('me',{cookie:m.cookie})).status,200);assert.ok(fixture('session-read',{sid:sid(m)}).data.last>=t);
+});
+
+test('background polls (chat heads, moderation badge, me, chat-channels) never keep a staff session alive; members stay signed in',{skip},async()=>{
+ const admin=await signIn(...ADMIN);
+ fixture('member',{email:'poll.member@test.example',password:PASSWORD,profile:true,exempt:true});
+ const m=await signIn('poll.member@test.example');
+ // A short idle limit stored in both sessions (as sign-in stores it): 6 s, so the refresh threshold idle/4 is 1.5 s.
+ const t=now();for(const c of [admin,m])fixture('session-edit',{sid:sid(c),set:{idle:6,last:t-4}});
+ const polls=['chat-feed&h=1:0:0,2:0:0','me','chat-channels'];
+ for(let round=0;round<2;round++){
+  for(const route of [...polls,'admin-chat-reports'])assert.ok([200,204].includes((await raw(route,{cookie:admin.cookie})).status),route);
+  for(const route of polls)assert.ok([200,204].includes((await raw(route,{cookie:m.cookie})).status),route);
+ }
+ assert.equal(fixture('session-read',{sid:sid(admin)}).data.last,t-4,'peek polls never refresh a staff session');
+ assert.ok(fixture('session-read',{sid:sid(m)}).data.last>=t,'a member session is refreshed after idle/4');
+ // Past the staff session's idle limit: signed out although the page kept polling; the member is still signed in.
+ while(now()<t+3)await sleep(100);
+ assert.equal((await raw('me',{cookie:admin.cookie})).status,401);
+ assert.equal((await admin.req('session')).data.user,null,'the staff session expired after its idle limit');
+ assert.equal((await m.req('session')).data.user?.id,m.login.data.user.id);
+});
+
+test('a staff session reading the chat (chat-feed with a=1 and a channel on screen) stays signed in; a=1 anywhere else refreshes nothing',{skip},async()=>{
+ const reader=await signIn(...ADMIN),unattended=await signIn(...ADMIN);
+ const t=now();for(const c of [reader,unattended])fixture('session-edit',{sid:sid(c),set:{idle:6,last:t-4}});
+ // a=1 on a heads-only poll or on another peek route, and a chat on screen without a=1, are not someone reading.
+ for(const route of ['chat-feed&h=1:0:0,2:0:0&a=1','me&a=1','chat-channels&a=1','admin-chat-reports&a=1','chat-feed&ch=1:0','chat-feed&ch=1:0&a=yes'])
+  assert.ok([200,204].includes((await raw(route,{cookie:unattended.cookie})).status),route);
+ assert.equal(fixture('session-read',{sid:sid(unattended)}).data.last,t-4,'no refresh without a reading poll');
+ // Reading (plan §3.5 step 6): one refresh write after idle/4, same id, no cookie.
+ const r=await raw('chat-feed&ch=1:0&a=1',{cookie:reader.cookie});assert.equal(r.status,200);assert.equal(r.headers.get('set-cookie'),null);
+ assert.ok(fixture('session-read',{sid:sid(reader)}).data.last>=t,'reading the chat refreshes a staff session');
+ // Past the idle limit both sessions started with: the reader is still signed in, the unattended session expired.
+ while(now()<t+3)await sleep(100);
+ assert.equal((await reader.req('session')).data.user?.id,reader.login.data.user.id);
+ assert.equal((await unattended.req('session')).data.user,null);
 });
 
 test('maintenance file and schema behind code answer 503 with Retry-After; an outdated client gets 409',{skip},async()=>{

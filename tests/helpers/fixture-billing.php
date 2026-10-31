@@ -10,9 +10,10 @@
 //   billing-country {userId, country}        sets the profile country (staff accounts have no profile fixture)
 //   billing-user-email {userId, email}       changes users.email directly (the member-email route belongs to another slice)
 //   billing-tombstone {userId}               turns the row into the tombstone of §3.8 (deleted_at, exemption and pending cleared)
+//   billing-customers {userId}               billing_customers rows of the account (every Stripe customer it ever had)
 declare(strict_types=1);
 use MatDraw\{Billing,BillingSync,StripeClient,StripeError};
-const FIXTURE_BILLING_CONFIG_KEYS=['stripe_webhook_secrets','stripe_down_seconds','billing_sync_min_interval','stripe_portal_configuration','billing_grace_days'];
+const FIXTURE_BILLING_CONFIG_KEYS=['stripe_webhook_secrets','stripe_down_seconds','billing_sync_min_interval','stripe_portal_configuration','billing_grace_days','billing_amounts'];
 return [
  'billing-row'=>function(PDO $pdo,array $p):?array{$q=$pdo->prepare('SELECT * FROM billing_accounts WHERE user_id=?');$q->execute([(string)($p['userId']??'')]);return $q->fetch(PDO::FETCH_ASSOC)?:null;},
  'billing-audit'=>function(PDO $pdo,array $p):array{
@@ -44,6 +45,7 @@ return [
  'billing-config-set'=>fn(PDO $pdo,array $p):array=>fixture_config_set((array)($p['set']??[]),FIXTURE_BILLING_CONFIG_KEYS,'billing-config-set'),
  'billing-country'=>function(PDO $pdo,array $p):?string{$uid=(string)($p['userId']??'');MatDraw\Accounts::ensureProfile($pdo,$uid);$pdo->prepare('UPDATE user_profiles SET country=? WHERE user_id=?')->execute([$p['country']??null,$uid]);return $p['country']??null;},
  'billing-user-email'=>function(PDO $pdo,array $p):bool{$pdo->prepare('UPDATE users SET email=? WHERE id=?')->execute([mb_strtolower((string)$p['email']),(string)$p['userId']]);return true;},
+ 'billing-customers'=>function(PDO $pdo,array $p):array{$q=$pdo->prepare('SELECT customer_id,livemode,redacted_at FROM billing_customers WHERE user_id=? ORDER BY created_at,customer_id');$q->execute([(string)($p['userId']??'')]);return $q->fetchAll(PDO::FETCH_ASSOC);},
  'billing-tombstone'=>function(PDO $pdo,array $p):array{
   $pdo->prepare('UPDATE billing_accounts SET deleted_at=?,billing_exempt=0,exempt_reason=NULL,exempt_by=NULL,exempt_at=NULL,exempt_until=NULL,pending_checkout_id=NULL,pending_checkout_expires=NULL,updated_at=? WHERE user_id=?')->execute([time(),time(),(string)$p['userId']]);
   $q=$pdo->prepare('SELECT * FROM billing_accounts WHERE user_id=?');$q->execute([(string)$p['userId']]);return $q->fetch(PDO::FETCH_ASSOC);

@@ -72,6 +72,28 @@ test('sign-up: 30 attempts per hour per address, then 429 with Retry-After',{ski
  r=await c.req('signup',signupBody());assert.equal(r.status,429);assert.equal(r.data.error,'Zbyt wiele prób zakładania konta. Spróbuj ponownie później.');
  assert.ok(r.data.retry>0&&Number(r.headers.get('retry-after'))>0);
 });
+test('sign-up: the global brake counts accounts created, not attempts; junk cannot block others; 0 switches it off',{skip},async()=>{
+ const old=fixture('accounts-config',{set:{signup_limit_global_hour:3,signup_limit_ip_hour:1000,signup_limit_ip_day:1000}});
+ try{
+  const tooMany='Zbyt wiele prób zakładania konta. Spróbuj ponownie później.';
+  // Junk without signup-begin, a too-quick form and the bot trap: twice the global limit of failed requests.
+  for(let i=0;i<3;i++){
+   assert.equal((await (await fresh()).req('signup',{junk:1})).status,400,'junk '+i);
+   assert.equal((await (await begun()).req('signup',signupBody({website:'http://spam.example'}))).status,400,'trap '+i);
+  }
+  // A real person still gets through, and so do the next ones up to the limit of 3 created accounts in the hour.
+  for(let i=0;i<3;i++){const r=await (await begun()).req('signup',signupBody());assert.equal(r.status,200,`account ${i}: ${JSON.stringify(r.data)}`);}
+  const blocked=await (await begun()).req('signup',signupBody());
+  assert.deepEqual([blocked.status,blocked.data.error],[429,tooMany]);assert.ok(blocked.data.retry>0&&Number(blocked.headers.get('retry-after'))>0);
+  // A refused attempt does not count either: lifting the limit to 4 lets exactly one more account in.
+  fixture('accounts-config',{set:{signup_limit_global_hour:4}});
+  assert.equal((await (await begun()).req('signup',signupBody())).status,200);
+  assert.equal((await (await begun()).req('signup',signupBody())).status,429);
+  // 0 switches the brake off (the owner's lever during an attack on the counter); the address limits stay.
+  fixture('accounts-config',{set:{signup_limit_global_hour:0}});
+  assert.equal((await (await begun()).req('signup',signupBody())).status,200,'no global brake with 0');
+ }finally{fixture('accounts-config',{set:old});}
+});
 test('sign-up switched off, then the invite-only window (§3.6, §6.10)',{skip},async()=>{
  const token='invite-'+'x'.repeat(30),signup=()=>publicConfig('signup');assert.equal(await signup(),true);
  const old=await setConfig({signup_enabled:false},signup,false);
@@ -330,7 +352,9 @@ test('accounts-cleanup: the avatar sweep resumes where the previous run stopped'
 });
 test('diagnostics: admin only, no secrets; probe=stripe limited to 6 per hour',{skip},async()=>{
  const c=await signIn(...ADMIN);const r=await get('diagnostics',{cookie:c.cookie});assert.equal(r.status,200,JSON.stringify(r.data));
- assert.deepEqual(Object.keys(r.data),['php','gd','exif','curl','openssl','intl','uploadsWritable','avatarMode','schema','sessions','backups','billing','chat','stripe']);
+ assert.deepEqual(Object.keys(r.data),['php','gd','exif','curl','openssl','intl','server','uploadsWritable','avatarMode','schema','sessions','backups','billing','chat','stripe']);
+ // php -S cannot send a response early: the payment sync and jobs after the response would never run there (cron needed).
+ assert.deepEqual(r.data.server,{sapi:'cli-server',afterResponse:false});
  assert.equal(r.data.uploadsWritable,true);assert.equal(r.data.schema.db,r.data.schema.code);assert.deepEqual([r.data.sessions.ownDir,typeof r.data.sessions.files],[true,'number']);
  assert.deepEqual(r.data.billing,{enabled:true,mode:'test'});assert.equal(r.data.stripe,null);assert.equal(r.headers.get('cache-control'),'private, no-store');
  assert.ok(!/rk_test|whsec_|password|app_key/.test(JSON.stringify(r.data)),'no secrets');

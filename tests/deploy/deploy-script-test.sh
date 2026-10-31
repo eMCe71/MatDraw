@@ -8,7 +8,12 @@
 #    copy with the hash of the old data, and the migration leaves the old rows unchanged;
 #  - a failing migration stops before activate; a missing copy blocks a migration unless ALLOW_NO_BACKUP=1;
 #  - the floor guard blocks a rollback to a release before 0002 while a member exists (FORCE_ROLLBACK=1 overrides);
+#  - a rollback to a release without sw.js (the code before the PWA) leaves a kill-switch sw.js with no-cache in the
+#    docroot, and the next activate of a release with its own sw.js replaces it;
 #  - cleanup deletes copies older than 30 days and always keeps the newest one of each kind;
+#  - the release's public/.htaccess keeps what php -S never exercises: the own RewriteEngine block (without it the
+#    AfterMarket account-level ~/.htaccess answers 429), the CSP, the PWA MIME types and no-cache for sw.js; no other
+#    .htaccess under public/ has a RewriteEngine line;
 #  - deploy-verify: ROLLBACK=false on a good release, ROLLBACK=true for a schema older than the code, ROLLBACK=false
 #    with the maintenance file, 503 chat_off accepted with the chat-off file; poll-probe.sh reports the status codes.
 # Usage: tests/deploy/deploy-script-test.sh [port] [db_name]   (defaults 8090 and matdraw_deploy_test_<port>)
@@ -70,12 +75,14 @@ mkdir -p "$base/releases" "$shared" "$site"; chmod 700 "$shared"
  "$app" "mysql:host=$dbhost;port=$dbport;dbname=$dbn;charset=utf8mb4" "md_$port" "$pass" "$(openssl rand -hex 32)" > "$shared/config.php"
 chmod 600 "$shared/config.php"; export MATDRAW_CONFIG=$shared/config.php
 release(){ mkdir -p "$base/releases/$1"; cp -a "$work/build/matdraw-php/public" "$work/build/matdraw-php/backend" "$base/releases/$1/"; }
+# The test's own migrations (a broken one, a probe) take the next free id after the shipped ones.
+next=$(( $("$php" -r 'require $argv[1];echo MatDraw\Migrator::target($argv[2]);' "$work/build/matdraw-php/backend/src/Migrator.php" "$work/build/matdraw-php/backend/migrations") + 1 )); nn=$(printf '%04d' "$next")
 R0=20250101000000-old0000 R1=20260101000001-new1111 R2=20260101000002-bad2222 R3=20260101000003-nob3333
-release "$R1"; release "$R0"; rm -rf "$base/releases/$R0/backend/migrations" "$base/releases/$R0/backend/bin/migrate.php"
+release "$R1"; release "$R0"; rm -rf "$base/releases/$R0/backend/migrations" "$base/releases/$R0/backend/bin/migrate.php" "$base/releases/$R0/public/sw.js" "$base/releases/$R0/public/version.json"
 ln -s "$shared/config.php" "$base/releases/$R0/backend/config.php"
 release "$R2"; echo r2 > "$base/releases/$R2/public/r2-marker.txt"
-printf '%s\n' '<?php' "return ['id'=>5,'name'=>'broken','destructive'=>false,'up'=>function(MatDraw\\Migrator \$m):void{throw new RuntimeException('Celowo błędna migracja testowa.');}];" > "$base/releases/$R2/backend/migrations/0005_broken.php"
-release "$R3"; printf '%s\n' '<?php' "return ['id'=>5,'name'=>'probe','destructive'=>false,'up'=>function(MatDraw\\Migrator \$m):void{\$m->exec('CREATE TABLE IF NOT EXISTS zz_deploy_probe (id INT PRIMARY KEY) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci');}];" > "$base/releases/$R3/backend/migrations/0005_probe.php"
+printf '%s\n' '<?php' "return ['id'=>$next,'name'=>'broken','destructive'=>false,'up'=>function(MatDraw\\Migrator \$m):void{throw new RuntimeException('Celowo błędna migracja testowa.');}];" > "$base/releases/$R2/backend/migrations/${nn}_broken.php"
+release "$R3"; printf '%s\n' '<?php' "return ['id'=>$next,'name'=>'probe','destructive'=>false,'up'=>function(MatDraw\\Migrator \$m):void{\$m->exec('CREATE TABLE IF NOT EXISTS zz_deploy_probe (id INT PRIMARY KEY) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci');}];" > "$base/releases/$R3/backend/migrations/${nn}_probe.php"
 printf '%s\n' '<?php' 'fwrite(STDERR,"dump.php disabled by the test\n");exit(1);' > "$base/releases/$R3/backend/bin/dump.php"
 # Data hash (same method as the http-compat job): per table the sorted SHA-1 of every row's values. --save stores the
 # column lists (without app_meta.schema_version, which a migration advances), --cols hashes only those columns (old rows
@@ -91,6 +98,13 @@ foreach($cols as $t=>$cs){$rows=[];$q=$pdo->query('SELECT `'.implode('`,`',$cs).
 PHP
 dhash(){ "$php" "$work/hash.php" "$@"; }
 restore(){ $root -e "DROP DATABASE IF EXISTS \`$rdb\`; CREATE DATABASE \`$rdb\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;" && gzip -dc "$1" | $root "$rdb"; }
+
+# --- the release's .htaccess (php -S ignores it, so only this check protects it) ---
+ht=$work/build/matdraw-php/public/.htaccess
+ok '.htaccess keeps its own RewriteEngine block with the https/www redirect (AfterMarket answers 429 without it)' 'grep -qx "<IfModule mod_rewrite.c>" "$ht" && grep -qx " RewriteEngine On" "$ht" && grep -qxF " RewriteRule ^ https://%2%{REQUEST_URI} [R=301,L]" "$ht"'
+ok '.htaccess sends the CSP and the PWA MIME types' 'grep -qF "Header always set Content-Security-Policy \"default-src '"'"'self'"'"'; script-src '"'"'self'"'"';" "$ht" && grep -qx " AddType application/manifest+json .webmanifest" "$ht" && grep -qx " AddType text/javascript .js .mjs" "$ht"'
+ok '.htaccess serves sw.js with no-cache' 'grep -A1 -xF " <FilesMatch \"^sw\\.js\$\">" "$ht" | grep -qF "Header set Cache-Control \"no-cache, max-age=0\""'
+ok 'no other .htaccess under public/ has its own RewriteEngine line' '[[ -z $(find "$work/build/matdraw-php/public" -name .htaccess ! -path "$ht" -exec grep -l RewriteEngine {} +) ]]'
 
 # --- check: directories outside the release ---
 run check remote check "$app"
@@ -165,8 +179,16 @@ mkdir "$work/ini"; printf '%s\n' '<?php if(in_array("--rollback-floor",$argv??[]
 printf 'auto_prepend_file=%s\nerror_reporting=E_ALL\ndisplay_errors=1\n' "$work/noise.php" > "$work/ini/zz-noise.ini"
 run 'rollback to R0 without members (PHP notices)' env PHP_INI_SCAN_DIR=":$work/ini" bash "$repo/scripts/deploy-remote.sh" rollback "$base" "$docroot"
 ok 'rollback to a release before 0002 is allowed without members, despite PHP notices' '[[ $rc == 0 && $(readlink -f "$base/current") == "$base/releases/$R0" ]] && ! grep -q "Powrót zablokowany" <<<"$out"'
+# R0 ships no service worker: browsers that loaded R1 would keep R1's worker and its cached app shell. The rollback
+# writes a kill switch (takes over, deletes matbravo-* caches, unregisters, reloads the windows; no fetch handler).
+ks=$docroot/sw.js
+ok 'rollback to a release without sw.js writes the kill-switch worker' '[[ -f $ks && ! -e $base/releases/$R0/public/sw.js ]] && grep -q "Wydanie bez sw.js" <<<"$out" && grep -q "skipWaiting" "$ks" && grep -q "registration.unregister" "$ks" && grep -q "startsWith(.matbravo-.)" "$ks" && grep -q "c.navigate(c.url)" "$ks" && ! grep -q "fetch" "$ks" && node --check "$ks"'
+ok 'the kill switch is served with no-cache (one .htaccess block, the RewriteEngine block kept)' '[[ $(grep -c "matbravo-kill-switch" "$docroot/.htaccess") == 1 ]] && grep -q "Header set Cache-Control \"no-cache, max-age=0\"" "$docroot/.htaccess" && grep -q "RewriteEngine On" "$docroot/.htaccess" && cmp -s <(head -n "$(wc -l < "$base/releases/$R0/public/.htaccess")" "$docroot/.htaccess") "$base/releases/$R0/public/.htaccess"'
+start_server; code=$(curl -sS -D "$work/ks.h" -o "$work/ks.js" -w '%{http_code}' "$app/sw.js")
+ok 'the kill switch answers 200 as JavaScript' '[[ $code == 200 ]] && grep -qi "^content-type:.*javascript" "$work/ks.h" && cmp -s "$work/ks.js" "$ks"'
 run 'activate R1 again' remote activate "$R1"
 ok 'activate a newer release needs no floor check' '[[ $rc == 0 && $(readlink -f "$base/current") == "$base/releases/$R1" && $(cat "$base/releases/$R1/.previous") == "$base/releases/$R0" ]]'
+ok 'activating a release with its own sw.js replaces the kill switch and its .htaccess block' 'cmp -s "$docroot/sw.js" "$base/releases/$R1/public/sw.js" && cmp -s "$docroot/.htaccess" "$base/releases/$R1/public/.htaccess" && ! grep -q "Wydanie bez sw.js" <<<"$out"'
 sql "INSERT INTO users (id,club_id,email,role,active,password_hash,auth_version) VALUES ('m1',NULL,'member@test.example','member',1,'x',1)"
 run 'rollback to R0 with a member' env PHP_INI_SCAN_DIR=":$work/ini" bash "$repo/scripts/deploy-remote.sh" rollback "$base" "$docroot"
 ok 'the floor guard blocks the rollback while a member exists' '[[ $rc != 0 && $(readlink -f "$base/current") == "$base/releases/$R1" ]] && grep -q "dane w bazie wymagają kodu co najmniej w wersji" <<<"$out" && grep -q FORCE_ROLLBACK <<<"$out"'
@@ -195,7 +217,7 @@ mkdir "$work/nodump"; for b in mysqldump mariadb-dump; do printf '#!/bin/sh\nech
 run 'migrate without a possible copy' env PATH="$work/nodump:$PATH" bash "$repo/scripts/deploy-remote.sh" migrate "$base" "$docroot" "$R3"
 ok 'a migration without a database copy is refused' '[[ $rc != 0 && $(q1 "SELECT schema_version FROM app_meta") == "$target" ]] && grep -q "Brak kopii bazy" <<<"$out"'
 run 'migrate with ALLOW_NO_BACKUP=1' env PATH="$work/nodump:$PATH" ALLOW_NO_BACKUP=1 bash "$repo/scripts/deploy-remote.sh" migrate "$base" "$docroot" "$R3"
-ok 'ALLOW_NO_BACKUP=1 migrates without a copy' '[[ $rc == 0 && $(q1 "SELECT schema_version FROM app_meta") == 5 ]] && grep -q "ALLOW_NO_BACKUP=1" <<<"$out"'
+ok 'ALLOW_NO_BACKUP=1 migrates without a copy' '[[ $rc == 0 && $(q1 "SELECT schema_version FROM app_meta") == "$next" ]] && grep -q "ALLOW_NO_BACKUP=1" <<<"$out"'
 
 # --- an empty database: the installer hint, no copy, no error ---
 $root -e "DROP DATABASE IF EXISTS \`$rdb\`; CREATE DATABASE \`$rdb\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
@@ -206,7 +228,7 @@ cp -p "$work/config.keep" "$shared/config.php"
 
 # --- server-check (read-only) ---
 run server-check remote server-check
-ok 'server-check reports the database rights, schema and copies' '[[ $rc == 0 ]] && grep -q "Prawo bazy ALTER: tak" <<<"$out" && grep -q "Prawo bazy CREATE: tak" <<<"$out" && grep -q "Prawo bazy REFERENCES: tak" <<<"$out" && grep -q "Schemat bazy: v5" <<<"$out" && grep -q "Najnowsza kopia db-\*.sql.gz: db-" <<<"$out" && grep -q "Stripe:" <<<"$out"'
+ok 'server-check reports the database rights, schema and copies' '[[ $rc == 0 ]] && grep -q "Prawo bazy ALTER: tak" <<<"$out" && grep -q "Prawo bazy CREATE: tak" <<<"$out" && grep -q "Prawo bazy REFERENCES: tak" <<<"$out" && grep -q "Schemat bazy: v$next" <<<"$out" && grep -q "Najnowsza kopia db-\*.sql.gz: db-" <<<"$out" && grep -q "Stripe:" <<<"$out"'
 # A hardened account (db_migrate): no CREATE/ALTER/REFERENCES here although it has CREATE TEMPORARY TABLES and ALL
 # PRIVILEGES on another database; the grant names this database by an escaped pattern (`a\_b`.*, as phpMyAdmin writes it).
 hpass=$(openssl rand -hex 12); hg=; edb=${dbn//_/\\_}
@@ -215,7 +237,7 @@ for h in "${uhosts[@]}"; do hg+="CREATE USER IF NOT EXISTS 'md_${port}h'@'$h' ID
 $root -e "$hg FLUSH PRIVILEGES;"
 "$php" -r '$c=require $argv[1];$c["db_migrate"]=["dsn"=>$c["db"]["dsn"],"user"=>$argv[2],"password"=>$argv[3]];echo "<?php\nreturn ",var_export($c,true),";\n";' "$work/config.keep" "md_${port}h" "$hpass" > "$shared/config.php"
 run 'server-check (hardened account)' remote server-check
-ok 'server-check counts only the exact rights on this database' '[[ $rc == 0 ]] && grep -q "Prawo bazy CREATE: NIE" <<<"$out" && grep -q "Prawo bazy ALTER: NIE" <<<"$out" && grep -q "Prawo bazy REFERENCES: NIE" <<<"$out" && grep -q "Prawo bazy INDEX: tak" <<<"$out" && grep -q "Schemat bazy: v5" <<<"$out"'
+ok 'server-check counts only the exact rights on this database' '[[ $rc == 0 ]] && grep -q "Prawo bazy CREATE: NIE" <<<"$out" && grep -q "Prawo bazy ALTER: NIE" <<<"$out" && grep -q "Prawo bazy REFERENCES: NIE" <<<"$out" && grep -q "Prawo bazy INDEX: tak" <<<"$out" && grep -q "Schemat bazy: v$next" <<<"$out"'
 cp -p "$work/config.keep" "$shared/config.php"
 
 echo "DEPLOY_SCRIPT_TEST: $n steps, $fails failed (work dir: $work)"

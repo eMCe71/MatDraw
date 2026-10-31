@@ -2,7 +2,10 @@
 // Chat routes (plan §4.2, §5.4–5.7, §5.10). Every route has tag chat: the file <shared>/chat-off or config
 // chat_force_off answers 503 chat_off before any database work (Routes::dispatch). Guests read through public routes
 // that never read cookies (public-chat-channels, public-chat; shared caches may keep them 30 s / 2 s); signed-in people
-// read through peek routes (no session lock, no file, no cookie). Writes are session POSTs with Origin and CSRF checks.
+// read through peek routes (no session write, no file, no cookie; PHP's files handler still takes the session file lock
+// while it reads, so a poll can wait behind a long request of the same session; it holds the lock only for that read
+// and one short refresh write per idle/4: always for a member session, for staff only on a chat-feed poll of someone
+// reading the chat, Chat::active). Writes are session POSTs with Origin and CSRF checks.
 // Limits (§5.7): sending by chat_settings.send (gap 2 s, 20/min, 300/day), deleting 60/h, reporting 20/h per person;
 // reading has no per-IP limit in v1 (sports halls share one address behind NAT).
 // After a message is sent, background jobs may run (Jobs::maybe from a shutdown function; it releases the session first).
@@ -26,7 +29,7 @@ return [
  // Signed in: own one-query viewer (users ⋈ billing_accounts) instead of RouteContext::user(), so an idle poll of a
  // member costs the session read and 3–4 queries by key (§2.7). Without full access: the guest projection.
  'chat-feed'=>['method'=>'GET','auth'=>'peek','user'=>'optional','tag'=>'chat','handler'=>function(RouteContext $ctx):?array{
-  $q=Chat::parseQuery($_GET);$v=Chat::peekViewer($ctx->config,fn()=>$ctx->pdo(),time());
+  $q=Chat::parseQuery($_GET);$v=Chat::peekViewer($ctx->config,fn()=>$ctx->pdo(),time(),Chat::active($_GET,$q));
   if(!$v)throw new AppError('Zaloguj się ponownie.',401);
   return Chat::feed($ctx->pdo(),$ctx->config,$q,$v,Chat::nowMs());
  }],

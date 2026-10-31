@@ -2,11 +2,12 @@
 // global channels in a fixed order, public cache, tournaments by visibility, lazy channels), the guest projection
 // (exact keys, no personal data in the raw JSON, no cookie, public max-age=2), the member projection (people, private
 // no-store), polling (204 also with h, COUNT only after knownLast changed, cursor, tombstones, more, cfg on a new settings
-// version, e reports into chat_health, history), sending (idempotent cid, limits with Retry-After, profile, temporary
-// password, mute, payment, archive, the settings switch, the chat-off file before the database), the tournament
-// lifecycle (draft 404 for everybody, grace day for signed-in people only, archive read only), reports with automatic
-// hiding, deletion with and without a copy of the text, Admin actions and settings (health: the last 60 minutes), panel
-// actions on messages of a tournament set back to a draft, retention and account tombstones (two-digit msg_count).
+// version, e reports into chat_health once per reporter, status and minute, history), sending (idempotent cid, limits
+// with Retry-After, profile, temporary password, mute, payment, archive, the settings switch, the chat-off file before
+// the database), the tournament lifecycle (draft 404 for everybody, grace day for signed-in people only, archive read
+// only), reports with automatic hiding, deletion with and without a copy of the text, Admin actions and settings
+// (health: the last 60 minutes), panel actions on messages of a tournament set back to a draft, retention and account
+// tombstones (two-digit msg_count).
 import test,{after,before} from 'node:test';
 import assert from 'node:assert/strict';
 import {randomBytes} from 'node:crypto';
@@ -160,6 +161,18 @@ test('polling: 204 without changes (also with h), COUNT only after knownLast cha
  assert.equal((await get('public-chat',{ch:`${id}:106`,cv:String(v),e:'3:429'})).status,204,'the report rides on a normal poll');
  assert.equal((await get('chat-feed',{e:'2:0',cv:String(v)},C.m2.cookie)).status,204);
  assert.deepEqual([count(429)-h429,count(0)-h0],[3,2]);
+ // One report per reporter (the address of a guest, the account of a signed-in person), status and minute, at most 10
+ // answers: a script repeating e=50:503 on the public route adds 10 a minute, while a reporter that sees the hosting
+ // fail again a minute later is counted again.
+ const h503=count(503),poll=e=>get('public-chat',{ch:`${id}:106`,cv:String(v),e});
+ for(let i=0;i<5;i++)assert.equal((await poll('50:503')).status,204);
+ assert.equal((await poll('9:429')).status,204);
+ assert.deepEqual([count(503)-h503,count(429)-h429],[10,3],'only the first report of this address per status counts this minute, capped at 10');
+ for(let i=0;i<3;i++)assert.equal((await get('chat-feed',{e:'4:503',cv:String(v)},C.m3.cookie)).status,204);
+ assert.equal(count(503)-h503,14,'another account is another reporter, once');
+ fixture('limits-age',{seconds:30});assert.equal((await poll('50:503')).status,204);assert.equal(count(503)-h503,14,'half a minute later: still the same window');
+ fixture('limits-age',{seconds:31});assert.equal((await poll('2:503')).status,204);assert.equal((await poll('7:429')).status,204);
+ assert.deepEqual([count(503)-h503,count(429)-h429],[16,10],'a minute later the same address counts again');
  for(const q of [{ch:'1:x'},{ch:`${id}:5`,before:'10'},{e:'51:429'},{e:'2:404'},{h:Array.from({length:31},(_,i)=>`${i+1}:0:0`).join(',')},{ch:Array.from({length:7},(_,i)=>`${i+1}:0`).join(',')}]){
   error(await get('public-chat',q),400,'Niepoprawne zapytanie czatu.');error(await get('chat-feed',q,C.m2.cookie),400,'Niepoprawne zapytanie czatu.');
  }
@@ -181,6 +194,12 @@ test('sending: repeated cid, limits with Retry-After, profile, temporary passwor
  fixture('chat-settings',{set:{send:{gap:0,perMin:2}}});
  assert.equal((await send(C.m4,general.id,'druga')).status,200);
  r=await send(C.m4,general.id,'trzecia');error(r,429);assert.ok(r.data.retry>=1&&r.data.retry<=60);
+ // Parallel sends from several sessions of one account (one paid account signed in on six devices) cannot beat the gap:
+ // the limit is checked again under the sender's row lock, so exactly one of them is stored.
+ fixture('chat-settings',{set:{send:{gap:5,perMin:1000}}});
+ const burster=member('czat.burst@test.example'),devices=await Promise.all(Array.from({length:6},()=>signIn(burster.email)));
+ const burst=await Promise.all(devices.map((d,i)=>send(d,i%2?karate.id:general.id,'równolegle '+i)));
+ assert.deepEqual(burst.map(x=>x.status).sort(),[200,429,429,429,429,429],JSON.stringify(burst.map(x=>[x.status,x.data?.error])));
  fixture('chat-settings',{set:{send:{gap:0,perMin:1000}}});
  error(await send(C.incomplete,general.id,'x'),403,'Uzupełnij profil, aby pisać na czacie.');
  error(await send(C.temp,general.id,'x'),403,'Najpierw zmień hasło tymczasowe.');

@@ -40,7 +40,9 @@ return [
  'avatar'=>['method'=>'GET','auth'=>'peek','user'=>'optional','handler'=>fn(RouteContext $ctx)=>Avatars::serve($ctx)],
  'admin-members'=>['method'=>'POST','auth'=>'session','user'=>'admin','handler'=>fn(RouteContext $ctx):array=>Members::adminList($ctx->pdo(),$ctx->config,$ctx->body)],
  'admin-member'=>['method'=>'POST','auth'=>'session','user'=>'admin','handler'=>fn(RouteContext $ctx):array=>Members::adminAction($ctx,$ctx->user(),$ctx->body)],
- // Server state for the Admin (§4.3): no secrets, no personal data.
+ // Server state for the Admin (§4.3): no secrets, no personal data. server.afterResponse: whether this SAPI can send
+ // the response early (fastcgi/litespeed_finish_request); without it the lazy payment sync and the background jobs that
+ // need it (billing-due, billing-events) never run on web requests, so the stripe-sync.php cron becomes mandatory.
  'diagnostics'=>['method'=>'GET','auth'=>'peek','user'=>'admin','handler'=>function(RouteContext $ctx)use($sessionFiles,$backupAge):array{
   $c=$ctx->config;$pdo=$ctx->pdo();$probe=$ctx->query('probe');
   if($probe!==null&&$probe!=='stripe')throw new AppError('Nieznana operacja.',400);
@@ -55,6 +57,7 @@ return [
   }
   $m=new Migrator($pdo,dirname(__DIR__).'/migrations');
   return ['php'=>PHP_VERSION,'gd'=>Capabilities::gd(),'exif'=>extension_loaded('exif'),'curl'=>extension_loaded('curl'),'openssl'=>extension_loaded('openssl'),'intl'=>extension_loaded('intl'),
+   'server'=>['sapi'=>PHP_SAPI,'afterResponse'=>function_exists('fastcgi_finish_request')||function_exists('litespeed_finish_request')],
    'uploadsWritable'=>$writable,'avatarMode'=>Capabilities::avatarMode($c),'schema'=>['db'=>$m->current(),'code'=>Migrator::target(dirname(__DIR__).'/migrations')],
    'sessions'=>['handler'=>(string)ini_get('session.save_handler'),'ownDir'=>Paths::ownSessions($c)!==null,'files'=>$sessionFiles($c)],'backups'=>['newestAgeHours'=>$backupAge($c)],
    'billing'=>['enabled'=>!empty($c['billing_enabled']),'mode'=>$c['billing_mode']],'chat'=>['on'=>$chatOn,'health'=>$health],'stripe'=>$stripe];

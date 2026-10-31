@@ -13,6 +13,17 @@ use PDO;
  */
 final class RateLimit {
  public const KEEP_SECONDS=172800;
+ /**
+  * The current count of a bucket without adding to it: 0 while fewer than $limit attempts fall in the current window,
+  * else the seconds until it ends (≥ 1). With hit() after a success it limits results instead of attempts (the global
+  * sign-up brake counts accounts actually created, so failed or junk requests cannot use it up).
+  */
+ public static function peek(PDO $pdo,string $appKey,string $scope,string $key,int $limit,int $window,?int $now=null):int {
+  $now??=time();$bucket=hash_hmac('sha256',$scope.'|'.$key,$appKey);
+  $q=$pdo->prepare('SELECT attempts,window_start FROM login_limits WHERE bucket=?');$q->execute([$bucket]);$row=$q->fetch(PDO::FETCH_ASSOC);$q->closeCursor();
+  if(!$row||(int)$row['window_start']<=$now-$window||(int)$row['attempts']<$limit)return 0;
+  return max(1,(int)$row['window_start']+$window-$now);
+ }
  /** Counts one attempt; returns 0 while at most $limit attempts fall in the current window, else seconds until it ends (≥ 1). */
  public static function hit(PDO $pdo,string $appKey,string $scope,string $key,int $limit,int $window,?int $now=null):int {
   $now??=time();$cut=$now-$window;$bucket=hash_hmac('sha256',$scope.'|'.$key,$appKey);

@@ -122,6 +122,26 @@ final class BillingSync {
   if($v===null){$pdo->prepare('DELETE FROM billing_kv WHERE k=?')->execute([$k]);return;}
   $pdo->prepare('INSERT INTO billing_kv (k,v,updated_at) VALUES (?,?,?) ON DUPLICATE KEY UPDATE v=VALUES(v),updated_at=VALUES(updated_at)')->execute([$k,$v,time()]);
  }
+ /**
+  * Every Stripe Customer an account ever had (billing_customers, migration 0006): Billing records each one it creates
+  * or replaces, and account deletion deletes them all (§3.8 step 4), not only the current one.
+  */
+ public static function remember(PDO $pdo,string $userId,string $customerId,int $livemode):void {
+  $pdo->prepare('INSERT IGNORE INTO billing_customers (customer_id,user_id,livemode,created_at) VALUES (?,?,?,?)')->execute([$customerId,$userId,$livemode,time()]);
+ }
+ /** customer id => livemode of the account's customers not yet deleted in Stripe (the current one included once remembered). */
+ public static function customersOf(PDO $pdo,string $userId):array {
+  $q=$pdo->prepare('SELECT customer_id,livemode FROM billing_customers WHERE user_id=? AND redacted_at IS NULL ORDER BY created_at,customer_id');$q->execute([$userId]);
+  $out=[];foreach($q->fetchAll(PDO::FETCH_NUM) as [$id,$live])$out[(string)$id]=(int)$live;return $out;
+ }
+ /** Stripe confirmed the deletion (or no longer knows the customer). */
+ public static function redacted(PDO $pdo,string $customerId):void{$pdo->prepare('UPDATE billing_customers SET redacted_at=? WHERE customer_id=? AND redacted_at IS NULL')->execute([time(),$customerId]);}
+ /** The account an orphaned subscription belongs to after all: a former customer of it, else metadata naming an account. */
+ private static function formerOwner(PDO $pdo,array $state,array $metadata):?string {
+  if($state['stripe_customer_id']!==null){$q=$pdo->prepare('SELECT user_id FROM billing_customers WHERE customer_id=?');$q->execute([$state['stripe_customer_id']]);$v=$q->fetchColumn();$q->closeCursor();if(is_string($v))return $v;}
+  $uid=$metadata['matbravo_user_id']??null;
+  return is_string($uid)&&preg_match('/^[A-Za-z0-9_-]{1,40}$/D',$uid)&&Accounts::find($pdo,$uid)?$uid:null;
+ }
  private static function rowBy(PDO $pdo,string $column,string $value):?array {
   if(!in_array($column,['user_id','stripe_customer_id','stripe_subscription_id','pending_checkout_id'],true))throw new \InvalidArgumentException('column');
   $q=$pdo->prepare("SELECT * FROM billing_accounts WHERE $column=?");$q->execute([$value]);$r=$q->fetch(PDO::FETCH_ASSOC);$q->closeCursor();return $r?:null;
@@ -161,7 +181,9 @@ final class BillingSync {
   if($state['stripe_subscription_id']===''||!preg_match('/^sub_[A-Za-z0-9_]{1,250}$/D',$state['stripe_subscription_id']))return 'ignored';
   if(($state['livemode']===1)!==self::live($c))return 'other-mode';
   $row=$opts['row']??self::owner($pdo,$c,$state,$meta);
-  if(!$row){self::audit($pdo,null,$actor,'orphan',null,$state['sub_status'],$state['stripe_subscription_id'].' '.($state['stripe_customer_id']??'-'));return 'orphan';}
+  // No row takes it (e.g. a subscription on a customer the account no longer uses): the audit names the account when it
+  // can, so the Admin sees it in admin-billing?userId= (the person may be charged without access).
+  if(!$row){self::audit($pdo,self::formerOwner($pdo,$state,$meta),$actor,'orphan',null,$state['sub_status'],$state['stripe_subscription_id'].' '.($state['stripe_customer_id']??'-'));return 'orphan';}
   if($row['deleted_at']!==null){self::audit($pdo,$row['user_id'],$actor,'tombstone',null,$state['sub_status'],$state['stripe_subscription_id']);return 'tombstone';}
   $cur=self::sameMode($row,$c)?$row['stripe_subscription_id']:null;$curStatus=self::rowStatus($row,$c);
   if($cur!==null&&$cur!==$state['stripe_subscription_id']&&$curStatus!=='none'){
@@ -224,8 +246,13 @@ final class BillingSync {
  private static function clearPending(PDO $pdo,string $userId,string $sessionId):void {
   $pdo->prepare('UPDATE billing_accounts SET pending_checkout_id=NULL,pending_checkout_expires=NULL,next_sync_at=IF(sub_status IN (\'none\',\'canceled\',\'incomplete_expired\',\'unpaid\'),NULL,next_sync_at),updated_at=? WHERE user_id=? AND pending_checkout_id=?')->execute([time(),$userId,$sessionId]);
  }
- /** The customer was deleted in Stripe: the row forgets customer and subscription (tombstones only note it). */
+ /**
+  * The customer was deleted in Stripe: the row forgets customer and subscription (tombstones only note it), and the
+  * remembered customer (billing_customers, also a replaced one that is no row's current customer) counts as deleted,
+  * so account deletion does not ask for it again and the abandoned-account cleanup may remove the account.
+  */
  public static function customerGone(PDO $pdo,string $customerId,string $actor):string {
+  self::redacted($pdo,$customerId);
   $row=self::rowBy($pdo,'stripe_customer_id',$customerId);if(!$row)return 'orphan';
   if($row['deleted_at']!==null){$pdo->prepare('UPDATE billing_accounts SET stripe_redact_pending=0,updated_at=? WHERE user_id=?')->execute([time(),$row['user_id']]);self::audit($pdo,$row['user_id'],$actor,'tombstone',null,null,'customer.deleted '.$customerId);return 'tombstone';}
   $pdo->prepare("UPDATE billing_accounts SET stripe_customer_id=NULL,stripe_subscription_id=NULL,sub_status='none',price_lookup_key=NULL,current_period_start=NULL,current_period_end=NULL,cancel_at_period_end=0,cancel_at=NULL,canceled_at=NULL,ended_at=NULL,latest_invoice_status=NULL,pending_checkout_id=NULL,pending_checkout_expires=NULL,next_sync_at=NULL,stripe_redact_pending=0,updated_at=? WHERE user_id=? AND stripe_customer_id=?")->execute([time(),$row['user_id'],$customerId]);
@@ -517,7 +544,8 @@ final class BillingSync {
  }
  /**
   * Accounts whose next_sync_at passed (this mode, oldest first) and retries of Stripe customer deletions
-  * (stripe_redact_pending, also on tombstones), $limit accounts in all. Deletions come first but take at most half of
+  * (stripe_redact_pending, also on tombstones: the current customer and every remembered one of this mode not yet
+  * deleted, billing_customers), $limit accounts in all. Deletions come first but take at most half of
   * the slots (at least one), so due syncs always get their share; a refused deletion goes to the back of the queue and
   * waits REDACT_BACKOFF (sync_error 'redact …', updated_at). Stops at the first unavailable error, and with $budget
   * (seconds, 0 = none) starts no further account after that much time (at least one per run).
@@ -525,14 +553,20 @@ final class BillingSync {
  public static function due(PDO $pdo,array $c,StripeClient $client,int $limit,?int $now=null,string $actor='cron',int $pauseMs=0,float $budget=0.0):array {
   $now??=time();$t0=hrtime(true);$n=['synced'=>0,'busy'=>0,'failed'=>0,'redacted'=>0,'redactFailed'=>0];$live=(int)self::live($c);$done=0;
   $over=function()use(&$done,$budget,$t0):bool{return $budget>0&&$done>0&&(hrtime(true)-$t0)/1e9>=$budget;};
-  $q=$pdo->prepare("SELECT user_id,stripe_customer_id FROM billing_accounts WHERE stripe_redact_pending=1 AND stripe_customer_id IS NOT NULL AND livemode=? AND (sync_error IS NULL OR sync_error NOT LIKE 'redact %' OR updated_at<=?) ORDER BY updated_at LIMIT ".max(1,intdiv($limit,2)));
+  $q=$pdo->prepare("SELECT user_id,stripe_customer_id FROM billing_accounts WHERE stripe_redact_pending=1 AND livemode=? AND (sync_error IS NULL OR sync_error NOT LIKE 'redact %' OR updated_at<=?) ORDER BY updated_at LIMIT ".max(1,intdiv($limit,2)));
   $q->execute([$live,$now-self::REDACT_BACKOFF]);
   foreach($q->fetchAll(PDO::FETCH_ASSOC) as $r){
    if($over())return $n;$done++;$limit--;
-   try{$client->delete('/v1/customers/'.$r['stripe_customer_id']);$ok=true;}catch(StripeError $e){$ok=$e->missing();if(!$ok){$n['redactFailed']++;if($e->unavailable())return $n;
-    $pdo->prepare('UPDATE billing_accounts SET sync_error=?,updated_at=? WHERE user_id=?')->execute([substr('redact '.$e->code(),0,200),time(),$r['user_id']]);continue;}}
+   // The current customer may predate the list (an older release): remembered first; one already deleted stays out.
+   if($r['stripe_customer_id']!==null)self::remember($pdo,$r['user_id'],$r['stripe_customer_id'],$live);
+   $ids=array_keys(array_filter(self::customersOf($pdo,$r['user_id']),fn($m)=>$m===$live));
+   foreach($ids as $i=>$cus){
+    try{$client->delete('/v1/customers/'.$cus);}catch(StripeError $e){if(!$e->missing()){$n['redactFailed']++;if($e->unavailable())return $n;
+     $pdo->prepare('UPDATE billing_accounts SET sync_error=?,updated_at=? WHERE user_id=?')->execute([substr('redact '.$e->code(),0,200),time(),$r['user_id']]);continue 2;}}
+    self::redacted($pdo,$cus);self::audit($pdo,$r['user_id'],$actor,'customer.redact',null,null,$cus);
+   }
    $pdo->prepare('UPDATE billing_accounts SET stripe_redact_pending=0,sync_error=NULL,updated_at=? WHERE user_id=?')->execute([time(),$r['user_id']]);
-   self::audit($pdo,$r['user_id'],$actor,'customer.redact',null,null,$r['stripe_customer_id']);$n['redacted']++;
+   $n['redacted']++;
    if($pauseMs)usleep($pauseMs*1000);
   }
   if($limit<=0)return $n;

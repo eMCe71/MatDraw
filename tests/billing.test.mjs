@@ -85,6 +85,18 @@ test('next_sync_at follows 03 §8.3: renewal, cancel at period end, past_due, in
  assert.deepEqual(bridge({job:'next',cases:[{state:st('incomplete'),now:NOW,min:1800}]}),[NOW+1800],'billing_sync_min_interval');
 });
 
+test('requireFrom for the grandfathered scope: 14 calendar days in Europe/Warsaw, also across both clock changes',{skip},()=>{
+ const at=(iso)=>Math.floor(Date.parse(iso)/1000);
+ const out=bridge({job:'grandfathered',cases:[
+  {now:at('2027-03-20T11:00:00Z'),date:'2027-04-03'},// spring change on 2027-03-28: 14 days are 14*86400 − 3600
+  {now:at('2027-03-20T23:30:00Z'),date:'2027-04-04'},// 00:30 on 21 March in Warsaw: the day of now counts
+  {now:at('2026-10-20T10:00:00Z'),date:'2026-11-03'},// autumn change on 2026-10-25
+  {now:at('2026-11-05T10:00:00Z'),date:'2026-11-19'},
+ ]});
+ for(const [min,day] of out)assert.equal(day,min,'the date 14 calendar days ahead is exactly the earliest allowed one');
+ assert.equal(out[0][0],at('2027-04-02T22:00:00Z'),'00:00 CEST on 3 April');
+});
+
 test('StripeClient::norm: booleans as true/false, nulls dropped, nested arrays and lists in Stripe brackets',{skip},()=>{
  const out=bridge({job:'norm',params:{a:true,b:false,c:null,d:{e:1,f:['x','y'],g:null},h:'s t',expand:['data.customer']}});
  assert.deepEqual(out.norm,{a:'true',b:'false',d:{e:'1',f:['x','y']},h:'s t',expand:['data.customer']});

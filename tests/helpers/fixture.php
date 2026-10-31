@@ -58,6 +58,8 @@ $jobs=[
  },
  // All tests come from 127.0.0.1: clear login and rate-limit buckets so one file cannot block the next.
  'reset-limits'=>fn(PDO $pdo):array=>['deleted'=>$pdo->exec('DELETE FROM login_limits')],
+ // Every rate-limit window starts {seconds} earlier, as if that much time had passed (short windows without waiting).
+ 'limits-age'=>fn(PDO $pdo,array $p):array=>['moved'=>$pdo->exec('UPDATE login_limits SET window_start=window_start-'.max(0,(int)($p['seconds']??0)))],
 ];
 foreach(glob(__DIR__.'/fixture-*.php')?:[] as $file){$more=require $file;if(!is_array($more))throw new RuntimeException(basename($file).' must return an array of jobs');foreach($more as $name=>$fn){if(isset($jobs[$name]))throw new RuntimeException("Duplicate fixture job $name in ".basename($file));$jobs[$name]=$fn;}}
 try{

@@ -11,8 +11,9 @@ use PDO;
  * (cv), without a deploy. The Admin panel changes the switch, the pace preset and the notice (a free text shown as text,
  * never translated); other values are changed in the database only.
  * Hosting health (§5.10): clients report 429/503/508 answers and non-JSON/network failures (status 0) with the next
- * successful poll (parameter e); report() adds them to chat_health(hour, status) with one upsert, health() estimates the
- * last 60 minutes for the panel and diagnostics. No address and no account is ever stored there.
+ * successful poll (parameter e); Chat::feed lets one report per reporter, status and minute through (at most 10
+ * answers), report() adds it to chat_health(hour, status) with one upsert, health() estimates the last 60 minutes for
+ * the panel and diagnostics. No address and no account is ever stored there.
  */
 final class ChatSettings {
  public const DEFAULTS=['on'=>true,'t'=>'poll','ms'=>[2500,5000,10000,30000,60000],'idle'=>[60,180,600,1800],'bg'=>30000,'boost'=>300,'safety'=>60000,'notice'=>null,
