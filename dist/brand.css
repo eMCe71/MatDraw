@@ -1,0 +1,15 @@
+/* MatBravo brand kit 1.0: Manrope and the official logo (the belt mark serves the smallest surfaces).
+   Self-hosted files only (CSP): fonts/ (SIL OFL 1.1, see fonts/OFL-Manrope.txt) and brand/. */
+@font-face{font-family:Manrope;font-style:normal;font-weight:400 800;font-display:swap;src:url(./fonts/manrope-latin.woff2) format("woff2");unicode-range:U+0000-024F,U+0259,U+02B0-036F,U+1E00-1EFF,U+2000-206F,U+20A0-20CF,U+2100-22FF,U+2500-25FF,U+FEFF,U+FFFD}
+@font-face{font-family:Manrope;font-style:normal;font-weight:400 800;font-display:swap;src:url(./fonts/manrope-cyrillic.woff2) format("woff2");unicode-range:U+0400-052F,U+1C80-1C8F,U+2DE0-2DFF,U+A640-A69F}
+:root{--mb-navy:#00448a;--mb-blue:#0072bc;--mb-cyan:#00aeef;--mb-ink:#102e4b;--mb-ice:#eff8ff;--mb-motion:6.4s}
+
+/* Logo: vector SVG, sized by height; the image's alt (or the link's label) gives the accessible name "MatBravo". */
+.brand-logo{display:block;width:auto;height:26px;max-width:100%}
+.sidebar .brand-logo{height:24px}
+.login-story .brand-logo{height:30px}
+.guest-brand picture{display:block}
+.guest-brand .brand-logo{height:25px}
+.arena .brand-logo{height:28px}
+@media(max-width:1250px){.sidebar .brand-logo{height:22px}}
+@media(max-width:650px){.login-story .brand-logo{height:26px}.guest-brand .brand-logo{height:30px}.arena .brand-logo{height:24px}}
