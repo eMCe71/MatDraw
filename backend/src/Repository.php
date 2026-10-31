@@ -19,6 +19,26 @@ final class Repository {
    $before=$this->load();$next=$before;$result=$fn($next);$this->persist($before,$next);$this->pdo->commit();return $result;
   }catch(\Throwable $e){$this->pdo->rollBack();throw $e;}
  }
+ /**
+  * Read-only data for GuestView: only tournaments that may be public (not drafts, dated $today or later), without
+  * creators, mats or activity; entries and draws only for the one requested tournament. Accounts and the athlete
+  * database are never read here.
+  */
+ public function guestTournaments(string $today,?string $id=null):array {
+  $this->pdo->beginTransaction();
+  try{
+   $q=$this->pdo->prepare("SELECT id,name,city,event_date,status FROM tournaments WHERE status IN ('open','closed','finished') AND event_date>=?".($id===null?'':' AND id=?').' ORDER BY event_date,id');
+   $q->execute($id===null?[$today]:[$today,$id]);$list=[];
+   foreach($q->fetchAll() as $t)$list[]=['id'=>$t['id'],'name'=>$t['name'],'city'=>$t['city'],'date'=>$t['event_date'],'status'=>$t['status'],'entries'=>[],'draws'=>[]];
+   if($id!==null&&$list){
+    $e=$this->pdo->prepare('SELECT snapshot FROM entries WHERE tournament_id=? ORDER BY profile_id');$e->execute([$id]);
+    foreach($e->fetchAll() as $row)$list[0]['entries'][]=self::decode($row['snapshot']);
+    $d=$this->pdo->prepare('SELECT category_key,data FROM draws WHERE tournament_id=? ORDER BY category_key');$d->execute([$id]);
+    foreach($d->fetchAll() as $row)$list[0]['draws'][$row['category_key']]=self::decode($row['data']);
+   }
+   $this->pdo->commit();return $list;
+  }catch(\Throwable $e){$this->pdo->rollBack();throw $e;}
+ }
  private function load():array {
   $db=['schemaVersion'=>2,'revision'=>(int)$this->pdo->query('SELECT revision FROM app_meta WHERE id=1')->fetchColumn(),'clubs'=>[],'users'=>[],'profiles'=>[],'tournaments'=>[]];
   $db['clubs']=$this->pdo->query('SELECT id,name FROM clubs ORDER BY name,id')->fetchAll();

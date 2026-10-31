@@ -1,5 +1,6 @@
 import {CONFIG} from './runtime-config.js';
 import {initialWorkspace,execute,publicWorkspace,DomainError} from './workspace.js';
+import {guestUpcoming,guestTournament,warsawToday} from './guest-view.js';
 const KEY='matdraw.workspace.v2',SESSION='matdraw.session.v2';
 export const isDemo=CONFIG.mode==='demo';
 let db=null,session=null,csrf='',authVersion=null,demoQueue=Promise.resolve();
@@ -44,3 +45,23 @@ export async function command(type,payload,expectedRevision){
  });
 }
 export const dataKey=KEY;
+// Public guest data (login screen list and read-only preview): GET only, without cookies or CSRF.
+// The demo serves the same projection (dist/guest-view.js) from this browser's demo data.
+async function publicApi(params){
+ const controller=typeof AbortController==='function'?new AbortController():null,timer=controller&&setTimeout(()=>controller.abort(),8000);
+ try{
+  let response;try{response=await fetch(CONFIG.apiBase+'?'+new URLSearchParams(params),{method:'GET',credentials:'omit',headers:{Accept:'application/json'},signal:controller?.signal});}catch{throw new Error('Brak połączenia z serwerem.');}
+  let result;try{result=await response.json();}catch{throw new Error('Serwer nie zwrócił odpowiedzi MatBravo. Sprawdź konfigurację PHP.');}
+  if(!response.ok)throw new DomainError(result.error||'Nie udało się wykonać operacji.',response.status);return result;
+ }finally{clearTimeout(timer);}
+}
+const demoTournaments=()=>{read();return db?.tournaments||[];};
+export async function upcoming(){
+ if(!isDemo)return publicApi({route:'public'});
+ return JSON.parse(JSON.stringify(guestUpcoming(demoTournaments(),warsawToday())));
+}
+export async function publicTournament(id){
+ if(!isDemo)return publicApi({route:'public-tournament',id});
+ const out=guestTournament(demoTournaments(),id,warsawToday());if(!out)throw new DomainError('Turniej nie jest dostępny.',404);
+ return JSON.parse(JSON.stringify(out));
+}

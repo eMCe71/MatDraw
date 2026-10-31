@@ -4,6 +4,7 @@ require_once __DIR__.'/src/Domain.php';
 require_once __DIR__.'/src/Rules.php';
 require_once __DIR__.'/src/Repository.php';
 require_once __DIR__.'/src/Auth.php';
+require_once __DIR__.'/src/GuestView.php';
 
 function matdraw_config(): array {
  $path=getenv('MATDRAW_CONFIG')?:__DIR__.'/config.php';

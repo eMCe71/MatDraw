@@ -607,5 +607,7 @@ export default {
  'Nie udało się wykonać operacji.':'The operation failed.',
  'Trwa zapisywanie. Poczekaj na potwierdzenie.':'Saving in progress. Wait for the confirmation.',
  'Nie znaleziono zawodnika.':'Athlete not found.',
- 'Wybierz turniej z otwartymi zapisami.':'Choose a tournament with open registration.'
+ 'Wybierz turniej z otwartymi zapisami.':'Choose a tournament with open registration.',
+ 'Turniej nie jest dostępny.':'This tournament is not available.',
+ 'Brak połączenia z serwerem.':'No connection to the server.'
 };

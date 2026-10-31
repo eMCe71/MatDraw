@@ -50,3 +50,32 @@ test('real PHP/MySQL: sessions, role isolation, multiple tournaments, atomicity 
  assert.ok(!JSON.stringify(admin.data).includes('passwordHash'));assert.ok(!JSON.stringify(admin.data).includes('authVersion'));
  await admin.req('logout',{});assert.equal((await admin.req('bootstrap')).status,401);
 });
+test('real PHP/MySQL: public guest routes are GET-only, cookie-free, read-only and show initials instead of names',{skip:!base},async()=>{
+ const admin=new Client();await admin.login('admin@test.example','AdminForTests2026!');
+ const day=n=>new Intl.DateTimeFormat('en-CA',{timeZone:'Europe/Warsaw'}).format(new Date(Date.now()+n*864e5));
+ const make=async(name,date,status)=>(await admin.cmd('tournament.save',{name,city:'Gdańsk',date,mat:'Mata 3',status})).id;
+ const open=await make('Publiczny otwarty',day(1),'open'),closed=await make('Publiczny zamknięty',day(2),'closed'),draft=await make('Publiczny roboczy',day(1),'draft'),past=await make('Publiczny miniony',day(-3),'open');
+ const athlete={clubId:admin.data.user.clubId,birthDate:'1998-05-05',sex:'F',weight:60,height:168,gradeType:'dan',grade:1,events:['forms'],champion:false};
+ for(const name of ['Zofia Żak-Nowicka','Łucja Ostrowska','Anna Maria Kowalczyk'])await admin.cmd('profile.save',{...athlete,name,registration:{...athlete,tournamentId:open}});
+ await admin.cmd('draw.create',{tournamentId:open,categoryId:'forms|senior|F|dan|1 Dan'});
+ const revision=admin.data.revision;
+ const pub=async(query,init={})=>{const r=await fetch(base+'?'+query,init);return {status:r.status,data:await r.json(),headers:r.headers};};
+ const list=await pub('route=public');
+ assert.equal(list.status,200,JSON.stringify(list.data));assert.equal(list.headers.get('set-cookie'),null);assert.match(list.headers.get('cache-control'),/public/);
+ const ids=list.data.tournaments.map(t=>t.id),dates=list.data.tournaments.map(t=>t.date);
+ assert.ok(ids.includes(open)&&ids.indexOf(open)<ids.indexOf(closed),JSON.stringify(ids));assert.ok(!ids.includes(draft)&&!ids.includes(past));
+ assert.ok(ids.length<=6);assert.deepEqual([...dates].sort(),dates);assert.ok(dates.every(d=>d>=day(0)));
+ for(const t of list.data.tournaments)assert.deepEqual(Object.keys(t).sort(),['city','date','id','name','status']);
+ const view=await pub('route=public-tournament&id='+open);
+ assert.equal(view.status,200,JSON.stringify(view.data));assert.equal(view.headers.get('set-cookie'),null);
+ assert.deepEqual(view.data.tournament,{id:open,name:'Publiczny otwarty',date:day(1),city:'Gdańsk',status:'open'});
+ assert.deepEqual(view.data.summary,{entries:3,clubs:1,categories:1,brackets:1});
+ const [category]=view.data.categories;assert.equal(category.code,'UF-01');assert.equal(category.state,'drawn');assert.equal(category.athletes,3);
+ const slots=category.bracket.slots.filter(Boolean);
+ assert.deepEqual(slots.map(s=>s.initials).sort(),['A. K.','Z. Ż.-N.','Ł. O.'].sort());assert.ok(slots.every(s=>s.club==='Test Warszawa'&&Object.keys(s).length===2));
+ const json=JSON.stringify(view.data)+JSON.stringify(list.data);
+ for(const word of ['Zofia','Nowicka','Łucja','Ostrowska','Anna','Kowalczyk','1998','birthDate','weight','height','presence','champion','email','passwordHash','clubId','createdBy','Mata 3','activity','revision'])assert.ok(!json.includes(word),word);
+ for(const id of [draft,past,'missing','../x']){const r=await pub('route=public-tournament&id='+encodeURIComponent(id));assert.equal(r.status,404);assert.equal(r.data.error,'Turniej nie jest dostępny.');assert.equal(r.headers.get('set-cookie'),null);}
+ const post=await pub('route=public',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});assert.equal(post.status,405);assert.equal(post.headers.get('allow'),'GET');
+ await admin.load();assert.equal(admin.data.revision,revision,'public routes never write');
+});

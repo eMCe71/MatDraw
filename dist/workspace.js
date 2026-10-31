@@ -26,7 +26,10 @@ export function initialWorkspace(legacy){
  const entries=old.athletes.map(a=>({...a,profileId:a.id,clubId:profiles.find(p=>p.id===a.id).clubId}));
  const t={...old.tournament,id:'t-autumn-2026',status:'open',createdBy:'demo-admin',entries,draws:old.draws||{},activity:old.activity||[]};
  const second={id:'t-winter-2027',name:'Puchar Zimy 2027',city:'Kraków',date:'2027-02-20',mat:'Mata 1',status:'open',createdBy:'demo-editor',entries:[],draws:{},activity:[]};
- return {schemaVersion:2,revision:1,clubs,users,profiles,tournaments:[t,second]};
+ // A further published date and an unpublished draft: the login screen's public list shows the first, never the draft.
+ const third={id:'t-gp-gdansk-2026',name:'Grand Prix Pomorza 2026',city:'Gdańsk',date:'2026-12-05',mat:'Mata 1',status:'closed',createdBy:'demo-editor',entries:[],draws:{},activity:[]};
+ const draft={id:'t-spring-2027',name:'Puchar Wiosny 2027',city:'Wrocław',date:'2027-04-17',mat:'Mata 1',status:'draft',createdBy:'demo-admin',entries:[],draws:{},activity:[]};
+ return {schemaVersion:2,revision:1,clubs,users,profiles,tournaments:[t,second,third,draft]};
 }
 function validateProfile(p){
  const v={...p,age:25,club:'Klub',events:['forms']};validateAthlete(v);
