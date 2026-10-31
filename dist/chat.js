@@ -397,11 +397,23 @@ function paint(v,{open:opening=false,others=0}={}){
  if(v.tabs)paintTabs(v);if(v.rail)paintRail(v);if(v.chips)paintChips(v);if(v.convhead)paintConvHead(v,c);
  paintBanners(v,c);paintLog(v,c,opening,others);paintFoot(v,c);
 }
+/** Writes a navigation part only when its markup changed and keeps keyboard focus on the same control: polling repaints the
+ * tabs, rail, chips, header and banners every few seconds, and a plain rewrite would drop the focus to <body>, re-announce
+ * the role="status"/"alert" banners and collapse an opened archive. */
+function swap(el,safe){
+ if(!el||el.chatHtml===safe.html)return false;
+ const a=doc()?.activeElement,inside=!!a&&a!==el&&!!el.contains?.(a),key=inside?a.dataset?.key:undefined,act=inside?a.dataset?.chatAct:undefined;
+ const arch=el.querySelector?.('details.chat-arch')?.open;
+ setHtml(el,safe);el.chatHtml=safe.html;
+ if(arch){const d=el.querySelector('details.chat-arch');if(d)d.open=true;}
+ if(inside&&act){const n=[...el.querySelectorAll('[data-chat-act]')].find(x=>x.dataset.chatAct===act&&x.dataset.key===key);n?.focus?.({preventScroll:true});}
+ return true;
+}
 function unreadDot(c){if(!c?.id)return false;const read=readMap()[c.id];return signedIn()?(c.n>0):(read!==undefined?(c.known||0)>read:false);}
 function paintTabs(v){
  const keys=S.lobby,hid='chat-v'+v.id;
- if(!keys.length){setHtml(v.tabs,h``);return;}
- setHtml(v.tabs,h`${keys.map(k=>{const c=S.channels.get(k),on=k===v.key,dot=!on&&unreadDot(c);return h`<button type="button" role="tab" class="${v.compact?'chat-chip':'chat-tab'}" id="${hid}-tab-${k}" aria-selected="${on}" aria-controls="${hid}-panel" tabindex="${on?0:-1}" data-chat-act="tab" data-key="${k}" title="${chFull(c)}">${chIcon(c)}<span class="chat-tab-text"><b>${chName(c)}</b><small>${chScope(c)}</small></span>${dot?h`<i class="chat-dot" aria-hidden="true"></i><span class="sr-only">${T('Nowe od ostatniej wizyty')}</span>`:''}</button>`;})}`);
+ if(!keys.length){swap(v.tabs,h``);return;}
+ swap(v.tabs,h`${keys.map(k=>{const c=S.channels.get(k),on=k===v.key,dot=!on&&unreadDot(c);return h`<button type="button" role="tab" class="${v.compact?'chat-chip':'chat-tab'}" id="${hid}-tab-${k}" aria-selected="${on}" aria-controls="${hid}-panel" tabindex="${on?0:-1}" data-chat-act="tab" data-key="${k}" title="${chFull(c)}">${chIcon(c)}<span class="chat-tab-text"><b>${chName(c)}</b><small>${chScope(c)}</small></span>${dot?h`<i class="chat-dot" aria-hidden="true"></i><span class="sr-only">${T('Nowe od ostatniej wizyty')}</span>`:''}</button>`;})}`);
  v.el.querySelector('.chat-panel')?.setAttribute('aria-labelledby',hid+'-tab-'+v.key);
 }
 function railItem(v,k){
@@ -410,18 +422,18 @@ function railItem(v,k){
 }
 function paintRail(v){
  const tours=S.tours,arch=S.archive;
- setHtml(v.rail,h`<div class="chat-rail-sec"><h3>${T('Kanały')}</h3>${S.lobby.map(k=>railItem(v,k))}</div>${tours.length?h`<div class="chat-rail-sec"><h3>${T('Czaty turniejów')}</h3>${tours.map(k=>railItem(v,k))}</div>`:''}${arch.length?h`<details class="chat-rail-sec chat-arch"${arch.includes(v.key)?h` open`:''}><summary>${icon('archive')}<span>${T('Archiwum · {n} zakończone',{n:arch.length})}</span></summary>${arch.map(k=>railItem(v,k))}</details>`:''}`);
+ swap(v.rail,h`<div class="chat-rail-sec"><h3>${T('Kanały')}</h3>${S.lobby.map(k=>railItem(v,k))}</div>${tours.length?h`<div class="chat-rail-sec"><h3>${T('Czaty turniejów')}</h3>${tours.map(k=>railItem(v,k))}</div>`:''}${arch.length?h`<details class="chat-rail-sec chat-arch"${arch.includes(v.key)?h` open`:''}><summary>${icon('archive')}<span>${T('Archiwum · {n} zakończone',{n:arch.length})}</span></summary>${arch.map(k=>railItem(v,k))}</details>`:''}`);
 }
 function paintChips(v){
  const keys=[...S.lobby,...S.tours];if(v.key&&!keys.includes(v.key))keys.push(v.key);
- setHtml(v.chips,h`${keys.map(k=>{const c=S.channels.get(k),on=k===v.key;return h`<a role="listitem" class="chat-chip${on?' is-on':''}" href="${registry.routeHash('chat',routeOf(c))}" data-chat-act="open" data-key="${k}"${on?h` aria-current="page"`:''}>${chIcon(c)}<span>${c.kind==='lobby'?h`${chName(c)} <small>${chScope(c)}</small>`:chName(c)}</span>${!on&&signedIn()&&c.n?h`<span class="chat-ub">${registry.badgeText(c.n)}</span>`:''}</a>`;})}`);
+ if(!swap(v.chips,h`${keys.map(k=>{const c=S.channels.get(k),on=k===v.key;return h`<a role="listitem" class="chat-chip${on?' is-on':''}" href="${registry.routeHash('chat',routeOf(c))}" data-chat-act="open" data-key="${k}"${on?h` aria-current="page"`:''}>${chIcon(c)}<span>${c.kind==='lobby'?h`${chName(c)} <small>${chScope(c)}</small>`:chName(c)}</span>${!on&&signedIn()&&c.n?h`<span class="chat-ub">${registry.badgeText(c.n)}</span>`:''}</a>`;})}`))return;
  v.chips.querySelector('.is-on')?.scrollIntoView?.({block:'nearest',inline:'nearest'});
 }
 function paintConvHead(v,c){
  const muted=c?.id&&mutedChannels().has(c.id),bell=signedIn()&&c?.id&&v.kind==='page';
  const back=v.kind==='page'?(signedIn()?h`<button type="button" class="chat-icon-btn chat-back" data-action="menu" aria-label="${T('Otwórz menu')}">${icon('menu')}</button>`:h`<button type="button" class="chat-icon-btn chat-back" data-chat-act="home" aria-label="${T('Wstecz')}">${icon('left')}</button>`):'';
  const chip=c?.kind==='tournament'&&c.date===today()?h`<span class="chat-today">${T('Dziś zawody')}</span>`:'';
- setHtml(v.convhead,h`${back}${c?chIcon(c):''}<div class="chat-grow"><h2 class="chat-conv-title">${v.kind==='tournament'?T('Czat turnieju'):chFull(c)||T('Czat')}</h2><p>${v.kind==='tournament'?chName(c):chAbout(c)}${chip}</p></div>${live()}${bell?h`<button type="button" class="chat-icon-btn${muted?' is-muted':''}" data-chat-act="mute" aria-pressed="${!!muted}" title="${muted?T('Powiadomienia: wyciszone'):T('Powiadomienia: włączone')}" aria-label="${muted?T('Powiadomienia: wyciszone'):T('Powiadomienia: włączone')}">${icon('bell')}</button>`:''}`);
+ swap(v.convhead,h`${back}${c?chIcon(c):''}<div class="chat-grow"><h2 class="chat-conv-title">${v.kind==='tournament'?T('Czat turnieju'):chFull(c)||T('Czat')}</h2><p><span class="chat-conv-sub">${v.kind==='tournament'?chName(c):chAbout(c)}</span>${chip}</p></div>${live()}${bell?h`<button type="button" class="chat-icon-btn${muted?' is-muted':''}" data-chat-act="mute" aria-pressed="${!!muted}" title="${muted?T('Powiadomienia: wyciszone'):T('Powiadomienia: włączone')}" aria-label="${muted?T('Powiadomienia: wyciszone'):T('Powiadomienia: włączone')}">${icon('bell')}</button>`:''}`);
  v.liveEl=v.convhead.querySelector('[data-chat-part="live"]');if(v.liveEl)v.liveEl.hidden=S.status!=='live';
 }
 function banner(kind,text,ico,extra=''){return h`<div class="chat-banner ${kind}" role="${kind==='error'?'alert':'status'}">${icon(ico)}<span>${text}</span>${extra}</div>`;}
@@ -439,7 +451,7 @@ function paintBanners(v,c){
  else if(c?.st==='closed')list.push(banner('archive',T('Ten czat jest tylko do odczytu.'),'lock'));
  if(me?.access?.block==='muted'&&c&&c.st==='open'){const until=me.access.mutedUntil;list.push(banner('muted',until?T('Moderator wstrzymał Twoje pisanie do {time}.',{time:new Date(until*1000).toLocaleString(locale(),{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'})}):T('Moderator wstrzymał Twoje pisanie bezterminowo.'),'shield'));}
  if(v.compact)list.length=Math.min(list.length,1);
- setHtml(v.banners,h`${list}`);
+ swap(v.banners,h`${list}`);
 }
 
 // Message list: keyed reconciliation, so appending keeps focus, images and scroll.
