@@ -16,7 +16,9 @@ export default {
  'Wczytywanie kontekstu…':'Loading the context…',
  // Reported messages
  'Brak zgłoszeń. Społeczność jest w formie!':'No reports. The community is in great shape!',
- 'Brak rozpatrzonych zgłoszeń.':'No settled reports.',
+ 'Brak zgłoszeń z podjętym działaniem.':'No reports with action taken.',
+ 'Brak odrzuconych zgłoszeń.':'No dismissed reports.',
+ 'Brak zgłoszeń w historii.':'No reports in the history.',
  'Liczba zgłoszeń: {n}':'Reports: {n}',
  'Spam lub reklama':'Spam or advertising',
  'Obraźliwe lub nienawistne treści':'Offensive or hateful content',
@@ -35,7 +37,7 @@ export default {
  'Kontekst rozmowy':'Conversation context',
  'Pokaż':'Show',
  'Odrzucone':'Dismissed',
- 'Rozpatrzone':'Settled',
+ 'Z podjętym działaniem':'Action taken',
  'Otwarte zgłoszenie':'Open report',
  'Otwórz w czacie':'Open in chat',
  // Actions

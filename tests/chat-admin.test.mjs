@@ -94,6 +94,21 @@ test('rendering: queue, muted list and settings (the notice, names and e-mails) 
  assert.ok(s.includes('&lt;/textarea&gt;&lt;script&gt;'),'the notice cannot close the textarea');
  assert.deepEqual(parts(settingsView(settings)).names.filter(n=>n==='textarea'),['textarea','textarea'],'one textarea (opening and closing tag)');
 });
+test('history: the filter names what it filters and the empty text follows it; the muted list shows the e-mail of a person with only a user name',()=>{
+ const html=queueView({total:0,page:1,items:[]},{open:new Set(),ctx:{},historyStatus:'actioned'},true).html;
+ assert.ok(html.includes('Z podjętym działaniem')&&!html.includes('Rozpatrzone'));
+ const texts={actioned:'Brak zgłoszeń z podjętym działaniem.',dismissed:'Brak odrzuconych zgłoszeń.',all:'Brak zgłoszeń w historii.'};
+ for(const [status,text] of Object.entries(texts)){
+  const out=queueView({total:0,page:1,items:[]},{open:new Set(),ctx:{},historyStatus:status},true).html;
+  assert.ok(out.includes(text),status);assert.ok(Object.hasOwn(DICTIONARY,text),'English entry: '+text);
+  assert.ok(out.includes('value="'+status+'" selected'),'the filter keeps '+status);
+ }
+ assert.ok(queueView({total:0,page:1,items:[]},{open:new Set(),ctx:{},historyStatus:'dismissed'}).html.includes('Społeczność jest w formie'),'the open queue keeps its own text');
+ const row=(user)=>mutedView({items:[{user,until:null,reason:null,createdAt:1893500000,createdBy:null}]}).html;
+ assert.ok(row({id:'u',email:'a@x.pl',name:null,username:'jan'}).includes('class="mod-email" dir="auto">a@x.pl'),'user name only: e-mail shown');
+ assert.ok(row({id:'u',email:'a@x.pl',name:'Jan Kot',username:'jan'}).includes('class="mod-email" dir="auto">a@x.pl'),'full name: e-mail shown');
+ assert.equal((row({id:'u',email:'a@x.pl',name:null,username:null}).match(/a@x\.pl/g)||[]).length,1,'e-mail only: shown once, as the name');
+});
 test('settings view: switch, preset radios, custom pace, the hosting counter and its orientation threshold',()=>{
  const base={version:1,on:false,preset:'custom',ms:[1000,2000,3000,4000,5000],notice:null,presets:{normal:[2500,5000,10000,30000,60000],saver:[5000,10000,30000,60000,120000],emergency:[15000,30000,60000,120000,300000]},health:{429:HOSTING_429_HINT,503:1,508:2,0:3}};
  const html=settingsView(base).html;
@@ -187,6 +202,37 @@ test('moderation-boot: the badge shows the number of messages with open reports;
  assert.equal(boot.BADGE_MS,300000);
  assert.equal(await boot.refreshBadge(),null,'demo: no request');
 });
+test('moderation-boot: badge requests status=open, skips non-Admins and the hall display, latches off on 403/404, and polls only while visible',async()=>{
+ const asRole=role=>registry.provide('ui',{getWorkspace:()=>({user:{role}})});
+ const calls=[],ok=async params=>{calls.push(params);return {total:4,page:1,items:[]};};
+ boot.reset();asRole('admin');
+ assert.equal(await boot.refreshBadge({demo:false,request:ok,screen:()=>false}),4);
+ assert.deepEqual(calls,[{route:'admin-chat-reports',status:'open',page:'1'}]);assert.equal(registry.badge('moderation'),4);
+ calls.length=0;
+ assert.equal(await boot.refreshBadge({demo:false,request:ok,screen:()=>true}),null,'#screen');
+ assert.equal(await boot.refreshBadge({demo:true,request:ok,screen:()=>false}),null,'demo');
+ asRole('editor');assert.equal(await boot.refreshBadge({demo:false,request:ok,screen:()=>false}),null,'not an Admin');
+ assert.deepEqual(calls,[],'no request in those cases');
+ asRole('admin');
+ for(const status of [403,404]){
+  boot.reset();
+  assert.equal(await boot.refreshBadge({demo:false,request:async()=>{throw Object.assign(new Error('x'),{status});},screen:()=>false}),null);
+  assert.equal(await boot.refreshBadge({demo:false,request:ok,screen:()=>false}),null,status+' latches the badge off');
+  assert.deepEqual(calls,[]);
+ }
+ boot.reset();
+ assert.equal(await boot.refreshBadge({demo:false,request:async()=>{throw Object.assign(new Error('net'),{status:0});},screen:()=>false}),null,'another error does not latch');
+ assert.equal(await boot.refreshBadge({demo:false,request:ok,screen:()=>false}),4);
+ // timer: first read at once, then every 5 minutes, but a hidden tab skips the tick
+ calls.length=0;boot.reset();
+ let tick=null,ms=null,hidden=false;
+ boot.start({demo:false,request:ok,screen:()=>false,visible:()=>!hidden,every:(fn,delay)=>{tick=fn;ms=delay;return 0;}});
+ await new Promise(r=>setImmediate(r));assert.equal(calls.length,1,'read at start');assert.equal(ms,300000);
+ tick();await new Promise(r=>setImmediate(r));assert.equal(calls.length,2,'visible: tick reads');
+ hidden=true;tick();await new Promise(r=>setImmediate(r));assert.equal(calls.length,2,'hidden: tick skipped');
+ boot.stop();calls.length=0;boot.start({demo:true,request:ok,every:()=>{throw new Error('no timer in the demo');}});assert.deepEqual(calls,[]);
+ boot.stop();boot.reset();
+});
 test('the dictionary has no moderation text without an English entry',()=>{
  for(const k of ['Moderacja','Wyciszeni','Historia','Odpowiedzi hostingu w ostatniej godzinie','Brak zgłoszeń. Społeczność jest w formie!','Notatka wewnętrzna (opcjonalnie)','Powód (widoczny tylko dla administratorów)'])assert.ok(Object.hasOwn(DICTIONARY,k),k);
 });
@@ -226,7 +272,10 @@ test('panel in a browser: hostile texts stay text, the dialogs send the right bo
     if(params.route==='admin-chat-reports')return {total:reports.length,page:1,items:reports};
     if(params.route==='admin-chat-settings')return settings();
     if(params.route==='admin-chat-action'){if(opts.body.action==='dismiss')reports=[];return {ok:true};}
-    if(params.route==='admin-chat-settings-save'){version++;return {...settings(),...opts.body,notice:opts.body.notice===undefined?evil:opts.body.notice};}
+    if(params.route==='admin-chat-settings-save'){
+     const fail=window.__fail;window.__fail=null;
+     if(fail){if(fail.status===409)version++;throw Object.assign(new Error(fail.message),{status:fail.status});}
+     version++;return {...settings(),...opts.body,notice:opts.body.notice===undefined?evil:opts.body.notice};}
     throw new Error('Nieznana trasa '+params.route);
    };
    m.mount(host,{request,demo:false});
@@ -265,9 +314,23 @@ test('panel in a browser: hostile texts stay text, the dialogs send the right bo
   await page.click('#mod-tab-settings');await page.waitForSelector('#mod-settings-form');
   assert.equal(await page.inputValue('#mod-notice'),EVIL);
   assert.match(await page.locator('.mod-tile.is-warn').first().innerText(),/429\s+61/);
+  // a failed save (network, 503) keeps the typed notice, the chosen pace and the switch, and shows the error next to the button
+  await page.check('#mod-settings-form input[value="saver"]');await page.fill('#mod-notice','Przerwa techniczna');await page.uncheck('#mod-settings-form input[name=on]');
+  await page.evaluate(()=>{window.__fail={status:0,message:'Failed to fetch'};});
+  await page.click('#mod-settings-form button[type=submit]');await page.waitForFunction(()=>document.querySelector('#mod-settings-form .form-error')?.textContent.trim());
+  assert.equal(await page.inputValue('#mod-notice'),'Przerwa techniczna');assert.equal(await page.isChecked('#mod-settings-form input[value="saver"]'),true);assert.equal(await page.isChecked('#mod-settings-form input[name=on]'),false);
+  assert.equal(await page.locator('.mod-saved').count(),0);
+  await page.evaluate(()=>{window.__fail={status:503,message:'Service Unavailable'};});
+  await page.click('#mod-settings-form button[type=submit]');await page.waitForFunction(()=>window.__calls.filter(c=>c.params.route==='admin-chat-settings-save').length===2);
+  assert.equal(await page.inputValue('#mod-notice'),'Przerwa techniczna','503 keeps the input');
+  // 409: somebody saved meanwhile; the form is rebuilt from the fresh state and says so
+  await page.evaluate(()=>{window.__fail={status:409,message:'Ustawienia zmienił ktoś inny.'};});
+  await page.click('#mod-settings-form button[type=submit]');await page.waitForFunction(()=>window.__calls.filter(c=>c.params.route==='admin-chat-settings').length===2&&document.querySelector('#mod-settings-form .form-error')?.textContent.trim());
+  assert.equal(await page.inputValue('#mod-notice'),EVIL,'409 reloads the saved state');assert.equal(await page.isChecked('#mod-settings-form input[value="saver"]'),false);
+  assert.match(await page.locator('#mod-settings-form .form-error').innerText(),/\S/);
   await page.check('#mod-settings-form input[value="saver"]');await page.fill('#mod-notice','Przerwa techniczna');await page.click('#mod-settings-form button[type=submit]');
   await page.waitForSelector('.mod-saved');
-  assert.deepEqual(await page.evaluate(()=>window.__calls.filter(c=>c.params.route==='admin-chat-settings-save').map(c=>c.body)),[{version:3,preset:'saver',notice:'Przerwa techniczna'}]);
+  assert.deepEqual(await page.evaluate(()=>window.__calls.filter(c=>c.params.route==='admin-chat-settings-save').map(c=>c.body)),[{version:3,on:false,preset:'saver',notice:'Przerwa techniczna'},{version:3,on:false,preset:'saver',notice:'Przerwa techniczna'},{version:3,on:false,preset:'saver',notice:'Przerwa techniczna'},{version:4,preset:'saver',notice:'Przerwa techniczna'}]);
   // keyboard: arrows move between tabs
   await page.focus('#mod-tab-settings');await page.keyboard.press('ArrowRight');assert.equal(await page.evaluate(()=>document.activeElement.id),'mod-tab-reports');
   assert.deepEqual(await page.evaluate(()=>window.__sec),[],'CSP violations');

@@ -120,7 +120,7 @@ export function reportItem(it,{open=false,ctx=null,history=false}={}){
 <p class="mod-reasons"><span class="mod-count">${T('Liczba zgłoszeń: {n}',{n:rs.count??0})}</span>${groupReasons(rs.reasons).map(x=>h` <span class="mod-chip">${reasonLabel(x.reason)} ×${x.n}</span>`)}</p>
 ${authorLine(author,muted)}
 ${messageText(m,deleted)}${deleted&&m.original?h`<p class="mod-note">${T('Treść zapisana w dzienniku moderacji (widoczna tylko dla administratorów).')}</p>`:''}
-<details class="mod-reports"><summary>${T('Powody i komentarze')}</summary><ul>${(rs.items||[]).map(r=>h`<li><span class="mod-reason">${reasonLabel(r.reason)}</span> <span class="mod-who" dir="auto">${r.reporter?.username?'@'+r.reporter.username:T('Zgłaszający bez nazwy użytkownika')}</span> <time>${fmtSeconds(r.createdAt)}</time>${history?h` <span class="badge neutral">${r.status==='dismissed'?T('Odrzucone'):r.status==='open'?T('Otwarte zgłoszenie'):T('Rozpatrzone')}</span>`:''}${r.comment?h`<q class="mod-comment" dir="auto">${r.comment}</q>`:''}</li>`)}</ul></details>
+<details class="mod-reports"><summary>${T('Powody i komentarze')}</summary><ul>${(rs.items||[]).map(r=>h`<li><span class="mod-reason">${reasonLabel(r.reason)}</span> <span class="mod-who" dir="auto">${r.reporter?.username?'@'+r.reporter.username:T('Zgłaszający bez nazwy użytkownika')}</span> <time>${fmtSeconds(r.createdAt)}</time>${history?h` <span class="badge neutral">${r.status==='dismissed'?T('Odrzucone'):r.status==='open'?T('Otwarte zgłoszenie'):T('Z podjętym działaniem')}</span>`:''}${r.comment?h`<q class="mod-comment" dir="auto">${r.comment}</q>`:''}</li>`)}</ul></details>
 <div class="mod-actions">${act('ctx',open?T('Ukryj kontekst'):T('Pokaż kontekst'))}${history?'':h`${deleted?'':act('delete',T('Usuń wiadomość'),'danger-text')}${m.state==='hidden_review'?act('restore',T('Przywróć wiadomość')):''}${act('dismiss',T('Odrzuć zgłoszenie'))}${muted?act('unmute',T('Przywróć pisanie')):author.id&&!admin?act('mute',T('Wycisz autora…')):''}${act('channel',T('Status czatu…'))}`}<a class="btn small-btn" href="${chatHash(m.channel)}">${T('Otwórz w czacie')}</a></div>
 ${open?h`<div class="mod-ctx">${contextView(ctx,m.id)}</div>`:''}
 </article>`;
@@ -130,16 +130,17 @@ function pager(data,kind){
  return pages>1?h`<nav class="mod-pager" aria-label="${T('Strony')}"><button type="button" class="btn small-btn" data-mod="page" data-dir="-1"${page<=1?' disabled':''}>${T('Poprzednia')}</button><span>${T('Strona {page} z {pages}',{page,pages})}</span><button type="button" class="btn small-btn" data-mod="page" data-dir="1"${page>=pages?' disabled':''}>${T('Następna')}</button></nav>`:'';
 }
 const empty=(text,extra='')=>h`<div class="mod-empty">${ui()?.emptyMascot?.()??''}<h3>${text}</h3>${extra}</div>`;
+const historyEmpty=status=>status==='dismissed'?T('Brak odrzuconych zgłoszeń.'):status==='all'?T('Brak zgłoszeń w historii.'):T('Brak zgłoszeń z podjętym działaniem.');
 export function queueView(data,state,history=false){
  const items=data?.items||[];
- const filter=history?h`<label class="mod-filter">${T('Pokaż')}<select data-mod-history-status>${[['actioned',T('Rozpatrzone')],['dismissed',T('Odrzucone')],['all',T('Wszystkie')]].map(([v,l])=>h`<option value="${v}"${state.historyStatus===v?' selected':''}>${l}</option>`)}</select></label>`:'';
- if(!items.length)return h`${filter}${empty(history?T('Brak rozpatrzonych zgłoszeń.'):T('Brak zgłoszeń. Społeczność jest w formie!'))}`;
+ const filter=history?h`<label class="mod-filter">${T('Pokaż')}<select data-mod-history-status>${[['actioned',T('Z podjętym działaniem')],['dismissed',T('Odrzucone')],['all',T('Wszystkie')]].map(([v,l])=>h`<option value="${v}"${state.historyStatus===v?' selected':''}>${l}</option>`)}</select></label>`:'';
+ if(!items.length)return h`${filter}${empty(history?historyEmpty(state.historyStatus):T('Brak zgłoszeń. Społeczność jest w formie!'))}`;
  return h`${filter}<div class="mod-list">${items.map(it=>reportItem(it,{history,open:state.open.has(it.message.id),ctx:state.ctx[it.message.id]}))}</div>${pager(data)}`;
 }
 export function mutedView(data){
  const items=data?.items||[];
  if(!items.length)return empty(T('Nikt nie jest teraz wyciszony.'));
- return h`<ul class="mod-list mod-muted">${items.map(x=>h`<li class="mod-item" data-user="${x.user?.id}"><div><strong dir="auto">${personName(x.user)}</strong>${x.user?.email&&x.user?.name?h` <span class="mod-email" dir="auto">${x.user.email}</span>`:''} ${mutedBadge({until:x.until})}</div>
+ return h`<ul class="mod-list mod-muted">${items.map(x=>h`<li class="mod-item" data-user="${x.user?.id}"><div><strong dir="auto">${personName(x.user)}</strong>${x.user?.email&&personName(x.user)!==x.user.email?h` <span class="mod-email" dir="auto">${x.user.email}</span>`:''} ${mutedBadge({until:x.until})}</div>
 <p class="mod-note">${T('Wyciszył(a): {name}, {time}',{name:x.createdBy?.email||T('Konto usunięte lub anonimowe'),time:fmtSeconds(x.createdAt)})}</p>${x.reason?h`<p class="mod-reason-text"><span class="mod-note">${T('Powód:')}</span> <span dir="auto">${x.reason}</span></p>`:''}
 <div class="mod-actions"><button type="button" class="btn small-btn" data-mod="unmute" data-user="${x.user?.id}">${T('Przywróć pisanie')}</button></div></li>`)}</ul>`;
 }
@@ -323,7 +324,8 @@ async function submit(event){
  }catch(error){
   if(error?.status===401){ui()?.handleError?.(error);return;}
   const message=translateMessage(error.message);
-  if(form.dataset.kind==='settings'){S.settingsError=message;if(error?.status===409){S.saved=false;await load('settings',{quiet:true});S.settingsError=message;}drawPanel();}
+  // 409: somebody saved meanwhile, so the form is rebuilt from the fresh state. Any other failure (network, 429/503, 422) keeps what the Admin typed.
+  if(form.dataset.kind==='settings'&&error?.status===409){S.saved=false;await load('settings',{quiet:true});S.settingsError=message;drawPanel();}
   else if(box)box.textContent=message;
  }finally{if(button?.isConnected)button.disabled=false;}
 }
