@@ -4,9 +4,10 @@
 // that changes only backend/ keeps the same sw.js and shows nobody an update bar. Each precache entry carries its SHA-256, which the worker
 // checks on install. Fails on missing or duplicated markers, a missing required file and a precache above 1.5 MB.
 import {readFile,writeFile,readdir} from 'node:fs/promises';import {createHash} from 'node:crypto';import path from 'node:path';import {pathToFileURL} from 'node:url';
-// Never precached: demo-only and documentation files, large images not needed offline, server-side and private paths, dotfiles, and the
-// worker's own update probes. Manifests and offline.html are part of the shell.
-export const DENY=[/^architecture\./,/^promo\//,/^vendor\//,/^brand\/og-image\./,/^fonts\/OFL/,/^screenshots\//,/^(?:api|u|live)(?:\/|$)/,/(?:^|\/)\./,/^favicon\.ico$/,/^sw\.js$/,/^version\.json$/];
+// Never precached: demo-only and documentation files, large images not needed offline, server-side and private paths, any PHP script
+// (its executed output would never match the source checksum and every install would fail), dotfiles, and the worker's own update probes.
+// Manifests and offline.html are part of the shell.
+export const DENY=[/^architecture\./,/^promo\//,/^vendor\//,/^brand\/og-image\./,/^fonts\/OFL/,/^screenshots\//,/^(?:api|u|live)(?:\/|$)/,/\.(?:php\d?|phtml|phar)$/i,/(?:^|\/)\./,/^favicon\.ico$/,/^sw\.js$/,/^version\.json$/];
 export const REQUIRED=['index.html','offline.html','manifest.webmanifest','manifest.en.webmanifest','app.js','runtime-config.js','lang-boot.js'];
 export const LIMIT=1.5*1024*1024;
 const BUILD_MARK="/*@build*/'dev'",LIST_MARK='/*@precache*/[]';

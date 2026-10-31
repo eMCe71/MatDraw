@@ -16,8 +16,9 @@ const scope=new URL('./',self.location).pathname,at=p=>new URL(p,self.location).
 const SHELL_PATHS=new Set(PRECACHE.map(([u])=>new URL(u,self.location).pathname));
 const PRIVATE=new RegExp('^'+scope.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'(?:api|u|live)(?:/|$)','i');
 const NEVER=new Set([scope+'sw.js',scope+'version.json']),MEDIA=/\.(?:png|jpe?g|gif|webp|avif|svg|ico|woff2?)$/i;
-/** Decoded path (so /%61pi/ counts as api/); null when it cannot be decoded, and such a request is left alone. */
-const decoded=u=>{try{return decodeURIComponent(u.pathname);}catch{return null;}};
+/** Decoded path (so /%61pi/ counts as api/) with repeated slashes collapsed (Apache serves //u/x as /u/x, so it must count as u/ too);
+ * null when it cannot be decoded, and such a request is left alone. */
+const decoded=u=>{try{return decodeURIComponent(u.pathname).replace(/\/{2,}/g,'/');}catch{return null;}};
 const hex=buf=>[...new Uint8Array(buf)].map(b=>b.toString(16).padStart(2,'0')).join('');
 
 self.addEventListener('install',e=>{if(live)e.waitUntil(precache());});

@@ -76,6 +76,8 @@ test('build-pwa refuses a filled, broken or oversized release and does not follo
  await assert.rejects(buildPwa(copyDist('t4',pub=>writeFileSync(path.join(pub,'big.bin'),Buffer.alloc(LIMIT)))),/above the/);
  const linked=copyDist('t5',pub=>{mkdirSync(path.join(TMP,'uploads'));writeFileSync(path.join(TMP,'uploads/a.webp'),'private');symlinkSync(path.join(TMP,'uploads'),path.join(pub,'files'));});
  assert.ok(!(await buildPwa(linked)).urls.some(u=>u.startsWith('./files/')));
+ const php=await buildPwa(copyDist('t6',pub=>{mkdirSync(path.join(pub,'hooks'));for(const f of ['health.php','hooks/stripe.PHP','x.phtml','y.phar','z.php8'])writeFileSync(path.join(pub,f),'<?php echo 1;');}));
+ assert.deepEqual(php.urls.filter(u=>/\.ph/i.test(u)),[],'server-side scripts are never precached');
 });
 test('manifests PL and EN: valid JSON, one identity, start_url in scope, language, icons with the declared sizes, maskable, shortcuts',()=>{
  const read=f=>JSON.parse(readFileSync(path.join(DIST,f),'utf8'));

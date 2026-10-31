@@ -22,12 +22,13 @@ function server(files){
  };
  return s;
 }
-/** Cache Storage keyed by URL without the query; honours ignoreSearch. */
+/** Cache Storage keyed by URL; honours ignoreSearch, and, more strictly than a browser, misses any stored response that carries Vary
+ * unless ignoreVary is set (in Chromium a Vary: Accept-Encoding from mod_deflate can make an otherwise equal request miss). */
 function cacheStorage(){
  const stores=new Map();
  const make=()=>{const m=new Map();return {m,
   async put(r,res){const u=typeof r==='string'?abs(r):r.url;await res.clone().arrayBuffer();m.set(u,res.clone());},
-  async match(r,o={}){const u=typeof r==='string'?abs(r):r.url;const hit=m.get(u)||(o.ignoreSearch?m.get(u.split('?')[0]):undefined);return hit?hit.clone():undefined;},
+  async match(r,o={}){const u=typeof r==='string'?abs(r):r.url;const hit=m.get(u)||(o.ignoreSearch?m.get(u.split('?')[0]):undefined);return hit&&(o.ignoreVary||!hit.headers.has('vary'))?hit.clone():undefined;},
   async keys(){return [...m.keys()].map(url=>({url}));},
   async delete(r){return m.delete(typeof r==='string'?r:r.url);}};};
  return {stores,
@@ -81,7 +82,8 @@ test('private and non-GET requests are never intercepted, so they are never cach
  const w=await installed();
  const cases=[['/api/index.php?route=bootstrap'],['/api/index.php?route=public-chat',{mode:'cors'}],['/API/index.php'],['/%61pi/x.png'],['/u/abc/avatar.webp'],['/live/lobby.json'],['/api/index.php',{mode:'navigate'}],['/u/abc/avatar.webp',{mode:'navigate'}],
   ['/api/index.php',{method:'POST'}],['/app.js',{method:'HEAD'}],['https://evil.test/app.js'],['https://evil.test/',{mode:'navigate'}],['/app.js',{headers:new Headers({range:'bytes=0-1'})}],
-  ['/sw.js'],['/version.json'],['/version.json',{mode:'navigate'}],['/brand/icon-192.png',{cache:'only-if-cached',mode:'no-cors'}]];
+  ['/sw.js'],['/version.json'],['/version.json',{mode:'navigate'}],['/brand/icon-192.png',{cache:'only-if-cached',mode:'no-cors'}],
+  ['//u/abc/avatar.webp'],['///api//x.png'],['/%2Fu/abc/avatar.webp'],['//live/lobby.json',{mode:'navigate'}],['//sw.js']];
  for(const [url,o] of cases)assert.equal(await w.fetchEvent(url,o),undefined,url+' '+JSON.stringify(o||{}));
  for(const store of w.caches.stores.values())for(const k of store.m.keys())assert.doesNotMatch(new URL(k).pathname,/^\/(api|u|live)\//i,k);
 });
@@ -143,6 +145,16 @@ test('the template (no precache list) passes everything through and its activati
  for(const [url,o] of [['/',{mode:'navigate'}],['/app.js'],['/promo/ad.webp']])assert.equal(await w.fetchEvent(url,o),undefined,url);
  await w.run('activate');assert.deepEqual(await caches.keys(),['other-app']);
  w.run('message',{data:'VERSION',source:{postMessage:m=>got.push(m)}});assert.equal(JSON.stringify(got),'[{"build":"dev"}]');
+});
+test('responses with Vary (mod_deflate) still come from the caches: root navigation, shell files and runtime images',async()=>{
+ const w=load({files:{...SHELL_FILES,'./promo/ad.webp':'ad-v1'}});for(const f of w.net.files.values())f.headers={vary:'Accept-Encoding'};
+ await w.run('install');await w.run('activate');w.net.log.length=0;
+ assert.equal(await (await w.fetchEvent('/?source=pwa',{mode:'navigate'})).text(),'<!doctype html>index-v1');
+ assert.equal(await (await w.fetchEvent('/app.js?v=2')).text(),'app-v1');assert.equal(w.net.log.length,0,'no network for the shell');
+ await w.fetchEvent('/promo/ad.webp');w.net.offline=true;
+ assert.equal(await (await w.fetchEvent('/promo/ad.webp')).text(),'ad-v1','runtime image offline');
+ assert.equal(await (await w.fetchEvent('/a/b',{mode:'navigate'})).status,302,'offline page found');
+ assert.equal(await (await w.fetchEvent('/architecture.html',{mode:'navigate'})).text(),'<!doctype html>offline-v1');
 });
 test('an unreadable cache never breaks a request: the network answers',async()=>{
  const w=await installed();w.caches.open=async()=>{throw new Error('storage broken');};
