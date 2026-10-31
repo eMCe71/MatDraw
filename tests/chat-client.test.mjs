@@ -1,8 +1,15 @@
 // Chat client (plan §5.4, §5.9, §11, §12.10): tokenizing and safe rendering, grouping and day separators, the poll schedule (idle time
 // only from interaction, limited boost), back-off and the hosting report, leader election (one source of polls for many tabs),
-// purgeIdentity after logout/reset/401, the avatar queue, the stop after client_outdated and the demo adapter.
+// purgeIdentity after logout/reset/401, the avatar queue, the stop and 'client-outdated' after client_outdated, background counters
+// (knownLast), the demo adapter and, in a real browser (MATDRAW_BROWSER_TESTS=1), per-channel "new messages", a tournament channel
+// created after the first lists, and drafts/focus kept across repaints.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import http from 'node:http';
+import {createRequire} from 'node:module';
+import {readFile} from 'node:fs/promises';
+import {extname,join,normalize} from 'node:path';
+import {fileURLToPath} from 'node:url';
 
 // Browser stand-ins installed before the modules load (me.js opens a BroadcastChannel, the demo uses localStorage).
 class MemoryStorage{#m=new Map();get length(){return this.#m.size;}key(i){return [...this.#m.keys()][i]??null;}getItem(k){return this.#m.has(k)?this.#m.get(k):null;}setItem(k,v){this.#m.set(k,String(v));}removeItem(k){this.#m.delete(k);}clear(){this.#m.clear();}}
@@ -187,6 +194,31 @@ test('401 calls onUnauth; 409 client_outdated stops polling for good',async()=>{
  await clock.advance(60000);assert.equal(n,1);assert.equal(outdated,1);assert.equal(t2.stopped,true);
 });
 
+test('409 client_outdated emits registry client-outdated once in every tab: alone, as the leader, as a follower and from lists',async()=>{
+ const clock=fakeClock(),outdated=async()=>json(409,{error:'x',code:'client_outdated'});
+ const make=(emits,more,wants=()=>({ch:{'1':0},onScreen:true}))=>T.createTransport({mode:()=>'public',wants,onOutdated:()=>{},env:{fetch:outdated,now:clock.now,random:()=>0.5,setTimeout:clock.setTimeout,clearTimeout:clock.clearTimeout,setInterval:clock.setInterval,clearInterval:clock.clearInterval,online:()=>true,visible:()=>true,apiUrl:q=>'?'+new URLSearchParams(q),emit:event=>emits.push(event),events:false,...more}});
+ const alone=[],t1=make(alone,{locks:undefined,BroadcastChannel:undefined});
+ await clock.advance(30000);assert.deepEqual(alone,['client-outdated'],'a tab polling alone tells pwa.js');assert.equal(t1.stopped,true);
+ const locks=fakeLocks(),seen=[[],[]],tabs=seen.map(e=>make(e,{locks,BroadcastChannel:Bus}));
+ await clock.advance(30000);assert.equal(tabs.filter(t=>t.stopped).length,2);
+ assert.deepEqual(seen,[['client-outdated'],['client-outdated']],'the leader that got the 409 and the follower that got the broadcast');
+ const fromLists=[],t3=make(fromLists,{locks:undefined,BroadcastChannel:undefined},()=>({}));
+ await assert.rejects(t3.lists(),e=>e.status===409);await assert.rejects(t3.lists(),e=>e.status===409);
+ assert.deepEqual(fromLists,['client-outdated'],'channel lists too, once');assert.equal(t3.stopped,true);
+});
+test('background counters: the first poll counts what came while away; knownLast is the id the count was made for',()=>{
+ const S=chat._state(),SEEN='matdraw.chat.seen';registry.provide('ui',{getWorkspace:()=>({user:{id:'u1',role:'club'}})});
+ try{
+  localStorage.setItem(SEEN,JSON.stringify({'1':100}));
+  chat._internals.applyLists({cv:1,lobby:[{id:1,slug:'taekwondo',scope:'world',last:105,count:9,st:'open'}],tournaments:[]});
+  const first=chat._internals.wants().h;assert.deepEqual(first,{'1':[100,0]},'not the last id from the lists (the server would answer same)');
+  assert.match(T.buildQuery({route:'chat-feed',h:first}).h,/^1:100:0$/);
+  chat._internals.apply({cv:1,heads:{'1':{last:105,n:5}}},{});
+  assert.equal(S.channels.get('1').n,5);assert.deepEqual(chat._internals.wants().h,{'1':[100,105]},'later polls: 204 until the channel changes');
+  localStorage.setItem(SEEN,JSON.stringify({'1':103}));assert.deepEqual(chat._internals.wants().h,{'1':[103,0]},'read in another tab: counted again');
+ }finally{registry.provide('ui',undefined);localStorage.removeItem(SEEN);chat.purgeIdentity();}
+});
+
 // ——— purgeIdentity ———
 function populate(){
  const S=chat._state();
@@ -242,4 +274,99 @@ test('demo adapter: seeded channels, member and guest projections, a demo accoun
  const older=await t.history('2',guest.ch['2'].m[2].id);assert.equal(older.m.length,2);
  await t.remove(sent.m.id);mode='feed';wants={ch:{'2':0}};t.update();await new Promise(r=>setTimeout(r,5));assert.equal(data.at(-1).ch['2'].m.find(m=>m.id===sent.m.id).x,'author');
  t.stop();
+});
+
+// ——— Real browser (opt-in like tests/pwa-browser.test.mjs: MATDRAW_BROWSER_TESTS=1, skipped without Playwright) ———
+// A harness page loads the real chat.js in the API mode; the test server answers the chat routes from `api` below.
+let chromium=null;if(process.env.MATDRAW_BROWSER_TESTS)try{({chromium}=createRequire(import.meta.url)('playwright'));}catch{}
+const DIST=fileURLToPath(new URL('../dist/',import.meta.url));
+const CSP="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self'";
+const HARNESS={
+ '/harness.html':['text/html; charset=utf-8','<!doctype html><html lang="pl"><head><meta charset="utf-8"><style>.chat-log{height:240px;overflow:auto}</style></head><body><div id="a" data-chat-mount="page"></div><div id="b" data-chat-mount="page"></div><div id="t" data-chat-mount="tournament"></div><script type="module" src="./harness.js"></script></body></html>'],
+ '/harness.js':['text/javascript; charset=utf-8',"import {registry} from './registry.js';registry.provide('ui',{getWorkspace:()=>window.__ws||null,icon:()=>'',toast:()=>{},getState:()=>({})});window.__registry=registry;window.__me=await import('./me.js');window.__chat=await import('./chat.js');window.__ready=true;"],
+ '/runtime-config.js':['text/javascript; charset=utf-8',"export const CONFIG={mode:'api',apiBase:'./api/index.php'};"]
+};
+const DAY=Date.UTC(2026,9,31,9,0,0);
+const msgs=(from,n,member)=>Array.from({length:n},(_,i)=>({id:from+i,r:from+i,t:DAY+(from+i)*60000,c:0,b:'Wiadomość '+(from+i),...(member?{a:'PidMarta0001'}:{g:i%5})}));
+function chatApi(){
+ const api={channels:{'1':msgs(1,40),'2':[],'3':msgs(101,40),'4':[]},tour:{id:null},me:null};
+ api.answer=(route,q)=>{
+  const member=route==='chat-feed'||route==='chat-channels';
+  if(route==='public-config')return [200,{signup:false,billing:false}];
+  if(route==='me')return api.me?[200,api.me]:[401,{error:'Zaloguj się ponownie.'}];
+  if(route==='public-chat-channels'||route==='chat-channels'){
+   const lobby=[['taekwondo','world'],['taekwondo-pl','pl'],['karate','world'],['general','world']].map(([slug,scope],i)=>({id:i+1,slug,scope,st:'open',last:api.channels[i+1].at(-1)?.id||0,count:api.channels[i+1].length}));
+   return [200,{cv:1,lobby,tournaments:[{id:api.tour.id,tournamentId:'t-1',title:'Puchar',date:'2099-01-01',city:'Kraków',st:'open',last:0,count:0}],archive:[]}];
+  }
+  if(route==='public-chat'||route==='chat-feed'){
+   const ch={};for(const p of (q.get('ch')||'').split(',').filter(Boolean)){const [id,rev]=p.split(':');const list=(api.channels[id]||[]).map(m=>member?{id:m.id,r:m.r,t:m.t,c:m.c,b:m.b,a:'PidMarta0001'}:m);if(rev==='0')ch[id]={rev:list.at(-1)?.r||0,st:'open',more:false,older:false,m:list};}
+   return Object.keys(ch).length?[200,{cv:1,ch,heads:{},...(member?{people:{PidMarta0001:{n:'Marta K.',u:'marta.k'}}}:{})}]:[204,null];
+  }
+  return [404,{error:'x'}];
+ };
+ return api;
+}
+const serveChat=api=>new Promise(resolve=>{
+ const TYPES={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.svg':'image/svg+xml','.json':'application/json'};
+ const server=http.createServer(async(req,res)=>{
+  const u=new URL(req.url,'http://x'),p=decodeURIComponent(u.pathname);
+  if(p==='/api/index.php'){const [status,body]=api.answer(u.searchParams.get('route'),u.searchParams);res.writeHead(status,status===204?{}:{'Content-Type':'application/json'});res.end(status===204?undefined:JSON.stringify(body));return;}
+  if(HARNESS[p]){res.writeHead(200,{'Content-Type':HARNESS[p][0],'Content-Security-Policy':CSP});res.end(HARNESS[p][1]);return;}
+  try{const body=await readFile(join(DIST,normalize(p).replace(/^(\.\.[\/\\])+/,'')));res.writeHead(200,{'Content-Type':TYPES[extname(p)]||'application/octet-stream','Content-Security-Policy':CSP});res.end(body);}
+  catch{res.writeHead(404);res.end();}
+ }).listen(0,'127.0.0.1',()=>resolve({server,url:'http://127.0.0.1:'+server.address().port+'/'}));
+});
+test('chat.js in a browser: "new messages" per channel, a tournament channel created later, the draft and focus kept across repaints',{skip:!chromium&&'set MATDRAW_BROWSER_TESTS=1 (needs playwright)',timeout:120000},async t=>{
+ const api=chatApi(),{server,url}=await serveChat(api);let browser;
+ try{browser=await chromium.launch();}catch(error){server.close();t.skip('Chromium cannot start: '+error.message);return;}
+ const errors=[];
+ const open=async()=>{const ctx=await browser.newContext({viewport:{width:1200,height:900},serviceWorkers:'block',locale:'pl-PL'});const page=await ctx.newPage();page.on('pageerror',e=>errors.push(e.message));await page.goto(url+'harness.html');await page.waitForFunction(()=>window.__ready===true);return {ctx,page};};
+ const mountPage=(page,id,params)=>page.evaluate(([id,params])=>{window.__chat.mount(document.getElementById(id),'page',{params:new URLSearchParams(params)});},[id,params]);
+ try{
+  // Guest, two full chats in one tab: a poll with 1 new message in one channel and 3 in the other counts each view's own channel.
+  { const {ctx,page}=await open();
+    await mountPage(page,'a','c=taekwondo');await mountPage(page,'b','c=karate');
+    await page.waitForFunction(()=>['a','b'].every(id=>document.querySelectorAll('#'+id+' .chat-msg').length===40));
+    await page.evaluate(()=>{for(const id of ['a','b']){const log=document.querySelector('#'+id+' .chat-log');log.scrollTop=0;log.dispatchEvent(new Event('scroll'));}});
+    await page.waitForFunction(()=>['a','b'].every(id=>document.getElementById(id).chatView.pinned===false));
+    await page.evaluate(([one,three])=>window.__chat._internals.apply({cv:1,ch:{'1':{rev:41,st:'open',more:false,m:one},'3':{rev:143,st:'open',more:false,m:three}}},{'1':40,'3':140}),[msgs(41,1),msgs(141,3)]);
+    assert.deepEqual(await page.evaluate(()=>['a','b'].map(id=>document.querySelector('#'+id+' [data-chat-part="pill"]').textContent)),['Nowe wiadomości: 1','Nowe wiadomości: 3']);
+    await ctx.close(); }
+
+  // Guest, tournament tab before the channel exists: once a member posts and the channel appears, the view moves to it.
+  { const {ctx,page}=await open();
+    await page.evaluate(()=>window.__chat.mount(document.getElementById('t'),'tournament',{tid:'t-1'}));
+    await page.waitForFunction(()=>document.getElementById('t').chatView.key==='t:t-1'&&!!document.querySelector('#t .chat-empty'));
+    api.tour.id=5;api.channels['5']=msgs(301,2);
+    await page.evaluate(()=>window.__chat._internals.ensureLists(true));
+    await page.waitForFunction(()=>document.querySelectorAll('#t .chat-msg').length===2);
+    assert.equal(await page.evaluate(()=>document.getElementById('t').chatView.key),'5');
+    assert.equal(await page.evaluate(()=>window.__chat._state().channels.has('t:t-1')),false,'the virtual entry is gone');
+    api.tour.id=null;delete api.channels['5'];await ctx.close(); }
+
+  // Member typing: a language switch and a me refresh within the 300 ms draft delay keep text, focus and caret; switching channel saves it.
+  { const {ctx,page}=await open();
+    api.me={user:{id:'u1',role:'club'},profile:{publicId:'PidAnna00001',username:'anna',firstName:'Anna',lastName:'K',country:'PL',sports:['taekwondo'],complete:true},access:{full:true,canPost:true,block:null}};
+    await page.evaluate(async()=>{window.__ws={user:{id:'u1',role:'club'},tournaments:[]};await window.__me.loadMe();});
+    await mountPage(page,'a','c=taekwondo');
+    await page.waitForSelector('#a textarea[data-chat-key="1"]');
+    const ta='#a textarea';
+    await page.type(ta,'Cześć');
+    await page.evaluate(()=>window.__registry.emit('language',{lang:'pl'}));
+    assert.deepEqual(await page.evaluate(ta=>{const t=document.querySelector(ta);return [t.value,document.activeElement===t,t.selectionStart];},ta),['Cześć',true,5]);
+    await page.type(ta,' wszystkim');
+    await page.evaluate(()=>window.__me.loadMe({force:true}));
+    assert.deepEqual(await page.evaluate(ta=>{const t=document.querySelector(ta);return [t.value,document.activeElement===t,t.selectionStart];},ta),['Cześć wszystkim',true,15]);
+    await page.type(ta,'!');
+    await page.evaluate(()=>document.querySelector('#a [data-chat-act="open"][data-key="3"]').click());
+    await page.waitForSelector('#a textarea[data-chat-key="3"]');
+    assert.equal(await page.evaluate(()=>sessionStorage.getItem('matdraw.chat.draft.1')),'Cześć wszystkim!','saved under its channel before the rebuild');
+    await page.evaluate(()=>document.querySelector('#a [data-chat-act="open"][data-key="1"]').click());
+    await page.waitForSelector('#a textarea[data-chat-key="1"]');
+    assert.equal(await page.evaluate(()=>document.querySelector('#a textarea').value),'Cześć wszystkim!');
+    await page.evaluate(()=>window.__registry.emit('logout'));
+    assert.equal(await page.evaluate(()=>sessionStorage.getItem('matdraw.chat.draft.1')),null,'sign-out leaves no draft behind');
+    api.me=null;await ctx.close(); }
+  assert.deepEqual(errors,[]);
+ }finally{await browser.close();server.close();}
 });

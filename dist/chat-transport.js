@@ -6,7 +6,8 @@
  * faster and never below ms[1]. bg when no visible tab has the chat on screen (unread counters), paused when every tab is hidden or the
  * browser is offline, +-20% jitter on every delay. One request at a time, 10 s timeout, back-off with Retry-After on 429/503/508, and
  * a report e=<n>:<status> of hosting answers (429/503/508, 0 = not JSON or no answer) sent with the next request.
- * 401 on chat-feed: every tab purges identity and continues on the public route. 409 client_outdated: polling stops for good.
+ * 401 on chat-feed: every tab purges identity and continues on the public route. 409 client_outdated: polling stops for good and every
+ * tab (the one that got the answer included, also without a leader) emits registry 'client-outdated' once (plan §5.4, §9.4).
  * The scheduling, report, query and leader helpers are pure exports (tests/chat-client.test.mjs). */
 import * as Client from './client.js';
 import {emit} from './registry.js';
@@ -137,6 +138,9 @@ export function createTransport(opts){
  let synced=false,bc=null,leader=null,solo=true,timer=null,inFlight=false,again=false,stopped=false,fails=0,turn=0,lastStart=-1e9,lastEnd=0,factor=1,errorUntil=0;
  let cfg=normalizeCfg(null),cv=null,report=reportNew(),status='connecting',interactionAt=env.now(),messageAt=0,handedAt=-1e9;
  const leading=()=>solo||!!leader?.leading;
+ let outdatedSaid=false;
+ /** 409 client_outdated in this tab (own answer or the leader's broadcast): stop for good, then tell the app once (pwa.js updates). */
+ const outdated=()=>{stop();opts.onOutdated?.();if(!outdatedSaid){outdatedSaid=true;env.emit('client-outdated',{});}};
  const post=msg=>{try{bc?.postMessage(msg);}catch{}};
  const setStatus=s=>{if(s===status)return;status=s;opts.onStatus?.(s);if(!solo&&leading())post({type:'status',status:s,cfg,cv});};
  const self=()=>({tab:id,mode:opts.mode(),visible:env.visible(),interactionAt,wants:opts.wants()||{},at:env.now()});
@@ -177,7 +181,7 @@ export function createTransport(opts){
     if(c.kind==='ok')accept(r.body,u.ch,tabsNow);setStatus(cfg.on?'live':'off');
    }
    else if(c.kind==='unauth'){post({type:'unauth'});opts.onUnauth?.();}
-   else if(c.kind==='outdated'){post({type:'outdated'});stop();opts.onOutdated?.();return;}
+   else if(c.kind==='outdated'){post({type:'outdated'});outdated();return;}
    else if(c.kind==='gone'){setStatus('error');stop();return;}
    else if(c.kind==='off'){fails=0;failed=Math.max((r.retry||0)*1000,cfg.ms[4]);setStatus('off');}
    else{failed=errorDelay(r.status,r.retry,fails,env.random);fails++;setStatus(fails>=2||failed>30000?'reconnecting':status);}
@@ -225,7 +229,7 @@ export function createTransport(opts){
    else if(m.type==='data'&&!leading()){if(m.cv!=null)cv=m.cv;if(m.cfg)cfg=normalizeCfg(m.cfg);if(m.fresh)messageAt=env.now();opts.onData?.(m.data,m.from||{});}
    else if(m.type==='status'&&!leading()){if(m.cfg)cfg=normalizeCfg(m.cfg);if(m.cv!=null)cv=m.cv;if(m.status!==status){status=m.status;opts.onStatus?.(status);}}
    else if(m.type==='unauth')opts.onUnauth?.();
-   else if(m.type==='outdated'){stop();opts.onOutdated?.();env.emit('client-outdated',{});}
+   else if(m.type==='outdated')outdated();
   };
   leader=createLeader({locks:env.locks,onLead(){tabs.clear();cv=null;synced=false;post({type:'who'});tabs.set(id,self());handOver();plan();},onLose(){env.clearTimeout(timer);timer=null;}});
  }
@@ -259,7 +263,7 @@ export function createTransport(opts){
   async lists(){
    const mode=opts.mode(),r=await request({route:mode==='feed'?'chat-channels':'public-chat-channels'},mode),c=classify(r.status,r.body,r.json);
    if(c.kind==='unauth'){opts.onUnauth?.();throw Object.assign(new Error('Zaloguj się ponownie.'),{status:401});}
-   if(c.kind==='outdated'){stop();opts.onOutdated?.();throw Object.assign(new Error('Nie udało się wczytać czatu.'),{status:409});}
+   if(c.kind==='outdated'){outdated();throw Object.assign(new Error('Nie udało się wczytać czatu.'),{status:409});}
    if(c.kind!=='ok')throw Object.assign(new Error('Nie udało się wczytać czatu.'),{status:r.status,off:c.kind==='off',gone:c.kind==='gone'});
    if(cv===null&&r.body?.cfg)cfg=normalizeCfg(r.body.cfg);
    return r.body;

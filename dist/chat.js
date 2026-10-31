@@ -143,7 +143,7 @@ const mutedChannels=()=>new Set(listOf('muted'));
 const today=()=>dayKey(Date.now());
 const draftKey=key=>DRAFT+key;
 
-function chan(key,props){let c=S.channels.get(key);if(!c){c={key,id:/^\d+$/.test(key)?key:null,msgs:new Map(),cursor:0,loaded:false,older:false,st:'open',known:0,n:0,count:0};S.channels.set(key,c);}Object.assign(c,props);return c;}
+function chan(key,props){let c=S.channels.get(key);if(!c){c={key,id:/^\d+$/.test(key)?key:null,msgs:new Map(),cursor:0,loaded:false,older:false,st:'open',known:0,n:0,count:0,counted:0,countedRead:0};S.channels.set(key,c);}Object.assign(c,props);return c;}
 const sorted=c=>[...c.msgs.values()].sort((a,b)=>a.id-b.id);
 const lastId=c=>{let m=c.known||0;for(const id of c.msgs.keys())if(id>m)m=id;return m;};
 const chName=c=>!c?'':c.kind==='lobby'?(c.slug==='general'?T('Ogólny'):c.slug==='karate'?'Karate':'Taekwondo'):c.title||T('Czat turnieju');
@@ -160,7 +160,7 @@ const routeOf=c=>c?.kind==='tournament'?{t:c.tid}:{c:c?.slug||'general'};
 
 function mode(){return signedIn()?'feed':'public';}
 function resetStore(){
- for(const c of S.channels.values()){c.msgs.clear();c.cursor=0;c.loaded=c.id===null;c.older=false;c.n=0;}
+ for(const c of S.channels.values()){c.msgs.clear();c.cursor=0;c.loaded=c.id===null;c.older=false;c.n=0;c.counted=0;}
  S.people.clear();S.pending.clear();S.listsAt=0;S.listsP=null;
  for(const v of S.views){v.nodes.clear();v.divider=undefined;}
 }
@@ -189,7 +189,9 @@ function wants(){
  }
  if(views.length||signedIn()){
   const read=readMap(),heads=[...S.lobby,...(signedIn()?S.tours:[])].map(k=>S.channels.get(k)).filter(c=>c?.id&&!c.gone);
-  for(const c of heads.slice(0,30))if(!(c.id in ch))h[c.id]=[read[c.id]||0,c.known||0];
+  // knownLast is the last id the counter c.n was computed for (counted), not the channel's last id from the lists: a channel that got
+  // messages while the person was away is counted on the first poll, and counted again after the read cursor moved (another tab).
+  for(const c of heads.slice(0,30))if(!(c.id in ch)){const r=read[c.id]||0;h[c.id]=[r,c.countedRead===r?c.counted||0:0];}
  }
  return {ch,h,init,onScreen,floor:floor||0};
 }
@@ -203,7 +205,7 @@ function apply(data,from={}){
  if(!data||typeof data!=='object')return;
  if(data.cfg)S.cfg=normalizeCfg(data.cfg);
  for(const [pid,p] of Object.entries(data.people||{}))if(p&&typeof p==='object')S.people.set(pid,p);
- const changed=new Set(),me=myPid();let others=0;
+ const changed=new Set(),me=myPid(),others=new Map();
  for(const [id,e] of Object.entries(data.ch||{})){
   const c=S.channels.get(id);if(!c||!e)continue;changed.add(id);
   if(e.st==='gone'){c.gone=true;c.st='gone';continue;}
@@ -215,7 +217,7 @@ function apply(data,from={}){
    c.loaded=true;c.cursor=Math.max(c.cursor,e.rev||0);
   }else{
    if(e.more||c.cursor<(from[id]??0)){c.cursor=0;c.reload=true;continue;}
-   for(const m of list){if(!c.msgs.has(m.id)&&!m.x&&m.a!==me)others++;upsert(c,m);}
+   for(const m of list){if(!c.msgs.has(m.id)&&!m.x&&m.a!==me)others.set(id,(others.get(id)||0)+1);upsert(c,m);}
    if(Number.isFinite(e.rev))c.cursor=Math.max(c.cursor,e.rev);
   }
   c.known=Math.max(c.known||0,lastId(c));
@@ -223,13 +225,15 @@ function apply(data,from={}){
  }
  for(const [id,v] of Object.entries(data.heads||{})){
   const c=S.channels.get(id);if(!c||!v)continue;if(v.st==='gone'){c.gone=true;continue;}
-  if(Number.isFinite(v.last))c.known=Math.max(c.known||0,v.last);if(Number.isFinite(v.n))c.n=v.n;changed.add(id);
+  if(Number.isFinite(v.last))c.known=Math.max(c.known||0,v.last);if(Number.isFinite(v.n)){c.n=v.n;if(Number.isFinite(v.last))counted(c,readMap()[c.id]||0,v.last);}changed.add(id);
  }
- for(const v of liveViews())if(changed.has(v.key)||v.kind==='strip')paint(v,{others:changed.has(v.key)?others:0});
+ for(const v of liveViews())if(changed.has(v.key)||v.kind==='strip')paint(v,{others:others.get(v.key)||0});
  if([...changed].some(id=>S.channels.get(id)?.reload))S.transport?.poke();
  for(const c of S.channels.values())c.reload=false;
  counters();announce();
 }
+/** c.n is the number of unread messages up to `last` for read cursor `read` (sent back as knownLast while the cursor stays). */
+function counted(c,read,last){c.counted=last;c.countedRead=read;}
 function upsert(c,m){
  if(!m||!Number.isFinite(m.id))return;const old=c.msgs.get(m.id);if(old&&old.r>m.r)return;
  c.msgs.set(m.id,m);c.known=Math.max(c.known||0,m.id);
@@ -258,13 +262,20 @@ function applyLists(r){
   c.known=Math.max(c.known||0,x.last||0);if(x.id==null){c.loaded=true;c.virtual=true;}
   S.byTid.set(x.tournamentId,key);(x.st==='archive'||(x.date&&x.date<day&&x.st!=='open')?S.archive:S.tours).push(key);
  }
+ // A tournament channel created since the last lists replaces its virtual entry 't:<tournamentId>' (views and drafts move with it).
+ for(const [k,c] of [...S.channels]){
+  const real=c.virtual?keyOfTid(c.tid):null;if(!real||real===k)continue;
+  const draft=session.get(draftKey(k));if(draft&&!session.get(draftKey(real)))session.set(draftKey(real),draft);session.set(draftKey(k),'');
+  S.channels.delete(k);if(S.pageKey===k)S.pageKey=real;
+  for(const v of S.views)if(v.key===k){const ta=v.footEl?.querySelector?.('textarea[data-chat-key]');if(ta)ta.dataset.chatKey=real;v.key=real;v.divider=undefined;v.nodes.clear();v.pinned=true;}
+ }
  S.listsAt=Date.now();
  baseline();
 }
 /** Unread counts start at the first visit: a channel never read on this device counts from its last message known then. */
 function baseline(){
  if(!signedIn()||!pk('read'))return;const read=readMap();let moved=false;
- for(const c of [...S.lobby,...S.tours].map(k=>S.channels.get(k)))if(c?.id&&read[c.id]===undefined&&c.known&&setRead(c.id,c.known)){c.n=0;moved=true;}
+ for(const c of [...S.lobby,...S.tours].map(k=>S.channels.get(k)))if(c?.id&&read[c.id]===undefined&&c.known&&setRead(c.id,c.known)){c.n=0;counted(c,c.known,c.known);moved=true;}
  if(moved){counters();announce();}
 }
 function ensureConfig(){
@@ -281,6 +292,7 @@ export function purgeIdentity(){
  S.people.clear();S.pending.clear();S.reported.clear();S.revealed.clear();S.scroll.clear();S.queued=null;
  S.channels.clear();S.lobby=[];S.tours=[];S.archive=[];S.byTid.clear();S.listsAt=0;S.listsP=null;S.pageKey=null;
  avatars.clear();
+ for(const v of S.views)for(const ta of v.el.querySelectorAll?.('textarea[data-chat-key]')||[]){clearTimeout(ta.saveTimer);ta.value='';}
  try{const keys=[];for(let i=0;i<sessionStorage.length;i++){const k=sessionStorage.key(i);if(k?.startsWith(DRAFT))keys.push(k);}for(const k of keys)sessionStorage.removeItem(k);}catch{}
  for(const v of S.views){v.nodes.clear();v.divider=undefined;v.key=null;v.foot=null;v.el.querySelectorAll?.('img').forEach(img=>img.removeAttribute('src'));}
 }
@@ -307,7 +319,8 @@ export function mount(el,kind,opts={}){
 const matchesPhone=()=>{try{return matchMedia('(max-width:650px)').matches;}catch{return false;}};
 /** Picks the channel of a view from its route, the remembered choice or the default rules. */
 function choose(v){
- if(v.key&&S.channels.has(v.key)&&!S.channels.get(v.key).gone)return;
+ const cur=v.key?S.channels.get(v.key):null;
+ if(cur&&!cur.gone&&!(cur.virtual&&keyOfTid(cur.tid)&&keyOfTid(cur.tid)!==v.key))return;
  const me=getMe(),stored=local.get(LAST),fallback=()=>{v.auto=!stored&&!me&&signedIn();return slugKey(defaultSlug({stored,me,lang:getLanguage()}))||S.lobby[0]||null;};
  if(v.kind==='tournament'){v.key=keyOfTid(v.tid);if(!v.key)v.missing=true;return;}
  if(v.kind==='home'){v.key=(S.homeSlug&&slugKey(S.homeSlug))||fallback();return;}
@@ -339,6 +352,7 @@ const langSwitch=()=>h`<div class="lang-switch" role="group" aria-label="Język 
 const live=()=>h`<span class="chat-live" data-chat-part="live" hidden><i aria-hidden="true"></i>${T('Na żywo')}</span>`;
 /** Static frame of a view; dynamic parts are filled by paint(). */
 function frame(v){
+ saveDraft(v);
  const c=S.channels.get(v.key),hid='chat-v'+v.id;
  const main=h`<div class="chat-main"><div class="chat-banners" data-chat-part="banners"></div><div class="chat-log" data-chat-part="log" role="feed" tabindex="0" aria-busy="true" aria-label="${T('Wiadomości: {channel}',{channel:chFull(c)})}" aria-describedby="${hid}-feed-note"></div><button type="button" class="chat-pill" data-chat-act="pill" hidden>${icon('down')}<span data-chat-part="pill"></span></button></div><p class="sr-only" id="${hid}-feed-note">${signedIn()&&full()?'':T('Imiona uczestników widzą tylko członkowie MatBravo.')}</p>`;
  const foot=h`<div class="chat-foot" data-chat-part="foot"></div><div class="sr-only" aria-live="polite" aria-atomic="true" data-chat-part="sr"></div>`;
@@ -567,7 +581,7 @@ function announceSr(v,c,n){
 function scheduleRead(v,c){
  clearTimeout(v.readTimer);if(!c?.id||!c.loaded)return;
  if(!v.pinned||doc().visibilityState==='hidden'||(v.kind==='home'&&!v.visible))return;
- v.readTimer=setTimeout(()=>{if(!v.pinned||doc().visibilityState==='hidden')return;const last=lastId(c);if(setRead(c.id,last)){c.n=0;counters();announce();for(const x of liveViews())if(x!==v&&x.kind!=='strip'){if(x.tabs)paintTabs(x);if(x.rail)paintRail(x);}else if(x.kind==='strip')paintStrip(x);}},READ_MS);
+ v.readTimer=setTimeout(()=>{if(!v.pinned||doc().visibilityState==='hidden')return;const last=lastId(c);if(setRead(c.id,last)){c.n=0;counted(c,last,last);counters();announce();for(const x of liveViews())if(x!==v&&x.kind!=='strip'){if(x.tabs)paintTabs(x);if(x.rail)paintRail(x);}else if(x.kind==='strip')paintStrip(x);}},READ_MS);
 }
 const tops=new WeakMap();
 function observeTop(v){
@@ -587,7 +601,7 @@ function paintFoot(v,c){
  const me=getMe(),config=S.config,kind=v.kind==='home'&&v.compact?'preview':v.missing||!c||c.gone?'none':footKind({signedIn:signedIn(),me,config,st:c.st,on:S.cfg.on!==false&&S.status!=='off'});
  const sig=kind+':'+v.key+':'+getLanguage()+':'+(config?1:0)+(kind==='preview'?':'+(config?.signup?1:0):'');
  if(v.foot===sig)return;
- const ta=box.querySelector('textarea');if(ta&&v.foot?.startsWith('composer:'))session.set(draftKey(v.foot.split(':')[1]),ta.value);
+ const ta=saveDraft(v),caret=ta&&doc().activeElement===ta?{key:ta.dataset.chatKey,start:ta.selectionStart,end:ta.selectionEnd}:null;
  v.foot=sig;
  const price=priceText(config?.amounts);
  const loginBtn=h`<button type="button" class="btn secondary" data-action="${doc().querySelector('#login-form')?'login-jump':'guest-login'}">${T('Zaloguj się')}</button>`;
@@ -604,11 +618,13 @@ function paintFoot(v,c){
  else if(kind==='password')html=gate('lock',T('Najpierw zmień hasło tymczasowe.'),T('Potem możesz pisać na czacie.'),navBtn(T('Zmień hasło'),'profile','security'));
  else if(kind==='composer')html=composer(v,c);
  setHtml(box,html);
- if(kind==='composer'){const t=box.querySelector('textarea');t.value=session.get(draftKey(v.key))||'';grow(t);count(v,t);limitNote(v);}
+ if(kind==='composer'){const t=box.querySelector('textarea');t.value=session.get(draftKey(v.key))||'';grow(t);count(v,t);limitNote(v);if(caret?.key===v.key){t.focus();try{t.setSelectionRange(caret.start,caret.end);}catch{}}}
 }
+/** Saves the composer text under the channel it was built for (data-chat-key) before the composer or the frame is rebuilt. */
+function saveDraft(v){const ta=v.footEl?.querySelector?.('textarea[data-chat-key]');if(!ta)return null;clearTimeout(ta.saveTimer);session.set(draftKey(ta.dataset.chatKey),ta.value);return ta;}
 function composer(v,c){
  const id='chat-in-'+v.id,name=chFull(c);
- return h`<form class="chat-composer" id="chat-form-${v.id}" data-chat-form="${v.id}" novalidate><p class="chat-note" data-chat-part="note" role="status"></p><div class="chat-input"><label class="sr-only" for="${id}">${T('Wiadomość do kanału {channel}',{channel:name})}</label><textarea id="${id}" class="chat-textarea" rows="1" maxlength="1000" autocomplete="off" placeholder="${T('Napisz w kanale {channel}…',{channel:name})}" data-chat-input="${v.id}"></textarea><button type="submit" class="chat-send" aria-label="${T('Wyślij')}" title="${T('Wyślij')}">${icon('send')}<span class="chat-cd" data-chat-part="cd"></span></button></div><div class="chat-hint"><span class="chat-keys">${T('Enter — wyślij · Shift+Enter — nowa linia')}</span><span class="chat-privacy">${T('Nie publikuj danych dzieci ani numerów telefonów.')}</span><span class="chat-count" data-chat-part="count" hidden></span></div></form>`;
+ return h`<form class="chat-composer" id="chat-form-${v.id}" data-chat-form="${v.id}" novalidate><p class="chat-note" data-chat-part="note" role="status"></p><div class="chat-input"><label class="sr-only" for="${id}">${T('Wiadomość do kanału {channel}',{channel:name})}</label><textarea id="${id}" class="chat-textarea" rows="1" maxlength="1000" autocomplete="off" placeholder="${T('Napisz w kanale {channel}…',{channel:name})}" data-chat-input="${v.id}" data-chat-key="${v.key}"></textarea><button type="submit" class="chat-send" aria-label="${T('Wyślij')}" title="${T('Wyślij')}">${icon('send')}<span class="chat-cd" data-chat-part="cd"></span></button></div><div class="chat-hint"><span class="chat-keys">${T('Enter — wyślij · Shift+Enter — nowa linia')}</span><span class="chat-privacy">${T('Nie publikuj danych dzieci ani numerów telefonów.')}</span><span class="chat-count" data-chat-part="count" hidden></span></div></form>`;
 }
 function grow(t){if(!t)return;t.style.height='auto';const line=parseFloat(getComputedStyle(t).lineHeight)||20;t.style.height=Math.min(t.scrollHeight,line*6+14)+'px';}
 function count(v,t){
@@ -801,8 +817,9 @@ function ensureGlobal(){
  });
  d.addEventListener('input',event=>{
   const t=event.target;if(!t.matches?.('textarea[data-chat-input]'))return;const v=viewOf(t);if(!v)return;
-  grow(t);count(v,t);clearTimeout(t.saveTimer);t.saveTimer=setTimeout(()=>session.set(draftKey(v.key),t.value),300);S.touchedAt=Date.now();S.transport?.interact();
+  grow(t);count(v,t);clearTimeout(t.saveTimer);t.saveTimer=setTimeout(()=>session.set(draftKey(t.dataset.chatKey||v.key),t.value),300);S.touchedAt=Date.now();S.transport?.interact();
  });
+ d.addEventListener('focusout',event=>{const t=event.target;if(t.matches?.('textarea[data-chat-key]')){clearTimeout(t.saveTimer);session.set(draftKey(t.dataset.chatKey),t.value);}});
  d.addEventListener('keydown',event=>{
   const t=event.target;
   if(event.key==='Escape'&&popState){event.preventDefault();closePop(true);return;}
@@ -827,11 +844,12 @@ function ensureGlobal(){
  d.addEventListener('visibilitychange',()=>{for(const v of liveViews()){v.hiddenTab=d.visibilityState==='hidden';if(!v.hiddenTab)scheduleRead(v,S.channels.get(v.key));}announce();});
  globalThis.addEventListener?.('online',()=>{flushQueue();paintAll(false);});
  globalThis.addEventListener?.('offline',()=>paintAll(false));
- minuteTimer=setInterval(()=>{for(const time of d.querySelectorAll('.chat-time[data-ts]'))time.textContent=timeLabel(Number(time.dataset.ts));},60000);
+ // A tournament chat shown before its channel exists is not polled: the lists are read again every minute until it appears.
+ minuteTimer=setInterval(()=>{for(const time of d.querySelectorAll('.chat-time[data-ts]'))time.textContent=timeLabel(Number(time.dataset.ts));if(d.visibilityState!=='hidden'&&liveViews().some(v=>v.visible&&!v.hiddenTab&&S.channels.get(v.key)?.virtual))ensureLists(true);},60000);
  try{matchMedia('(max-width:650px)').addEventListener('change',()=>{for(const v of liveViews())if(v.kind==='home')paint(v);announce();});}catch{}
  onMe(me=>{baseline();
   // A signed-in view that picked its channel before me arrived picks again by sport and country (plan §5.1).
-  if(me)for(const v of liveViews())if(v.auto&&(v.kind==='page'||v.kind==='strip')){v.auto=false;const before=v.key;v.key=null;choose(v);const k=v.key;v.key=before;if(k&&k!==before)open(v,k);}if(S.mode&&S.mode!==mode()){transport();paintAll(true);ensureLists(true);}else{for(const v of liveViews()){v.foot=null;paint(v);}}counters();});
+  if(me)for(const v of liveViews())if(v.auto&&(v.kind==='page'||v.kind==='strip')){v.auto=false;const before=v.key;v.key=null;choose(v);const k=v.key;v.key=before;if(k&&k!==before)open(v,k);}if(S.mode&&S.mode!==mode()){transport();paintAll(true);ensureLists(true);}else{for(const v of liveViews())paint(v);}counters();});
 }
 
 // ——— Entry points used by chat-boot.js ———
@@ -859,10 +877,10 @@ registry.on('logout',()=>{purgeIdentity();});
 registry.on('language',()=>{
  const pub=doc()?.querySelector('#app > .chat-public');
  if(pub&&!signedIn()){for(const v of liveViews())saveScroll(v);setHtml(doc().querySelector('#app'),publicFrame());scan();return;}
- for(const v of liveViews()){v.nodes.clear();v.foot=null;paint(v);}counters();
+ for(const v of liveViews()){v.nodes.clear();paint(v);}counters();
 });
 registry.on('client-outdated',()=>{S.outdated=true;S.transport?.stop();});
 
 /** Tests only: the module state. */
 export const _state=()=>S;
-export const _internals={apply,applyLists,wants,transport,unauthorized,banner,railItem};
+export const _internals={apply,applyLists,ensureLists,wants,transport,unauthorized,banner,railItem};
