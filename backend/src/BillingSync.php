@@ -246,8 +246,13 @@ final class BillingSync {
  private static function clearPending(PDO $pdo,string $userId,string $sessionId):void {
   $pdo->prepare('UPDATE billing_accounts SET pending_checkout_id=NULL,pending_checkout_expires=NULL,next_sync_at=IF(sub_status IN (\'none\',\'canceled\',\'incomplete_expired\',\'unpaid\'),NULL,next_sync_at),updated_at=? WHERE user_id=? AND pending_checkout_id=?')->execute([time(),$userId,$sessionId]);
  }
- /** The customer was deleted in Stripe: the row forgets customer and subscription (tombstones only note it). */
+ /**
+  * The customer was deleted in Stripe: the row forgets customer and subscription (tombstones only note it), and the
+  * remembered customer (billing_customers, also a replaced one that is no row's current customer) counts as deleted,
+  * so account deletion does not ask for it again and the abandoned-account cleanup may remove the account.
+  */
  public static function customerGone(PDO $pdo,string $customerId,string $actor):string {
+  self::redacted($pdo,$customerId);
   $row=self::rowBy($pdo,'stripe_customer_id',$customerId);if(!$row)return 'orphan';
   if($row['deleted_at']!==null){$pdo->prepare('UPDATE billing_accounts SET stripe_redact_pending=0,updated_at=? WHERE user_id=?')->execute([time(),$row['user_id']]);self::audit($pdo,$row['user_id'],$actor,'tombstone',null,null,'customer.deleted '.$customerId);return 'tombstone';}
   $pdo->prepare("UPDATE billing_accounts SET stripe_customer_id=NULL,stripe_subscription_id=NULL,sub_status='none',price_lookup_key=NULL,current_period_start=NULL,current_period_end=NULL,cancel_at_period_end=0,cancel_at=NULL,canceled_at=NULL,ended_at=NULL,latest_invoice_status=NULL,pending_checkout_id=NULL,pending_checkout_expires=NULL,next_sync_at=NULL,stripe_redact_pending=0,updated_at=? WHERE user_id=? AND stripe_customer_id=?")->execute([time(),$row['user_id'],$customerId]);

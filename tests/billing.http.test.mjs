@@ -13,7 +13,8 @@
 // currency, resync); no second subscription next to an incomplete one or a session paid elsewhere (also while another
 // sync holds the claim), and 'sub.multiple' for two ongoing ones; two parallel syncs = one Stripe call; circuit breaker
 // after a network error; account deletion (DELETE /v1/customers, failure → stripe_redact_pending →
-// billing-due retry, tombstone) and refused deletions that cannot starve billing-due; e-mail pushed to Stripe and
+// billing-due retry, tombstone) and refused deletions that cannot starve billing-due; the abandoned-account cleanup next
+// to remembered customers (one deleted in the Dashboard, a replaced one Stripe still has); e-mail pushed to Stripe and
 // corrected by sync; 503 when Stripe fails, transparent retry of one 500; a new customer for another currency
 // (Customer.currency first, Stripe's refusal as the fallback); and every request the app sent carried the pinned
 // Stripe-Version, Bearer rk_test_stub and (POST) an Idempotency-Key.
@@ -636,6 +637,31 @@ test('account deletion deletes every Stripe customer the account ever had; a fai
  assert.deepEqual((await since(t,'DELETE')).map(x=>x.path),['/v1/customers/'+p.customer],'only the one still pending');
  assert.equal((await stub({op:'customer',id:p.customer})).deleted,true);rw=row(p.id);assert.deepEqual([rw.stripe_redact_pending,rw.sync_error],[0,null]);
  assert.ok(fixture('billing-customers',{userId:p.id}).every(x=>x.redacted_at>0),'both deletions confirmed');
+});
+
+test('accounts-cleanup: a member whose remembered customer was deleted in the Dashboard is removed; a replaced customer Stripe still has keeps the account',{skip},async()=>{
+ const old=now()-40*D,exists=id=>fixture('accounts-state',{userId:id}).user!==null;
+ const customers=userId=>Object.fromEntries(fixture('billing-customers',{userId}).map(x=>[x.customer_id,x.redacted_at>0]));
+ // Opened Checkout once (the customer is remembered), never paid; the customer was deleted in the Dashboard later.
+ const g=member('abandon-gone'),cg=await signIn(g.email);const first=await cg.req('billing-checkout',{});assert.equal(first.status,200,JSON.stringify(first.data));
+ const cus=row(g.id).stripe_customer_id;await stub({op:'expire-session',sessionId:sessionOf(first.data.url)});await stub({op:'delete-customer',id:cus});
+ assert.equal((await webhook(event('customer.deleted',{id:cus,object:'customer',deleted:true}))).status,200);
+ assert.deepEqual([row(g.id).stripe_customer_id,row(g.id).sub_status],[null,'none']);
+ assert.deepEqual(customers(g.id),{[cus]:true},'a customer deleted in Stripe counts as deleted');
+ // Paid in USD and canceled, the plan moved to PLN (a new customer), then the new one was deleted in the Dashboard: the
+ // replaced customer still holds the e-mail and billing address at Stripe.
+ const k=await paidMember('abandon-kept','DE');await stub({op:'subscription',id:k.sub,status:'canceled'});assert.equal(run('sync',{userId:k.id}).sub_status,'canceled');
+ fixture('billing-country',{userId:k.id,country:'PL'});const kr=await k.c.req('billing-checkout',{});assert.equal(kr.status,200,JSON.stringify(kr.data));
+ const replaced=row(k.id).stripe_customer_id;assert.notEqual(replaced,k.customer);
+ await stub({op:'expire-session',sessionId:sessionOf(kr.data.url)});await stub({op:'delete-customer',id:replaced});
+ assert.equal((await webhook(event('customer.deleted',{id:replaced,object:'customer',deleted:true}))).status,200);
+ assert.deepEqual([row(k.id).stripe_customer_id,row(k.id).sub_status],[null,'none']);assert.deepEqual(customers(k.id),{[k.customer]:false,[replaced]:true});
+ // Both become old, unused sign-ups (billing is enforced in the test config).
+ for(const m of [g,k])assert.equal(fixture('accounts-profile-age',{userId:m.id,createdAt:old,lastLoginAt:old}),1);
+ const out=fixture('accounts-cleanup',{});assert.match(out,/abandoned=on deleted=[1-9]\d* failed=0 /);
+ assert.ok(!exists(g.id),'deleted: Stripe holds nothing of it any more');assert.deepEqual(fixture('billing-customers',{userId:g.id}),[]);assert.equal(row(g.id),null);
+ assert.ok(exists(k.id),'kept for account deletion, which deletes every customer');assert.deepEqual(customers(k.id),{[k.customer]:false,[replaced]:true});
+ assert.match(fixture('accounts-cleanup',{}),/ failed=0 /,'the kept account is not retried as a failure');
 });
 
 test('billing-due: refused customer deletions take at most half of the slots and then wait; due accounts are still synced',{skip},async()=>{

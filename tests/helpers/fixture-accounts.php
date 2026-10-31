@@ -10,6 +10,8 @@
 //   accounts-avatar-files {publicId}      files of a person's avatar directory with their modes (and the directory mode)
 //   accounts-avatar-age {publicId,days,keep?}  sets the mtime of the directory and its files (except keep) $days back
 //   accounts-avatar-orphan {publicId}     an avatar directory with one file for a public_id without a profile, two days old
+//   accounts-profile-age {userId,createdAt,lastLoginAt?}  backdates a profile (an account that signed in for a test
+//                                         becomes an old, unused one for accounts-cleanup); lastLoginAt null = never
 declare(strict_types=1);
 use MatDraw\{Avatars,Jobs};
 const FIXTURE_ACCOUNTS_CONFIG_KEYS=['signup_enabled','signup_invite_token','signup_free_beta','billing_enforce','avatars_enabled','signup_limit_ip_hour','signup_limit_ip_day','signup_limit_global_hour','username_check_limit_session','username_check_limit_ip','abandoned_member_days'];
@@ -61,6 +63,10 @@ return [
   $dir=fixture_accounts_dir($c,(string)($p['publicId']??''));$t=time()-(int)($p['days']??2)*86400;$keep=(string)($p['keep']??'');$out=[];
   foreach(scandir($dir) as $f)if($f!=='.'&&$f!=='..'&&($keep===''||!str_starts_with($f,$keep))){touch("$dir/$f",$t);$out[]=$f;}
   touch($dir,$t);return $out;
+ },
+ 'accounts-profile-age'=>function(PDO $pdo,array $p):int{
+  $q=$pdo->prepare('UPDATE user_profiles SET created_at=?,last_login_at=? WHERE user_id=?');
+  $q->execute([(int)$p['createdAt'],isset($p['lastLoginAt'])?(int)$p['lastLoginAt']:null,(string)($p['userId']??'')]);return $q->rowCount();
  },
  'accounts-avatar-orphan'=>function(PDO $pdo,array $p,array $c):string{
   $dir=fixture_accounts_dir($c,(string)($p['publicId']??''));Avatars::mkdir($dir);$f="$dir/".str_repeat('a',32).'-256.webp';

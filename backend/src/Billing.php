@@ -89,10 +89,11 @@ final class Billing {
    if($r['outcome']==='busy'){
     // Another sync holds the claim (the lazy sync after me, a double click) and only the cached row came back: Stripe is
     // read here without writing, so a subscription the cache does not know yet still refuses the checkout and the
-    // Customer.currency check below still has the customer. Stripe's answer decides, not the (possibly stale) row.
+    // Customer.currency check below still has the customer. Stripe's answer decides, not the (possibly stale) row; a
+    // customer Stripe reports deleted is marked so in billing_customers (customerGone does the rest in the other sync).
     [$subs,$cus]=BillingSync::fetchCustomer($client,(string)$row['stripe_customer_id']);
     if(BillingSync::ongoingIds($c,$subs))self::locked();
-    if(!empty($cus['deleted']))$r['outcome']='customer-deleted';
+    if(!empty($cus['deleted'])){$r['outcome']='customer-deleted';BillingSync::redacted($pdo,(string)$row['stripe_customer_id']);}
    }elseif(in_array(Access::subStatus($row,$c),BillingSync::ONGOING,true))self::locked();
    $currency=self::currencyFor($pdo,$c,$row,$country,$u['id'])??$currency;
    if(!isset($c['stripe_prices'][$currency]))throw new StripeError('No price for '.$currency,0,'config');
