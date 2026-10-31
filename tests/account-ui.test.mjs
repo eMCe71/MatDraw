@@ -159,7 +159,7 @@ test('username prefill and suggestions never show the full surname by default (p
  assert.deepEqual(suggestUsernames('Marta','Kowalska').slice(0,2),['marta.kowalska','marta_kowalska'],'the default order (server parity) is unchanged');
  // Server suggestions for a taken name: the full-surname ones are hidden unless the person chose to show the full name.
  const server=['marta.kowalska','marta_kowalska','marta.k2','bad name'];
- assert.deepEqual(flow.shownSuggestions(server,{last:'Kowalska',full:false}),['marta.k2']);
+ assert.deepEqual(flow.shownSuggestions(server,{first:'Marta',last:'Kowalska',full:false}),['marta.k2']);
  assert.deepEqual(flow.shownSuggestions(server,{last:'Kowalska',full:true}),['marta.kowalska','marta_kowalska','marta.k2']);
  assert.deepEqual(flow.shownSuggestions(null,{last:'K'}),[]);
  // A short surname is also a substring of the initial-only candidates: those stay, only the full-surname ones are hidden.
@@ -169,6 +169,14 @@ test('username prefill and suggestions never show the full surname by default (p
   for(const x of flow.shownSuggestions(sent,{first,last,username,full:false}))assert.ok(!x.includes(slugName(first)+'.'+slugName(last))&&!x.includes(slugName(first)+'_'+slugName(last))&&x!==slugName(first)+slugName(last),x);
  }
  assert.deepEqual(flow.shownSuggestions(['alicja.li','alicja_li','alicja.l2','alicjali'],{first:'Alicja',last:'Li',username:'alicja.l',full:false}),['alicja.l2']);
+ // A long name: the server cuts the full-surname forms to 24 characters, so they no longer contain the whole surname; still hidden.
+ for(const [first,last,want] of [['Katarzyna','Szczepańska-Wiśniewska',['katarzyna.s2','katarzyna.s3']],['Małgorzata','Kowalczykowska',['malgorzata.k2','malgorzata.k3']],['Bartłomiej','Brzęczyszczykiewicz',['bartlomiej.b2','bartlomiej.b3']]]){
+  const username=flow.prefillUsername({first,last}),sent=suggestUsernames(first,last,username);
+  assert.ok(sent.some(x=>x.length===24&&!x.includes(slugName(last))),'the server list has a cut full-surname form: '+sent);
+  assert.deepEqual(flow.shownSuggestions(sent,{first,last,username,full:false}),want,first+' '+last);
+  assert.deepEqual(flow.shownSuggestions(sent,{first,last,username,full:true}).slice(0,2),sent.slice(0,2),'shown when the full name is');
+ }
+ assert.deepEqual(flow.shownSuggestions(['marta.kowalskawisniewsk2','marta.k2'],{first:'Marta',last:'Kowalska-Wiśniewska',username:'marta.k',full:false}),['marta.k2']);
  assert.deepEqual(flow.shownSuggestions(['marta.kowalska2'],{first:'Marta',last:'Kowalska',username:'marta.kowalska',full:false}),['marta.kowalska2'],'what the person typed is theirs to extend');
  const html=String(flow.fieldsView(flow.newFields(null,['pl-PL']),{id:'t',signup:true}));
  assert.match(html,/Nazwę użytkownika widzą członkowie czatu\./,'the sign-up says who sees the username');
