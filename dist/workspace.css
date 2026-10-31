@@ -156,23 +156,17 @@
 }
 @media(max-width:440px){
  .login-story{padding:18px 16px 70px}
- .login-page .login-story .brand-logo{height:22px}
+ /* 320-440px (WCAG 1.4.10): the language switch and the sign-in button take about 150px, so the logo (156px wide at 22px high) gives way instead of running under them. */
+ .login-story>.brand{max-width:calc(100% - 150px)}
+ .login-page .login-story .brand-logo{height:auto;width:156px;max-width:100%}
  .login-story h1{font-size:28px}
  .login-page .login-upcoming{padding:24px 12px 28px}
  .login-form-panel{padding:26px 18px 8px}
  .login-lang{right:12px;gap:6px}
- .login-lang .lang-switch button{min-width:30px;padding:0 6px}
- .login-jump{padding:6px 10px}
+ .login-lang .lang-switch button{min-width:clamp(24px,7.4vw,30px);padding:0 clamp(4px,1.5vw,6px)}
+ .login-jump{padding:6px clamp(8px,2.7vw,10px);font-size:clamp(12px,3.4vw,13px)}
  .home-centre{padding-inline:10px}
  .guest-tab{padding:0 8px;gap:6px;font-size:12px}
-}
-/* 320-360px (WCAG 1.4.10): the language switch and the sign-in button take about 150px, so the logo gives way instead of running under them. */
-@media(max-width:360px){
- .login-story>.brand{max-width:calc(100% - 150px)}
- .login-page .login-story .brand-logo{height:auto;width:156px;max-width:100%}
- .login-lang{right:10px;gap:4px}
- .login-lang .lang-switch button{min-width:26px;padding:0 4px}
- .login-jump{padding:6px 8px;font-size:12px}
 }
 /* Sponsor pop-up (content in promo.js). Inline SVG only: the CSP allows no external images or fonts. */
 .promo-backdrop{background:#0a1a33b8}

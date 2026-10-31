@@ -494,7 +494,7 @@ document.addEventListener('submit',async event=>{
 });
 document.addEventListener('keydown',event=>{
  const tab=event.target.closest?.('.guest-tab');
- if(tab&&['ArrowLeft','ArrowRight','Home','End'].includes(event.key)){
+ if(tab&&!event.altKey&&!event.ctrlKey&&!event.metaKey&&['ArrowLeft','ArrowRight','Home','End'].includes(event.key)){
   const tabs=[...tab.parentElement.querySelectorAll('.guest-tab')],i=tabs.indexOf(tab),next=tabs[event.key==='Home'?0:event.key==='End'?tabs.length-1:(i+(event.key==='ArrowRight'?1:-1)+tabs.length)%tabs.length];
   event.preventDefault();publicAction('guest-tab',next,next.dataset.id);return;
  }

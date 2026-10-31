@@ -34,6 +34,7 @@ test('tournaments page and guest preview carry the chat mount points',()=>{
 test('the grid covers the plan\'s breakpoints and the print stylesheet hides the chat',()=>{
  for(const s of ['minmax(340px,388px) minmax(460px,1fr) clamp(400px,30vw,480px)','minmax(560px,760px) 520px','"story auth" "chat auth" "upcoming foot"','"story" "auth" "chat" "upcoming" "foot"','min-height:560px;max-height:900px','height:calc(100dvh - 48px)','--mascot-h:196px'])assert.ok(css.includes(s),s);
  assert.match(css,/@media print\{[^}]*\.home-centre/);
+ assert.deepEqual([...new Set([...css.matchAll(/@media\s*\(\s*max-width:\s*(\d+)px/g)].map(m=>+m[1]))].filter(w=>![440,650,760,800,1000,1180,1199,1650].includes(w)),[],'plan 8.7: no new breakpoint (760 and 1180 predate the slice)');
  assert.match(readFileSync(root+'styles.css','utf8'),/@media print\{[^@]*#app,[^}]*display:none!important/,'the app shell (home page, guest preview) is never part of a printout: prints go through #print-root');
 });
 
@@ -101,6 +102,8 @@ test('home page in a browser: layout, skip links, phone sign-in button, known de
    assert.deepEqual(await page.locator('.guest-tab').evaluateAll(t=>t.map(x=>[x.getAttribute('aria-selected'),x.tabIndex])),[['true',0],['false',-1]]);
    await page.click('#guest-tab-chat');
    assert.ok(await page.evaluate(()=>location.hash.endsWith('&tab=chat')&&!!document.querySelector('[data-chat-mount="tournament"][data-tournament-id]')&&document.activeElement.id==='guest-tab-chat'));
+   // browser shortcuts are left alone (Alt+Arrow = Back/Forward, Ctrl+Home/End)
+   for(const combo of ['Alt+ArrowLeft','Alt+ArrowRight','Control+Home','Control+End','Meta+ArrowLeft']){await page.keyboard.press(combo);assert.ok(await page.evaluate(()=>location.hash.endsWith('&tab=chat')&&document.activeElement.id==='guest-tab-chat'),combo+' must not switch the tab');}
    await page.keyboard.press('ArrowLeft');assert.ok(await page.evaluate(()=>!location.hash.includes('tab=')&&document.activeElement.id==='guest-tab-cats'&&!document.querySelector('[data-chat-mount="tournament"]')&&!!document.querySelector('.category-card')));
    await page.click('#guest-tab-chat');await page.click('[data-set-lang="en"]');assert.equal(await page.locator('.guest-tab[aria-selected="true"]').innerText(),'Tournament chat');
    // after the sign-in: strip and link mounts on the tournaments page, and a member's preview without promo and with "Wróć"
