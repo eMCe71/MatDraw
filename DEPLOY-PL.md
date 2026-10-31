@@ -102,7 +102,7 @@ chmod 600 ~/matdraw/shared/config.php
 
 ### 5. PHP dla domeny
 
-W DirectAdmin ustaw dla `matbravo.com` PHP 8.3 (wybór wersji PHP domeny) i upewnij się, że włączone są `pdo_mysql` i `mbstring`. Wymuś HTTPS w ustawieniach SSL domeny.
+W DirectAdmin ustaw dla `matbravo.com` PHP 8.3 (wybór wersji PHP domeny) i upewnij się, że włączone są `pdo_mysql` i `mbstring`. Wymuś HTTPS w ustawieniach SSL domeny. Niezależnie od tego `.htaccess` aplikacji przekierowuje `http://` i `www.` na jeden adres `https://matbravo.com` (bezpieczne ciasteczko sesji i sprawdzanie Origin działają tylko pod adresem z `app_url`).
 
 ### 6. Pierwszy deploy i Administrator
 
@@ -145,6 +145,6 @@ bash ~/matdraw/bin/deploy-remote.sh activate ~/matdraw ~/domains/matbravo.com/pu
 
 Rollback zmienia tylko kod. Baza danych pozostaje bez zmian, więc przed aktualizacją, która zmienia schemat, wykonaj kopię bazy (phpMyAdmin → Eksport lub DirectAdmin → MySQL Management → Backup).
 
-## Historia: HTTP 429 na matdraw.mdcse.com (30.10.2026)
+## Znany problem: HTTP 429 na nowo dodanych domenach
 
-Po dodaniu `matdraw.mdcse.com` w DirectAdmin każde żądanie HTTP/HTTPS dostawało `429 Too Many Requests` (Server: LiteSpeed, pusta treść), od pierwszego wpisu w logu i z różnych adresów IP. Dotyczyło to także oryginalnej strony domyślnej DirectAdmin (w logu odpowiedź 183 B zamiast 447 B, czyli bez nagłówków z `.htaccess` MatDraw) oraz świeżo dodanej `test429.mdcse.com`, a nie dotyczyło `mdcse.com`. Blokada jest po stronie serwera AfterMarket, niezależna od plików aplikacji; przez nią DirectAdmin nie mógł też wystawić certyfikatu Let's Encrypt. Dlatego aplikację przeniesiono na domenę `matbravo.com` (31.10.2026). Domeny `matdraw.mdcse.com` i `test429.mdcse.com` można usunąć w DirectAdmin.
+Po dodaniu `matdraw.mdcse.com` w DirectAdmin każde żądanie HTTP/HTTPS dostawało `429 Too Many Requests` (Server: LiteSpeed, pusta treść), od pierwszego wpisu w logu i z różnych adresów IP. Dotyczyło to także oryginalnej strony domyślnej DirectAdmin (w logu odpowiedź 183 B zamiast 447 B, czyli bez nagłówków z `.htaccess` MatDraw) oraz świeżo dodanej `test429.mdcse.com`, a nie dotyczyło `mdcse.com`. Blokada jest po stronie serwera AfterMarket, niezależna od plików aplikacji; przez nią DirectAdmin nie mógł też wystawić certyfikatu Let's Encrypt. 31.10.2026 aplikację przeniesiono na `matbravo.com`, ale ta świeżo dodana domena też odpowiadała 429 (http i https, sprawdzone z serwerów GitHub), więc blokada dotyczy nowo dodanych domen na serwerze web9, a nie konkretnej nazwy. Zdjąć ją może tylko AfterMarket. Weryfikacja po deployu zgłasza 429 jako problem hostingu i nie cofa wtedy wydania. Domeny `matdraw.mdcse.com` i `test429.mdcse.com` można usunąć w DirectAdmin.

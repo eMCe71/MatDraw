@@ -175,7 +175,7 @@ jobs:
         id: verify
         run: sleep 5 && bash scripts/deploy-verify.sh
       - name: Powrót do poprzedniego wydania po nieudanej weryfikacji
-        if: failure() && steps.verify.outcome == 'failure' && env.PREVIOUS != ''
+        if: failure() && steps.verify.outputs.rollback == 'true' && env.PREVIOUS != ''
         run: ssh deploy bash -s -- rollback "$DEPLOY_BASE" "$DOCROOT" < scripts/deploy-remote.sh
       - name: Usunięcie starych wydań
         run: ssh deploy bash -s -- cleanup "$DEPLOY_BASE" "$DOCROOT" < scripts/deploy-remote.sh
