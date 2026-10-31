@@ -492,7 +492,7 @@ document.addEventListener('submit',async event=>{
   // Modules react while the form is still in the page (e.g. account billing fields); passwords are never passed on.
   const {password:_p,currentPassword:_c,...shared}=payload||{};registry.emit('saved',{form:form.id,type,payload:shared,result,element:form});
   closeModal();render();toast(T('Zapisano zmiany.'));
- }catch(error){await handleError(error,form);}finally{if(submit?.isConnected)submit.disabled=false;}
+ }catch(error){await handleError(error,form);}finally{if(submit?.isConnected){submit.disabled=false;if(!document.activeElement||document.activeElement===document.body)submit.focus();}}
 });
 document.addEventListener('keydown',event=>{
  const tab=event.target.closest?.('.guest-tab');
