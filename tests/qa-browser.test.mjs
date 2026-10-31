@@ -159,3 +159,34 @@ test('final review in a browser: focus trap in the crop dialog, focus back to me
   assert.deepEqual(problems,[],'no page or console errors');
  }finally{await browser.close();server.close();}
 });
+
+// Final review F8: a laptop at 200 % and 400 % zoom (640×400 and 320×256 CSS px) gets the phone layout; the full-screen chat must not
+// squeeze the messages to a sliver, and the join prompt (with its price) or the composer must stay reachable by scrolling.
+test('full chat on short screens (200 % and 400 % zoom): messages keep a usable height, the gate and the composer stay reachable',{skip:!chromium&&'set MATDRAW_BROWSER_TESTS=1 (needs playwright)',timeout:180000},async t=>{
+ const {server,url}=await serve();let browser;
+ try{browser=await chromium.launch();}catch(error){server.close();t.skip('Chromium cannot start: '+error.message);return;}
+ const problems=[];
+ try{
+  for(const [width,height] of [[640,400],[320,256]])for(const who of ['guest','member']){
+   const ctx=await browser.newContext({viewport:{width,height},locale:'pl-PL',serviceWorkers:'block'}),page=await ctx.newPage();
+   page.on('pageerror',e=>problems.push('pageerror: '+e.message));
+   if(who==='member'){await page.goto(url);await page.locator('[data-action="demo-login"]').last().click();await page.waitForSelector('.app-shell');}
+   await page.goto(url+'#chat');await page.waitForSelector('.chat-full .chat-msg');await sleep(600);
+   if(who==='guest')await page.evaluate(async()=>{const c=await import('./chat.js'),S=c._state();S.config={...(S.config||{}),signup:true,billing:true,amounts:{pln:899,usd:299}};dispatchEvent(new Event('offline'));dispatchEvent(new Event('online'));});
+   const target=who==='guest'?'.chat-full .chat-gate-price':'.chat-full textarea[data-chat-input]';await page.waitForSelector(target);
+   const at=who+' '+width+'x'+height;
+   assert.ok(await page.evaluate(()=>document.querySelector('.chat-full .chat-log').getBoundingClientRect().height)>=150,'message list at least 150 px: '+at);
+   const reach=await page.evaluate(sel=>{const el=document.querySelector(sel);el.scrollIntoView({block:'center'});const b=el.getBoundingClientRect(),x=b.left+Math.min(b.width/2,20),y=b.top+b.height/2;const hit=document.elementFromPoint(x,y);return {inView:b.top>=0&&b.bottom<=innerHeight,hit:!!hit&&(el===hit||el.contains(hit))};},target);
+   assert.deepEqual(reach,{inView:true,hit:true},(who==='guest'?'price line':'composer')+' reachable: '+at);
+   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth-document.documentElement.clientWidth),0,'no horizontal scroll: '+at);
+   await ctx.close();
+  }
+  // A phone keeps the full-screen chat (position:fixed, no page scroll inside the chat).
+  const ctx=await browser.newContext({viewport:{width:390,height:844},locale:'pl-PL',serviceWorkers:'block'}),page=await ctx.newPage();
+  await page.goto(url);await page.locator('[data-action="demo-login"]').last().click();await page.waitForSelector('.app-shell');
+  await page.goto(url+'#chat');await page.waitForSelector('.chat-full .chat-msg');
+  assert.equal(await page.evaluate(()=>getComputedStyle(document.querySelector('.chat-page-mount .chat-full')).position),'fixed');
+  await ctx.close();
+  assert.deepEqual(problems,[],'no page errors');
+ }finally{await browser.close();server.close();}
+});

@@ -28,8 +28,7 @@
 .chat-ch-date strong{font-size:13px}
 .chat-ch-date.is-today{background:var(--chat-edge)}.chat-ch-date.is-today small{color:#0b2a50}.chat-ch-date.is-today strong{color:#0b1d3a}
 /* Home card: channel tabs (desktop, ARIA tabs) and chips (phone). */
-.chat-tabs{display:flex;gap:6px;padding:0 14px 12px;border-bottom:1px solid #e9eef5;overflow-x:auto;scrollbar-width:none}
-.chat-tabs::-webkit-scrollbar{display:none}
+.chat-tabs{display:grid;grid-template-columns:repeat(auto-fit,minmax(148px,1fr));gap:6px;padding:0 14px 12px;border-bottom:1px solid #e9eef5}
 .chat-tab{position:relative;display:flex;align-items:center;gap:8px;padding:7px 10px 7px 8px;border-radius:10px;border:1px solid #dfe7f0;background:#fff;text-align:left;min-width:0;flex:1 0 auto;color:#19324f}
 .chat-tab:hover{border-color:#a6c9e1;background:#f5fafe}
 .chat-tab-text{min-width:0}
@@ -162,6 +161,10 @@ button.chat-name:hover{text-decoration:underline;text-underline-offset:2px}
 .chat-gate-actions{display:flex;gap:8px;flex-shrink:0;flex-wrap:wrap}
 .chat-gate-actions .btn{min-height:38px}
 .chat-gate-price{font-size:11px;color:#4f6987;margin-top:9px;padding-left:54px}
+/* The footer follows its own width, not the viewport: the home card is only 430–540 px wide between 1001 and 1199 px and in the
+   1200 px centre column, so a narrow footer stacks the gate like on a phone (copy on its own line, buttons full width). */
+.chat-foot{container-type:inline-size}
+@container (max-width:560px){.chat-gate-row{flex-wrap:wrap}.chat-gate-actions{width:100%}.chat-gate-actions .btn{flex:1}.chat-gate-price{padding-left:0}}
 .chat-preview-foot{padding:10px 14px 14px;border-top:1px solid #e9eef5;background:#f8fbfe}
 .chat-preview-foot .btn{width:100%}
 .chat-preview-foot p{font-size:11px;color:#4f6987;text-align:center;margin-top:8px}
@@ -260,9 +263,6 @@ button.chat-name:hover{text-decoration:underline;text-underline-offset:2px}
  .chat-keys{display:none}
  .chat-hint{margin-top:5px}
  .chat-gate{padding:12px 14px max(env(safe-area-inset-bottom),12px)}
- .chat-gate-row{flex-wrap:wrap}
- .chat-gate-actions{width:100%}.chat-gate-actions .btn{flex:1}
- .chat-gate-price{padding-left:0}
  .chat-page-mount .chat-full{position:fixed;inset:0;z-index:20;display:flex;flex-direction:column;gap:0;background:#fff;padding-top:env(safe-area-inset-top);padding-left:env(safe-area-inset-left);padding-right:env(safe-area-inset-right)}
  .chat-page-mount .chat-conv{border:0;border-radius:0;flex:1}
  .chat-back{display:inline-grid}
@@ -273,6 +273,17 @@ button.chat-name:hover{text-decoration:underline;text-underline-offset:2px}
  .chat-public .chat-page-mount .chat-full{position:static;height:100%}
  .chat-strip{flex-wrap:wrap}.chat-strip-text{flex-basis:calc(100% - 90px)}
  .chat-pop{position:fixed;left:0!important;right:0;bottom:0;top:auto!important;width:auto;border-radius:18px 18px 0 0;padding-bottom:max(env(safe-area-inset-bottom),16px)}
+}
+/* Short screens (a laptop at 200–400 % zoom is 640×400 or 320×256 CSS px): the phone chat is not locked to the viewport, the page
+   scrolls instead, so the messages keep a usable height and the gate or composer below them stays reachable (WCAG 1.4.10). */
+@media(max-width:650px) and (max-height:480px){
+ .chat-page-mount,.chat-public .chat-page-mount{height:auto;min-height:0}
+ .chat-page-mount .chat-full,.chat-public .chat-page-mount .chat-full{position:static;inset:auto;height:auto;z-index:auto}
+ .chat-page-mount .chat-conv{overflow:visible;flex:none}
+ .chat-page-mount .chat-log{flex:none;height:max(200px,calc(100dvh - 120px))}
+ .chat-page-mount .chat-back{display:none}
+ .chat-gate-ico{display:none}
+ .chat-gate{padding:10px 12px 12px}
 }
 @media(prefers-reduced-motion:reduce){.chat-live i,.chat-skeleton i,.chat-skeleton span{animation:none}.chat-log{scroll-behavior:auto}}
 @media print{.home-chat,.chat-card,.chat-full,.chat-page-mount,.chat-strip,.chat-tlink,.chat-pop,[data-chat-mount]{display:none!important}}
