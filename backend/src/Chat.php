@@ -6,8 +6,9 @@ use PDO;
 /**
  * Chat channels, polling, sending and deleting (plan §5.1–5.5, §2.4). Never touches Repository::transaction/snapshot or
  * app_meta (D5): every write is one short transaction serialized only by the channel row (SELECT … FOR UPDATE), taken
- * before anything else; the only other rows it locks are the message rows it then changes. Writers of one channel queue
- * on that row, writers of different channels never meet. Times are computed in PHP (milliseconds in created_ms and
+ * before anything else; the only other rows it locks are the message rows it then changes and, when sending, the
+ * sender's users row (after the channel row, the order account deletion uses too), so the send limits hold for parallel
+ * sessions of one account. Writers of one channel queue on that row, writers of different channels never meet. Times are computed in PHP (milliseconds in created_ms and
  * changed_ms, seconds elsewhere), never by the database.
  *
  * Visibility (§5.2), one rule for reading and writing (visibleFor): a global channel is visible to everyone; a tournament
@@ -295,7 +296,11 @@ final class Chat {
   if((int)$r['day_n']>=$send['perDay'])$ms=max($ms,(int)$r['day_first']+86400000-$nowMs);
   return $ms>0?(int)ceil($ms/1000):0;
  }
- /** Send limits from one query on the index (user_id, created_ms); 429 with Retry-After and retry. */
+ /**
+  * Send limits from one query on the index (user_id, created_ms); 429 with Retry-After and retry. send() runs it once
+  * before its transaction (a cheap refusal) and again inside it, after locking the sender's users row: parallel requests
+  * from several sessions of one account otherwise all read the same count and all pass.
+  */
  private static function limit(PDO $pdo,string $userId,array $send,int $nowMs):void {
   $minute=$nowMs-60000;
   $q=$pdo->prepare('SELECT COUNT(*) AS day_n,MIN(created_ms) AS day_first,MAX(created_ms) AS last_ms,SUM(created_ms>?) AS minute_n,MIN(CASE WHEN created_ms>? THEN created_ms END) AS minute_first FROM chat_messages WHERE user_id=? AND created_ms>?');
@@ -335,6 +340,8 @@ final class Chat {
   try{
    $l=$pdo->prepare('SELECT rev,status FROM chat_channels WHERE id=? FOR UPDATE');$l->execute([$id]);$cur=$l->fetch(PDO::FETCH_ASSOC);$l->closeCursor();
    if(!$cur||$cur['status']!=='open')throw new AppError('Ten czat jest tylko do odczytu.',409);
+   $u=$pdo->prepare('SELECT id FROM users WHERE id=? FOR UPDATE');$u->execute([$viewer['id']]);$u->fetchAll();
+   self::limit($pdo,$viewer['id'],$d['send'],$nowMs??self::nowMs());
    $prev=self::rows($pdo,'SELECT user_id,created_ms,state FROM chat_messages WHERE channel_id=? ORDER BY id DESC LIMIT 1',[$id])[0]??null;
    $ms=$nowMs??self::nowMs();$rev=(int)$cur['rev']+1;$cont=self::cont($prev,$viewer['id'],$ms);
    $pdo->prepare("INSERT INTO chat_messages (channel_id,rev,user_id,client_id,body,cont,state,created_ms) VALUES (?,?,?,?,?,?,'visible',?)")->execute([$id,$rev,$viewer['id'],$cid,$body,$cont,$ms]);

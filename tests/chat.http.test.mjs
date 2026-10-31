@@ -181,6 +181,12 @@ test('sending: repeated cid, limits with Retry-After, profile, temporary passwor
  fixture('chat-settings',{set:{send:{gap:0,perMin:2}}});
  assert.equal((await send(C.m4,general.id,'druga')).status,200);
  r=await send(C.m4,general.id,'trzecia');error(r,429);assert.ok(r.data.retry>=1&&r.data.retry<=60);
+ // Parallel sends from several sessions of one account (one paid account signed in on six devices) cannot beat the gap:
+ // the limit is checked again under the sender's row lock, so exactly one of them is stored.
+ fixture('chat-settings',{set:{send:{gap:5,perMin:1000}}});
+ const burster=member('czat.burst@test.example'),devices=await Promise.all(Array.from({length:6},()=>signIn(burster.email)));
+ const burst=await Promise.all(devices.map((d,i)=>send(d,i%2?karate.id:general.id,'równolegle '+i)));
+ assert.deepEqual(burst.map(x=>x.status).sort(),[200,429,429,429,429,429],JSON.stringify(burst.map(x=>[x.status,x.data?.error])));
  fixture('chat-settings',{set:{send:{gap:0,perMin:1000}}});
  error(await send(C.incomplete,general.id,'x'),403,'Uzupełnij profil, aby pisać na czacie.');
  error(await send(C.temp,general.id,'x'),403,'Najpierw zmień hasło tymczasowe.');
