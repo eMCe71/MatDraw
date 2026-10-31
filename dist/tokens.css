@@ -1,0 +1,22 @@
+/* Shared tokens for the community features (chat, moderation, accounts, members, PWA): plan §8.7, research 05 §18 and the mockup.
+   Custom properties plus the shell's menu badge; nothing here changes existing screens. Feature styles live in chat.css, moderation.css, account.css,
+   members.css and pwa.css; brand.css keeps the last word. */
+:root{
+ --chat-meta:#5b6f89;--chat-own:#f0f8fe;--chat-edge:var(--mb-cyan,#00aeef);--chat-danger:#b3424a;--chat-field-border:#8296b0;
+ /* Guest placeholders (ghost-ava g1…g5): --ghost-N disc colour, -b blurred shape, -c highlight (05 §6.2, mockup). */
+ --ghost-1:#d3e5f6;--ghost-1-b:#7fb6e3;--ghost-1-c:#f2f8fd;
+ --ghost-2:#dceefa;--ghost-2-b:#00aeef;--ghost-2-c:#bfe6f8;
+ --ghost-3:#d9e2f0;--ghost-3-b:#5b7fb4;--ghost-3-c:#eef3fa;
+ --ghost-4:#e3ecf6;--ghost-4-b:#9fb5d3;--ghost-4-c:#ffffff;
+ --ghost-5:#d6ecf5;--ghost-5-b:#3e9fcf;--ghost-5-c:#e5f5fb;
+ --ghost-name:linear-gradient(90deg,#c8d7e7,#dbe5f0 60%,#cdd9e7);
+ /* Sport chips: text / background. */
+ --sport-tkd:#00679d;--sport-tkd-bg:#e8f6fc;--sport-karate:#6b4aa0;--sport-karate-bg:#f2edfb;
+ /* Layers (plan §8.7): below modals (100) and the toast (200). */
+ --z-pwa-bar:90;--z-pwa-sheet:95;
+}
+/* Menu badge of a registered page (registry.setBadge, plan §8.3 point 4): the shell renders it hidden until a module sets a count. */
+.nav-badge{margin-left:auto;min-width:20px;padding:1px 6px;border-radius:10px;background:var(--mb-cyan,#00aeef);color:#fff;font-size:11px;font-weight:800;line-height:16px;text-align:center}
+.nav-badge[hidden]{display:none}
+/* Billing placeholders in the staff accounts panel (plan §8.3 point 12) take no space until members-frontend fills them. */
+.acct-plan-badge:empty,[data-account-billing]:empty{display:none}

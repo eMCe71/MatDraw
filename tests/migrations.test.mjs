@@ -1,0 +1,62 @@
+// Lint of backend/migrations (plan §2.1, §11; report 04 §2.a.2): the SQL must run on MariaDB 10.6 and MySQL 8.0 and
+// every migration must be additive, so the previous release keeps working on the new schema (rollback safety).
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {readFileSync,readdirSync} from 'node:fs';
+import {spawnSync} from 'node:child_process';
+const dir='backend/migrations';
+const files=readdirSync(dir).filter(f=>f.endsWith('.php')).sort();
+// Statements on existing tables that 0002 may run although they modify columns (plan §2.3 a–b).
+const ALLOWED={2:["ALTER TABLE users MODIFY role ENUM('admin','editor','club','member') NOT NULL",'ALTER TABLE users MODIFY club_id VARCHAR(40) NULL']};
+const stripComments=s=>s.replace(/\/\*[\s\S]*?\*\//g,'').replace(/(^|[^:'"])\/\/.*$/gm,'$1').replace(/^\s*#.*$/gm,'').replace(/--[^\n'"]*$/gm,'');
+const parsed=files.map(name=>{const text=readFileSync(`${dir}/${name}`,'utf8');return {name,text,code:stripComments(text),id:Number(name.slice(0,4)),destructive:/'destructive'\s*=>\s*true/.test(text)};});
+
+test('migration files are named NNNN_name.php with contiguous ids from 2 that match the returned id',()=>{
+ assert.ok(files.length>=1);
+ parsed.forEach((m,i)=>{assert.match(m.name,/^\d{4}_[a-z0-9_]+\.php$/);assert.equal(m.id,i+2,`${m.name}: expected ${String(i+2).padStart(4,'0')}`);
+  assert.match(m.text,new RegExp(`'id'\\s*=>\\s*${m.id}\\s*,`),`${m.name}: 'id'=>${m.id}`);assert.match(m.text,/'destructive'\s*=>\s*(true|false)/,`${m.name}: destructive flag`);assert.match(m.text,/^<\?php[\s\S]*declare\(strict_types=1\);/,m.name);});
+});
+
+test('every CREATE TABLE is InnoDB utf8mb4_unicode_ci and names its foreign keys fk_<table>_…',()=>{
+ for(const m of parsed){
+  const creates=[...m.code.matchAll(/CREATE\s+TABLE(?:\s+IF\s+NOT\s+EXISTS)?\s+`?(\w+)`?\s*\(([\s\S]*?)\)\s*(ENGINE[^"';]*)/gi)];
+  assert.equal(creates.length,(m.code.match(/CREATE\s+TABLE/gi)||[]).length,`${m.name}: every CREATE TABLE ends with ENGINE=…`);
+  for(const [,table,body,tail] of creates){
+   assert.match(tail,/^ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci\s*$/,`${m.name}: ${table}`);
+   const fks=(body.match(/FOREIGN\s+KEY/gi)||[]).length,named=[...body.matchAll(/CONSTRAINT\s+`?(\w+)`?\s+FOREIGN\s+KEY/gi)].map(x=>x[1]);
+   assert.equal(named.length,fks,`${m.name}: ${table} has an unnamed foreign key`);
+   for(const fk of named)assert.ok(fk.startsWith(`fk_${table}_`),`${m.name}: ${fk} must start with fk_${table}_`);
+   assert.ok(!/\bJSON\b[^,\n]*\bDEFAULT\b/i.test(body),`${m.name}: ${table} has a DEFAULT on a JSON column`);
+   assert.ok(!/\bTIMESTAMP\b|\bDATETIME\b/i.test(body),`${m.name}: ${table} stores time as BIGINT epoch, not TIMESTAMP/DATETIME`);
+  }
+ }
+});
+
+test('no SQL outside the shared MariaDB 10.6 / MySQL 8.0 subset',()=>{
+ const banned=[[/ADD\s+COLUMN\s+IF\s+NOT\s+EXISTS/i,'ADD COLUMN IF NOT EXISTS (use $m->addColumn)'],[/(CREATE|ADD)\s+(UNIQUE\s+)?INDEX\s+IF\s+NOT\s+EXISTS/i,'INDEX IF NOT EXISTS (use $m->addIndex)'],[/\bRETURNING\b/i,'RETURNING'],[/->>/,'->>'],[/\bJSON_VALUE\b/i,'JSON_VALUE'],[/\bNOW\s*\(/i,'NOW()'],[/\bCURRENT_TIMESTAMP\b/i,'CURRENT_TIMESTAMP'],[/\bVALUES\s*\([^)]*\)\s+AS\s+\w+/i,'row alias in upsert'],[/\bALGORITHM\s*=/i,'ALGORITHM= hint'],[/\bOVER\s*\(/i,'window function'],[/ADD\s+(CONSTRAINT\s+\w+\s+)?FOREIGN\s+KEY/i,'new foreign key on an existing table']];
+ for(const m of parsed)for(const [re,label] of banned)assert.ok(!re.test(m.code),`${m.name}: ${label}`);
+});
+
+test('DROP, MODIFY, CHANGE and RENAME only in destructive migrations or the allowed 0002 statements',()=>{
+ for(const m of parsed){
+  if(m.destructive)continue;let code=m.code;
+  for(const s of ALLOWED[m.id]||[]){assert.ok(code.includes(s),`${m.name}: allowed statement missing or altered: ${s}`);code=code.split(s).join('');}
+  const hit=code.match(/\b(DROP|MODIFY|CHANGE|RENAME)\b/i);assert.ok(!hit,`${m.name}: ${hit?.[0]} requires 'destructive'=>true`);
+ }
+});
+
+test('0002 matches plan §2.3: conditional ALTERs, privacy defaults, floor on member rows',()=>{
+ const m=parsed.find(x=>x.id===2).code;
+ assert.match(m,/if\(!\$m->enumHas\('users','role','member'\)\)\$m->exec\("ALTER TABLE users MODIFY role/);
+ assert.match(m,/if\(!\$m->columnNullable\('users','club_id'\)\)\$m->exec\('ALTER TABLE users MODIFY club_id/);
+ assert.match(m,/name_display ENUM\('full','initial'\) NOT NULL DEFAULT 'initial'/);
+ for(const c of ['pw_reset_at BIGINT NULL','stripe_redact_pending TINYINT(1) NOT NULL DEFAULT 0','deleted_at BIGINT NULL','CREATE TABLE IF NOT EXISTS account_audit','CREATE TABLE IF NOT EXISTS job_runs','INSERT IGNORE INTO billing_accounts'])assert.ok(m.includes(c),c);
+ assert.match(m,/'floor'=>fn\(PDO \$pdo\):bool=>\(bool\)\$pdo->query\("SELECT 1 FROM users WHERE role='member' LIMIT 1"\)->fetchColumn\(\)/);
+});
+
+test('PHP loads every migration with the declared shape and Migrator::target() is the highest id',{skip:!process.env.PHP_BIN},()=>{
+ const code=`require 'backend/src/Migrator.php';$out=[];foreach(MatDraw\\Migrator::files('${dir}') as $id=>$f){$m=require $f;$out[]=[$id,$m['id'],$m['name'],$m['destructive'],is_callable($m['up']),!isset($m['floor'])||is_callable($m['floor'])];}echo json_encode(['list'=>$out,'target'=>MatDraw\\Migrator::target('${dir}'),'none'=>MatDraw\\Migrator::target('backend/no-such-dir')]);`;
+ const r=spawnSync(process.env.PHP_BIN,['-r',code],{encoding:'utf8'});assert.equal(r.status,0,r.stderr||r.stdout);const out=JSON.parse(r.stdout);
+ assert.equal(out.list.length,files.length);for(const [id,declared,name,destructive,up,floor] of out.list){assert.equal(declared,id);assert.equal(typeof name,'string');assert.equal(typeof destructive,'boolean');assert.ok(up&&floor,String(id));}
+ assert.equal(out.target,Math.max(1,...parsed.map(m=>m.id)));assert.equal(out.none,1);
+});
