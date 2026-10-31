@@ -1,1 +1,80 @@
-/* moderation.css: styles of the moderation feature (plan §8.7). Placeholder created by frontend-foundation; the feature slice owns it. */
+/* moderation.css: styles of the moderation panel (#moderation; plan §8.7, research 05 §12.3). Prefix mod-, tokens from tokens.css, no global
+   element selectors. Layers stay below modals (100). Print: the panel is never part of a printout. */
+:root{--mod-warn:#8a4b00;--mod-warn-bg:var(--amber-bg,#fff6e5);--mod-warn-line:#e8c98a;--mod-preview-bg:#f3eefb;--mod-preview-ink:#4a3470;--mod-skeleton:#edf2f8}
+.mod-root{max-width:980px}
+.mod-tabs{display:flex;flex-wrap:wrap;gap:6px;border-bottom:1px solid var(--line);margin:0 0 20px}
+.mod-tab{appearance:none;background:transparent;border:0;border-bottom:3px solid transparent;margin-bottom:-1px;padding:11px 14px;min-height:44px;font:inherit;font-size:13px;font-weight:700;color:var(--chat-meta);cursor:pointer;border-radius:6px 6px 0 0}
+.mod-tab:hover{color:var(--navy);background:var(--soft)}
+.mod-tab[aria-selected="true"]{color:var(--navy);border-bottom-color:var(--primary)}
+.mod-tab:focus-visible,.mod-panel:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
+.mod-tab-count{display:inline-block;min-width:20px;padding:1px 6px;margin-left:4px;border-radius:10px;background:var(--primary);color:var(--white);font-size:11px;font-weight:800;line-height:16px;text-align:center}
+.mod-panel{outline:0}
+.mod-live{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.mod-skeleton{display:grid;gap:12px}
+.mod-skel-row{height:128px;border-radius:9px;background:linear-gradient(90deg,var(--mod-skeleton),#f6f9fc 50%,var(--mod-skeleton));background-size:200% 100%;animation:mod-shimmer 1.4s linear infinite}
+@keyframes mod-shimmer{to{background-position:-200% 0}}
+.mod-list{display:grid;gap:14px;list-style:none;margin:0;padding:0}
+.mod-item{background:var(--white);border:1px solid var(--line);border-radius:9px;padding:18px 20px;display:grid;gap:10px;min-width:0}
+.mod-item-head{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px}
+.mod-channel{margin:0;font-size:15px;color:var(--navy);overflow-wrap:anywhere}
+.mod-when{font-size:12px;color:var(--chat-meta)}
+.mod-reasons{display:flex;flex-wrap:wrap;align-items:center;gap:6px 8px;margin:0;font-size:12px}
+.mod-count{font-weight:800;color:var(--chat-danger)}
+.mod-chip{padding:2px 8px;border-radius:12px;background:var(--soft);color:var(--sport-tkd);font-weight:700;font-size:11px}
+.mod-author{margin:0;font-size:13px;display:flex;flex-wrap:wrap;gap:4px 8px;align-items:center;overflow-wrap:anywhere}
+.mod-email{color:var(--chat-meta);font-size:12px}
+.mod-role{padding:1px 7px;border-radius:10px;background:#edf0f3;color:var(--chat-meta);font-size:11px;font-weight:700}
+.mod-body{margin:0;padding:10px 14px;border-left:3px solid var(--chat-edge);background:var(--chat-own);border-radius:0 6px 6px 0;font-size:14px;line-height:1.55;white-space:pre-wrap;overflow-wrap:anywhere;unicode-bidi:plaintext}
+.mod-gone{border-left-color:var(--line);background:#f5f8fc;color:var(--chat-meta);font-style:italic}
+.mod-gone:empty{display:none}
+.mod-note{margin:0;font-size:12px;line-height:1.55;color:var(--chat-meta)}
+.mod-note.is-warn{color:var(--mod-warn);font-weight:700}
+.mod-reports summary{cursor:pointer;font-size:12px;font-weight:700;color:var(--primary);min-height:32px;display:flex;align-items:center}
+.mod-reports ul{margin:6px 0 0;padding:0;list-style:none;display:grid;gap:8px}
+.mod-reports li{font-size:12px;line-height:1.55;padding:8px 10px;border:1px solid var(--line);border-radius:6px;overflow-wrap:anywhere}
+.mod-reason{font-weight:800;color:var(--navy)}
+.mod-who,.mod-reports time{color:var(--chat-meta)}
+.mod-comment{display:block;margin-top:4px;color:var(--ink);white-space:pre-wrap;unicode-bidi:plaintext}
+.mod-comment::before,.mod-comment::after{content:""}
+.mod-actions{display:flex;flex-wrap:wrap;align-items:center;gap:8px}
+.mod-actions .btn{white-space:normal;text-decoration:none}
+.mod-context{margin:0;padding:0;list-style:none;display:grid;gap:6px}
+.mod-ctx-row{display:grid;gap:2px;padding:8px 10px;border-radius:6px;background:#f5f8fc;font-size:13px;overflow-wrap:anywhere}
+.mod-ctx-row.is-target{background:var(--chat-own);box-shadow:inset 3px 0 0 var(--chat-edge)}
+.mod-ctx-head{font-size:12px;color:var(--chat-meta)}
+.mod-ctx-text{white-space:pre-wrap;unicode-bidi:plaintext}
+.mod-pager{display:flex;justify-content:center;align-items:center;gap:14px;margin-top:18px;font-size:12px;color:var(--chat-meta)}
+.mod-empty{display:grid;justify-items:center;gap:8px;padding:40px 16px;text-align:center;background:var(--white);border:1px solid var(--line);border-radius:9px}
+.mod-empty h3{margin:0;font-size:15px;color:var(--navy)}
+.mod-filter{display:flex;align-items:center;gap:8px;margin:0 0 14px;font-size:12px;font-weight:700;color:var(--chat-meta)}
+.mod-filter select,.mod-field textarea,.mod-settings textarea{font:inherit;font-size:13px;border:1px solid var(--chat-field-border);border-radius:6px;padding:8px 10px;background:var(--white);color:var(--ink)}
+.mod-field{display:grid;gap:6px;font-size:12px;font-weight:700;color:var(--navy)}
+.mod-field textarea,.mod-settings textarea{width:100%;box-sizing:border-box;resize:vertical;line-height:1.5}
+.mod-fieldset{border:0;margin:0 0 18px;padding:0;display:grid;gap:8px;min-width:0}
+.mod-fieldset legend{padding:0;margin-bottom:6px;font-size:12px;font-weight:800;color:var(--navy)}
+.mod-radio,.mod-check{display:flex;align-items:flex-start;gap:10px;padding:10px 12px;border:1px solid var(--line);border-radius:7px;background:var(--white);cursor:pointer;font-size:13px}
+.mod-radio:has(input:checked){border-color:var(--primary);background:var(--soft)}
+.mod-radio span{display:grid;gap:2px}
+.mod-radio small{font-size:12px;color:var(--chat-meta);line-height:1.5}
+.mod-radio input,.mod-check input{margin:2px 0 0;padding:0;min-height:0;flex:none;width:16px;height:16px;accent-color:var(--primary)}
+.mod-preview{margin:0 0 8px;padding:10px 12px;border-radius:7px;background:var(--mod-preview-bg);color:var(--mod-preview-ink);font-size:13px;line-height:1.5}
+.mod-settings{display:grid;gap:4px;background:var(--white);border:1px solid var(--line);border-radius:9px;padding:20px;margin-bottom:18px}
+.mod-saved{color:var(--sport-tkd);font-weight:800;font-size:12px}
+.mod-health{background:var(--white);border:1px solid var(--line);border-radius:9px;padding:20px;display:grid;gap:12px}
+.mod-health-head{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:center;gap:8px}
+.mod-health h3{margin:0;font-size:14px;color:var(--navy)}
+.mod-tiles{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px;margin:0}
+.mod-tile{border:1px solid var(--line);border-radius:7px;padding:10px 12px;background:#f5f8fc}
+.mod-tile dt{font-size:12px;font-weight:700;color:var(--chat-meta)}
+.mod-tile dd{margin:2px 0 0;font-size:24px;font-weight:800;color:var(--navy)}
+.mod-tile.is-warn{background:var(--mod-warn-bg);border-color:var(--mod-warn-line)}
+.mod-tile.is-warn dd{color:var(--mod-warn)}
+.mod-reason-text{margin:0;font-size:13px;white-space:pre-wrap;unicode-bidi:plaintext;overflow-wrap:anywhere}
+.mod-danger{background:var(--chat-danger);border-color:var(--chat-danger)}
+@media (max-width:650px){
+ .mod-tabs{gap:0 2px}.mod-tab{padding:10px 9px;font-size:12px}
+ .mod-item{padding:14px}.mod-tiles{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .mod-actions .btn{flex:1 1 calc(50% - 8px)}
+}
+@media (prefers-reduced-motion:reduce){.mod-skel-row{animation:none}}
+@media print{.mod-root,.mod-tabs,.mod-panel,.mod-item{display:none!important}}
