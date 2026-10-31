@@ -646,6 +646,22 @@ test('billing-due: refused customer deletions take at most half of the slots and
  for(const s of stuck){const x=row(s.id);assert.deepEqual([x.stripe_redact_pending,x.sync_error],[0,null]);}
 });
 
+test('a new price after stripe-setup --reprice is used at once: a cached price id of another amount is read again',{skip},async()=>{
+ // The owner raises the amount in billing_amounts and runs --reprice: the lookup key moves to a new price (the old one
+ // stays active for existing subscribers), as stripe-setup.php does with transfer_lookup_key.
+ const api=async(path,params)=>{const r=await fetch(stubBase+path,{method:'POST',headers:{Authorization:'Bearer rk_test_stub','Stripe-Version':VERSION,'Idempotency-Key':'matbravo-test-'+crypto.randomUUID(),'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams(params).toString()});const j=await r.json();assert.equal(r.status,200,JSON.stringify(j));return j;};
+ const reprice=amount=>api('/v1/prices',{product:'matbravo_membership',currency:'pln',unit_amount:String(amount),'recurring[interval]':'month',lookup_key:'matbravo_monthly_pln',transfer_lookup_key:'true'});
+ const warm=member('reprice-warm'),cw=await signIn(warm.email);assert.equal((await cw.req('billing-checkout',{})).status,200);
+ const keys=await prices();assert.equal(JSON.parse(fixture('billing-kv',{})['price:test:matbravo_monthly_pln']).id,keys.matbravo_monthly_pln,'the price id is cached');
+ const old=fixture('billing-config-set',{set:{billing_amounts:{pln:999,usd:299}}});const fresh=await reprice(999);
+ try{
+  const m=member('reprice'),c=await signIn(m.email);assert.equal((await me(c)).billing.amounts.pln,999);
+  const t=Date.now();assert.equal((await c.req('billing-checkout',{})).status,200);
+  assert.equal((await since(t,'POST',/^\/v1\/checkout\/sessions$/))[0].body.line_items[0].price,fresh.id,'the new price, not the cached old one');
+  assert.equal((await since(t,'GET',/^\/v1\/prices$/)).length,1);
+ }finally{fixture('billing-config-set',{set:old});await reprice(899);}
+});
+
 test('every request the app sent to Stripe carried the pinned version and rk_test_stub, every POST an Idempotency-Key; routes need a session and CSRF',{skip},async()=>{
  const reqs=(await stub({op:'requests'})).filter(x=>!x.probe);assert.ok(reqs.length>50,String(reqs.length));
  for(const x of reqs){

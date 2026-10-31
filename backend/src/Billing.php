@@ -172,17 +172,21 @@ final class Billing {
   BillingSync::audit($pdo,$u['id'],$u['id'],$old!==null?'customer.replace':'customer.create',null,null,$old!==null?$old.' -> '.$id:$id);
   return $id;
  }
- /** Price id of a currency from its lookup key (03 §3.2): billing_kv price:<mode>:<key> for 24 h; $fresh skips the cache. */
+ /**
+  * Price id of a currency from its lookup key (03 §3.2): billing_kv price:<mode>:<key> for 24 h, with the amount it had;
+  * an entry whose amount is not billing_amounts any more (stripe-setup.php --reprice moved the lookup key to a new price
+  * after the owner changed the amount) is read again, so new subscribers never get the old price. $fresh skips the cache.
+  */
  public static function resolvePrice(PDO $pdo,array $c,StripeClient $client,string $currency,bool $fresh=false):string {
   $key=(string)$c['stripe_prices'][$currency];$kv='price:'.$c['billing_mode'].':'.$key;
-  $hit=json_decode((string)BillingSync::kv($pdo,$kv),true);
-  if(!$fresh&&is_array($hit)&&is_string($hit['id']??null)&&(int)($hit['at']??0)>time()-86400)return $hit['id'];
+  $hit=json_decode((string)BillingSync::kv($pdo,$kv),true);$amount=$c['billing_amounts'][$currency]??null;
+  if(!$fresh&&is_array($hit)&&is_string($hit['id']??null)&&(int)($hit['at']??0)>time()-86400&&($amount===null||($hit['amount']??null)===$amount))return $hit['id'];
   $r=$client->get('/v1/prices',['lookup_keys'=>[$key],'active'=>true,'limit'=>1]);$p=$r['data'][0]??null;
   if(!is_array($p)||!is_string($p['id']??null)||!preg_match('/^price_[A-Za-z0-9_]{1,250}$/D',$p['id'])||strtolower((string)($p['currency']??''))!==$currency){
    BillingSync::kvSet($pdo,$kv,null);throw new StripeError('Price not found',404,'invalid_request_error','resource_missing');
   }
   if(isset($c['billing_amounts'][$currency])&&($p['unit_amount']??null)!==$c['billing_amounts'][$currency])error_log('MatDraw stripe: price '.$key.' amount differs from billing_amounts');
-  BillingSync::kvSet($pdo,$kv,json_encode(['id'=>$p['id'],'at'=>time()],JSON_THROW_ON_ERROR));
+  BillingSync::kvSet($pdo,$kv,json_encode(['id'=>$p['id'],'at'=>time(),'amount'=>is_int($p['unit_amount']??null)?$p['unit_amount']:null],JSON_THROW_ON_ERROR));
   return $p['id'];
  }
 

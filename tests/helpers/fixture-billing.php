@@ -13,7 +13,7 @@
 //   billing-customers {userId}               billing_customers rows of the account (every Stripe customer it ever had)
 declare(strict_types=1);
 use MatDraw\{Billing,BillingSync,StripeClient,StripeError};
-const FIXTURE_BILLING_CONFIG_KEYS=['stripe_webhook_secrets','stripe_down_seconds','billing_sync_min_interval','stripe_portal_configuration','billing_grace_days'];
+const FIXTURE_BILLING_CONFIG_KEYS=['stripe_webhook_secrets','stripe_down_seconds','billing_sync_min_interval','stripe_portal_configuration','billing_grace_days','billing_amounts'];
 return [
  'billing-row'=>function(PDO $pdo,array $p):?array{$q=$pdo->prepare('SELECT * FROM billing_accounts WHERE user_id=?');$q->execute([(string)($p['userId']??'')]);return $q->fetch(PDO::FETCH_ASSOC)?:null;},
  'billing-audit'=>function(PDO $pdo,array $p):array{
