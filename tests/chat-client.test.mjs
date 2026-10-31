@@ -213,10 +213,32 @@ test('background counters: the first poll counts what came while away; knownLast
   chat._internals.applyLists({cv:1,lobby:[{id:1,slug:'taekwondo',scope:'world',last:105,count:9,st:'open'}],tournaments:[]});
   const first=chat._internals.wants().h;assert.deepEqual(first,{'1':[100,0]},'not the last id from the lists (the server would answer same)');
   assert.match(T.buildQuery({route:'chat-feed',h:first}).h,/^1:100:0$/);
-  chat._internals.apply({cv:1,heads:{'1':{last:105,n:5}}},{});
+  chat._internals.apply({cv:1,heads:{'1':{last:105,n:5}}},{},{'1':[100,0]});
   assert.equal(S.channels.get('1').n,5);assert.deepEqual(chat._internals.wants().h,{'1':[100,105]},'later polls: 204 until the channel changes');
   localStorage.setItem(SEEN,JSON.stringify({'1':103}));assert.deepEqual(chat._internals.wants().h,{'1':[103,0]},'read in another tab: counted again');
+  // The cursor moves while a poll is in flight: the answer was counted for the cursor sent, not the one current when it arrives.
+  localStorage.setItem(SEEN,JSON.stringify({'1':108}));
+  chat._internals.apply({cv:1,heads:{'1':{last:110,n:7}}},{},{'1':[103,0]});
+  assert.deepEqual(chat._internals.wants().h,{'1':[108,0]},'counted for 103, read is 108 now: the next poll counts again');
+  chat._internals.apply({cv:1,heads:{'1':{last:110,n:2}}},{},{'1':[108,0]});
+  assert.equal(S.channels.get('1').n,2);assert.deepEqual(chat._internals.wants().h,{'1':[108,110]});
+  localStorage.setItem(SEEN,JSON.stringify({'1':110}));
+  chat._internals.apply({cv:1,heads:{'1':{last:110,n:2}}},{},{'1':[108,0]});
+  assert.equal(S.channels.get('1').n,0,'read up to the last id meanwhile: nothing unread, no stale badge');
+  assert.deepEqual(chat._internals.wants().h,{'1':[110,110]},'and nothing to count again');
  }finally{registry.provide('ui',undefined);localStorage.removeItem(SEEN);chat.purgeIdentity();}
+});
+test('background counters for guests: the known last id from the lists, so the server counts only after a change (§5.4, H4)',()=>{
+ const S=chat._state(),SEEN='matdraw.chat.seen',view={el:{isConnected:true},key:'none',kind:'strip'};
+ try{
+  localStorage.setItem(SEEN,JSON.stringify({'1':100}));
+  chat._internals.applyLists({cv:1,lobby:[{id:1,slug:'taekwondo',scope:'world',last:105,count:9,st:'open'},{id:2,slug:'karate',scope:'world',last:40,count:3,st:'open'}],tournaments:[]});
+  assert.deepEqual(chat._internals.wants().h,{},'no chat on screen: no background counters');
+  S.views.add(view);
+  assert.deepEqual(chat._internals.wants().h,{'1':[100,105],'2':[0,40]},'the server answers same until last_message_id changes');
+  chat._internals.apply({cv:1,heads:{'1':{last:107,n:7}}},{},{'1':[100,105]});
+  assert.deepEqual(chat._internals.wants().h,{'1':[100,107],'2':[0,40]});
+ }finally{S.views.delete(view);localStorage.removeItem(SEEN);chat.purgeIdentity();}
 });
 
 // ——— purgeIdentity ———
@@ -283,7 +305,7 @@ const DIST=fileURLToPath(new URL('../dist/',import.meta.url));
 const CSP="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self'";
 const HARNESS={
  '/harness.html':['text/html; charset=utf-8','<!doctype html><html lang="pl"><head><meta charset="utf-8"><style>.chat-log{height:240px;overflow:auto}</style></head><body><div id="a" data-chat-mount="page"></div><div id="b" data-chat-mount="page"></div><div id="t" data-chat-mount="tournament"></div><script type="module" src="./harness.js"></script></body></html>'],
- '/harness.js':['text/javascript; charset=utf-8',"import {registry} from './registry.js';registry.provide('ui',{getWorkspace:()=>window.__ws||null,icon:()=>'',toast:()=>{},getState:()=>({})});window.__registry=registry;window.__me=await import('./me.js');window.__chat=await import('./chat.js');window.__ready=true;"],
+ '/harness.js':['text/javascript; charset=utf-8',"import {registry} from './registry.js';registry.provide('ui',{getWorkspace:()=>window.__ws||null,icon:()=>'',toast:()=>{},getState:()=>({})});window.__registry=registry;window.__i18n=await import('./i18n.js');window.__me=await import('./me.js');window.__chat=await import('./chat.js');window.__ready=true;"],
  '/runtime-config.js':['text/javascript; charset=utf-8',"export const CONFIG={mode:'api',apiBase:'./api/index.php'};"]
 };
 const DAY=Date.UTC(2026,9,31,9,0,0);
@@ -352,8 +374,13 @@ test('chat.js in a browser: "new messages" per channel, a tournament channel cre
     await page.waitForSelector('#a textarea[data-chat-key="1"]');
     const ta='#a textarea';
     await page.type(ta,'Cześć');
-    await page.evaluate(()=>window.__registry.emit('language',{lang:'pl'}));
-    assert.deepEqual(await page.evaluate(ta=>{const t=document.querySelector(ta);return [t.value,document.activeElement===t,t.selectionStart];},ta),['Cześć',true,5]);
+    // A real switch: the footer signature changes, the composer is rebuilt from the saved draft with focus and caret restored.
+    await page.evaluate(ta=>{document.querySelector(ta).__before=true;window.__i18n.setLanguage('en',{persist:false});window.__registry.emit('language',{lang:'en'});},ta);
+    assert.deepEqual(await page.evaluate(ta=>{const t=document.querySelector(ta);return [t.__before,t.value,document.activeElement===t,t.selectionStart,t.placeholder.startsWith('Write in ')];},ta),[undefined,'Cześć',true,5,true],'a new textarea');
+    await page.keyboard.press('ArrowLeft');await page.keyboard.press('ArrowLeft');
+    await page.evaluate(()=>{window.__i18n.setLanguage('pl',{persist:false});window.__registry.emit('language',{lang:'pl'});});
+    assert.deepEqual(await page.evaluate(ta=>{const t=document.querySelector(ta);return [t.value,document.activeElement===t,t.selectionStart,t.placeholder.startsWith('Napisz w kanale ')];},ta),['Cześć',true,3,true],'the caret where it was, not at the end');
+    await page.keyboard.press('End');
     await page.type(ta,' wszystkim');
     await page.evaluate(()=>window.__me.loadMe({force:true}));
     assert.deepEqual(await page.evaluate(ta=>{const t=document.querySelector(ta);return [t.value,document.activeElement===t,t.selectionStart];},ta),['Cześć wszystkim',true,15]);

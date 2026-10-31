@@ -189,9 +189,11 @@ function wants(){
  }
  if(views.length||signedIn()){
   const read=readMap(),heads=[...S.lobby,...(signedIn()?S.tours:[])].map(k=>S.channels.get(k)).filter(c=>c?.id&&!c.gone);
-  // knownLast is the last id the counter c.n was computed for (counted), not the channel's last id from the lists: a channel that got
-  // messages while the person was away is counted on the first poll, and counted again after the read cursor moved (another tab).
-  for(const c of heads.slice(0,30))if(!(c.id in ch)){const r=read[c.id]||0;h[c.id]=[r,c.countedRead===r?c.counted||0:0];}
+  // Members: knownLast is the last id the counter c.n was computed for (counted), not the channel's last id from the lists: a channel
+  // that got messages while the person was away is counted on the first poll, and counted again after the read cursor moved (another
+  // tab). Guests never see c.n (their dot is c.known > read), so they send the known last id and the server counts only on a change.
+  const member=signedIn();
+  for(const c of heads.slice(0,30))if(!(c.id in ch)){const r=read[c.id]||0;h[c.id]=[r,member?(c.countedRead===r?c.counted||0:0):c.known||0];}
  }
  return {ch,h,init,onScreen,floor:floor||0};
 }
@@ -201,7 +203,7 @@ function unauthorized(){
  else{transport();announce();}
 }
 /** A poll answer (also broadcast from the leader tab): settings, people, channel changes, background counters. */
-function apply(data,from={}){
+function apply(data,from={},sent=null){
  if(!data||typeof data!=='object')return;
  if(data.cfg)S.cfg=normalizeCfg(data.cfg);
  for(const [pid,p] of Object.entries(data.people||{}))if(p&&typeof p==='object')S.people.set(pid,p);
@@ -225,7 +227,12 @@ function apply(data,from={}){
  }
  for(const [id,v] of Object.entries(data.heads||{})){
   const c=S.channels.get(id);if(!c||!v)continue;if(v.st==='gone'){c.gone=true;continue;}
-  if(Number.isFinite(v.last))c.known=Math.max(c.known||0,v.last);if(Number.isFinite(v.n)){c.n=v.n;if(Number.isFinite(v.last))counted(c,readMap()[c.id]||0,v.last);}changed.add(id);
+  if(Number.isFinite(v.last))c.known=Math.max(c.known||0,v.last);
+  // n was counted for the read cursor sent with the poll (sent[id][0]); when the cursor moved meanwhile (read here or in another tab
+  // while the poll was in flight), counted() keeps the old cursor so the next wants() sends knownLast 0 and the server counts again.
+  if(Number.isFinite(v.n)){const now=readMap()[c.id]||0,was=Array.isArray(sent?.[id])&&Number.isFinite(sent[id][0])?sent[id][0]:now;
+   if(was!==now&&Number.isFinite(v.last)&&now>=v.last){c.n=0;counted(c,now,v.last);}else{c.n=v.n;if(Number.isFinite(v.last))counted(c,was,v.last);}}
+  changed.add(id);
  }
  for(const v of liveViews())if(changed.has(v.key)||v.kind==='strip')paint(v,{others:others.get(v.key)||0});
  if([...changed].some(id=>S.channels.get(id)?.reload))S.transport?.poke();

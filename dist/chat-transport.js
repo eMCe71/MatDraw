@@ -125,8 +125,8 @@ export function clientId(crypto=globalThis.crypto){
 
 /**
  * The poller of this tab. opts: wants() -> {ch:{id:rev}, init:[ids without data yet], h:{id:[read,known]}, onScreen, floor}; mode() -> 'feed' | 'public';
- * isOwn(message) -> true for the person's own messages (they do not speed polling up); onData(data, from) with from = {id: cursor
- * the poll used}; onStatus('connecting'|'live'|'reconnecting'|'offline'|'off'|'error'); onUnauth(); onOutdated().
+ * isOwn(message) -> true for the person's own messages (they do not speed polling up); onData(data, from, h) with from = {id: cursor
+ * the poll used} and h = {id: [read, knownLast]} the poll sent (what the counters were computed for); onStatus('connecting'|'live'|'reconnecting'|'offline'|'off'|'error'); onUnauth(); onOutdated().
  * env (tests): fetch, locks, BroadcastChannel, now, random, setTimeout, clearTimeout, setInterval, clearInterval, online(), visible(),
  * apiUrl, emit, events (false: no window/document listeners).
  */
@@ -178,7 +178,7 @@ export function createTransport(opts){
     if(e)report=reportNew();fails=0;errorUntil=0;synced=true;
     // 204 while a tab waits for a channel's first page: the channel is visible and empty (the server answers 'same' for rev 0).
     if(c.kind==='none'&&u.init.length)accept({ch:Object.fromEntries(u.init.filter(id=>!u.ch[id]).map(id=>[id,{rev:0,more:false,older:false,m:[]}]))},u.ch,tabsNow);
-    if(c.kind==='ok')accept(r.body,u.ch,tabsNow);setStatus(cfg.on?'live':'off');
+    if(c.kind==='ok')accept(r.body,u.ch,tabsNow,u.h);setStatus(cfg.on?'live':'off');
    }
    else if(c.kind==='unauth'){post({type:'unauth'});opts.onUnauth?.();}
    else if(c.kind==='outdated'){post({type:'outdated'});outdated();return;}
@@ -192,7 +192,7 @@ export function createTransport(opts){
   lastEnd=env.now();factor=0.8+0.4*env.random();errorUntil=failed===null?0:lastEnd+failed;
   plan(again&&failed===null);
  }
- function accept(body,used,tabsNow){
+ function accept(body,used,tabsNow,sentH={}){
   if(!body||typeof body!=='object')return;
   if(Number.isInteger(body.cv))cv=body.cv;if(body.cfg)cfg=normalizeCfg(body.cfg);
   let fresh=false;
@@ -204,7 +204,7 @@ export function createTransport(opts){
   }
   for(const [k,v] of Object.entries(body.heads||{}))if(Number.isFinite(v?.last))for(const t of tabsNow){const w=t.wants?.h;if(w&&w[k])w[k]=[w[k][0],Math.max(w[k][1]||0,v.last)];}
   if(fresh)messageAt=env.now();
-  opts.onData?.(body,used);post({type:'data',data:body,from:used,cv,cfg:body.cfg?cfg:null,fresh});
+  opts.onData?.(body,used,sentH);post({type:'data',data:body,from:used,h:sentH,cv,cfg:body.cfg?cfg:null,fresh});
  }
  async function request(q,mode){
   const controller=typeof AbortController==='function'?new AbortController():null,t=controller&&env.setTimeout(()=>controller.abort(),LIMITS.timeout);
@@ -226,7 +226,7 @@ export function createTransport(opts){
    else if(m.type==='bye'&&leading()){tabs.delete(m.tab);plan();}
    else if(m.type==='poke'&&leading()){const t=tabs.get(m.tab);if(t)t.visible=true;plan(true);}
    else if(m.type==='who'&&!leading())announce();
-   else if(m.type==='data'&&!leading()){if(m.cv!=null)cv=m.cv;if(m.cfg)cfg=normalizeCfg(m.cfg);if(m.fresh)messageAt=env.now();opts.onData?.(m.data,m.from||{});}
+   else if(m.type==='data'&&!leading()){if(m.cv!=null)cv=m.cv;if(m.cfg)cfg=normalizeCfg(m.cfg);if(m.fresh)messageAt=env.now();opts.onData?.(m.data,m.from||{},m.h||{});}
    else if(m.type==='status'&&!leading()){if(m.cfg)cfg=normalizeCfg(m.cfg);if(m.cv!=null)cv=m.cv;if(m.status!==status){status=m.status;opts.onStatus?.(status);}}
    else if(m.type==='unauth')opts.onUnauth?.();
    else if(m.type==='outdated')outdated();
