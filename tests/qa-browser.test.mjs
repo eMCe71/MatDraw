@@ -1,7 +1,8 @@
 // Browser regressions found in the integration QA (plan §11, manual list): the static demo (dist/ served with the production CSP)
 // in Chromium. Keyboard focus on the chat channel tabs survives the polling repaints; the demo moderation page renders (its tab
 // strip was a plain string); the print preview ends when the address changes; a member's shell avatar shows the member's own
-// initials; no console error, CSP violation or horizontal scroll on the main demo pages at 360 px.
+// initials; the phone menu has a language switch (the full-screen chat covers the top bar); no console error, CSP violation or
+// horizontal scroll on the main demo pages at 360 px.
 // Opt-in like the other browser tests: MATDRAW_BROWSER_TESTS=1 node --test tests/qa-browser.test.mjs (skipped without Playwright).
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -72,6 +73,12 @@ test('demo in a browser: tab focus across repaints, moderation page, print previ
     for(const hash of ['','#chat']){await page.goto(url+hash);await sleep(1200);assert.ok(await overflow(page)<=0,'no horizontal scroll on '+(hash||'home'));}
     await demoLogin(page,2);
     for(const hash of ['#tournaments','#athletes','#chat','#profile']){await page.goto(url+hash);await sleep(900);assert.ok(await overflow(page)<=0,'no horizontal scroll on '+hash);}
+    // the full-screen chat covers the top bar on a phone: the menu carries the language switch, and a draft survives the switch
+    await page.goto(url+'#chat');await page.locator('textarea[data-chat-input]').first().fill('Szkic');
+    await page.locator('.chat-back[data-action="menu"]').click();
+    const en=page.locator('.sidebar-lang [data-set-lang="en"]');assert.ok(await en.isVisible(),'language switch in the phone menu');
+    await en.click();await page.waitForFunction(()=>document.documentElement.lang==='en');
+    assert.equal(await page.locator('textarea[data-chat-input]').first().inputValue(),'Szkic');
     assert.deepEqual(await page.evaluate(()=>window.__csp),[]);
     await ctx.close();}
   assert.deepEqual(problems,[],'no page or console errors');
