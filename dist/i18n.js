@@ -1,0 +1,87 @@
+/* MatBravo interface language (PL / EN).
+ * Gettext style: the Polish text in the code is the key and the Polish output; English lives in i18n-en.js.
+ * A missing English entry falls back to the Polish key, so Polish behaviour does not depend on this module.
+ * Rule-engine labels and server messages stay Polish in data/API and are translated only for display. */
+import EN from './i18n-en.js';
+
+export const LANGUAGES=['pl','en'];
+export const STORAGE_KEY='matdraw.language';
+const LOCALES={pl:'pl-PL',en:'en-GB'};
+
+/** Polish browser preference (pl, pl-PL, pl_PL…) gives PL; anything else, or nothing, gives EN. */
+export function detectLanguage(preferred){
+ const list=(Array.isArray(preferred)?preferred:[preferred]).filter(x=>typeof x==='string'&&x.trim());
+ return /^pl(?:[-_]|$)/i.test(list[0]?.trim()||'')?'pl':'en';
+}
+/** A remembered manual choice wins over browser detection. */
+export function resolveLanguage(saved,preferred){return LANGUAGES.includes(saved)?saved:detectLanguage(preferred);}
+function savedLanguage(){try{return globalThis.localStorage?.getItem(STORAGE_KEY)??null;}catch{return null;}}
+function browserLanguages(){try{const n=globalThis.navigator;return n?.languages?.length?[...n.languages]:[n?.language];}catch{return [];}}
+
+let current=resolveLanguage(savedLanguage(),browserLanguages());
+const listeners=new Set();
+function applyDocumentLanguage(){try{if(globalThis.document?.documentElement)globalThis.document.documentElement.lang=current;}catch{}}
+applyDocumentLanguage();
+
+export const getLanguage=()=>current;
+export const locale=()=>LOCALES[current];
+export function onLanguageChange(fn){listeners.add(fn);return()=>listeners.delete(fn);}
+/** Switches the language; persist=false is used when another window already stored the choice. */
+export function setLanguage(lang,{persist=true}={}){
+ if(!LANGUAGES.includes(lang))return current;
+ if(persist){try{globalThis.localStorage?.setItem(STORAGE_KEY,lang);}catch{}}
+ if(lang===current)return current;
+ current=lang;applyDocumentLanguage();
+ for(const fn of listeners)fn(lang);
+ return current;
+}
+
+const fill=(text,params)=>params?String(text).replace(/\{(\w+)\}/g,(m,k)=>Object.hasOwn(params,k)?String(params[k]):m):String(text);
+export const hasTranslation=key=>Object.hasOwn(EN,key);
+/** t('Polish text {n}',{n}) – English entries may be a string, {one,other} (chosen by params.n) or a function. */
+export function t(key,params){
+ if(current==='pl'||!Object.hasOwn(EN,key))return fill(key,params);
+ const entry=EN[key];
+ if(typeof entry==='function')return String(entry(params||{}));
+ if(entry&&typeof entry==='object')return fill(params?.n===1?entry.one:entry.other,params);
+ return fill(entry,params);
+}
+
+export const formatNumber=(value,digits=1)=>Number(value).toLocaleString(locale(),{minimumFractionDigits:digits,maximumFractionDigits:digits});
+export function ordinal(n){if(current==='pl')return String(n);const v=Math.abs(n)%100;return n+(v>=11&&v<=13?'th':({1:'st',2:'nd',3:'rd'}[v%10]||'th'));}
+/** Grade type name: Polish ITF "Cup" is "Gup" in English; Dan is the same in both. */
+export const gradeName=type=>type==='dan'?'Dan':current==='pl'?'Cup':'Gup';
+export const gradeLabel=(grade,type)=>current==='pl'?grade+' '+gradeName(type):ordinal(grade)+' '+gradeName(type);
+
+/** One label fragment produced by engine.js / Rules.php (event, age group, sex, weight/height class, grade band). */
+export function ruleLabel(text){
+ if(current==='pl'||text==null)return text;
+ const s=String(text);let m;
+ if(Object.hasOwn(EN,s))return t(s);
+ if((m=s.match(/^(do|powyżej) (\d+(?:[.,]\d+)?) (kg|cm)$/)))return t(m[1]==='do'?'do {value} {unit}':'powyżej {value} {unit}',{value:m[2],unit:m[3]});
+ if((m=s.match(/^(\d+)–(\d+) Cup$/)))return ordinal(+m[1])+'–'+ordinal(+m[2])+' '+gradeName('cup');
+ if((m=s.match(/^(\d+) (Dan|Cup)$/)))return gradeLabel(+m[1],m[2].toLowerCase());
+ if((m=s.match(/^(.+) (\d+–\d+|\d+\+) lat$/))&&Object.hasOwn(EN,m[1]))return t('{group} {range} lat',{group:t(m[1]),range:m[2]});
+ return s;
+}
+/** Category subtitles and titles joined with " · " (e.g. "Seniorzy · mężczyźni · do 63 kg"). */
+export const ruleText=text=>current==='pl'||text==null?text:String(text).split(' · ').map(ruleLabel).join(' · ');
+
+// Server/domain messages with a variable part. Captured parts are translated by the given function or kept (names).
+const TEMPLATES=[
+ ['Sprawdź pole: {field}.',{field:t}],
+ ['{entity} nie istnieje.',{entity:t}],
+ ['Zgłoszono: {name}',{}],
+ ['Zmieniono zgłoszenie: {name}',{}],
+ ['Wycofano zgłoszenie: {name}',{}],
+ ['Kontrola startowa: {name}',{}],
+ ['Zapisano losowanie: {category}',{category:ruleText}]
+].map(([key,convert])=>{const names=[];const source='^'+key.replace(/[.*+?^${}()|[\]\\]/g,'\\$&').replace(/\\\{(\w+)\\\}/g,(m,name)=>{names.push(name);return '(.+)';})+'$';return {key,names,convert,re:new RegExp(source,'s')};});
+/** Translates a message that arrives in Polish from the API, the demo adapter, the rules engine or stored activity. Unknown text is returned unchanged. */
+export function translateMessage(message){
+ if(current==='pl'||message==null)return message;
+ const s=String(message);
+ if(Object.hasOwn(EN,s))return t(s);
+ for(const {key,names,convert,re} of TEMPLATES){const m=s.match(re);if(!m)continue;const params={};names.forEach((name,i)=>{params[name]=convert[name]?convert[name](m[i+1]):m[i+1];});return t(key,params);}
+ return s;
+}
