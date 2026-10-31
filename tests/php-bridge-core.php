@@ -95,6 +95,19 @@ $out=match($in['job']){
   };
   return ['peek'=>array_map(fn($c)=>$user('peek',$c),$in['cookies']),'session'=>array_map(fn($c)=>$user('session',$c),[$in['anon'],$in['live']])];
  })(),
+ // Jobs::afterSent after Jobs::maybe skipped by sampling (fresh jobs-tick, nothing sent): with fastcgi_finish_request
+ // (stand-in like PHP-FPM: true once, false afterwards) the work runs after the response was sent, with the session
+ // released first; without it (CLI, php -S, mod_php) the work is skipped.
+ 'after-sent'=>(function()use($in){
+  putenv('MATDRAW_CONFIG='.$in['dir'].'/config.php');$GLOBALS['log']=[];
+  if($in['fpm']){function fastcgi_finish_request():bool{$GLOBALS['log'][]=session_status()===PHP_SESSION_ACTIVE?'sent, session open':'sent';return count(array_filter($GLOBALS['log'],fn($l)=>str_starts_with($l,'sent')))===1;}}
+  ini_set('session.use_cookies','0');ini_set('session.cache_limiter','');session_save_path($in['dir']);session_start();$_SESSION['x']=1;
+  Jobs::maybe(new FakeDb(),array_replace(Config::DEFAULTS,[]));$GLOBALS['log'][]='jobs';
+  session_start();// a session opened again after the jobs (e.g. by a later shutdown function)
+  $ran=Jobs::afterSent(function(){$GLOBALS['log'][]='sync';},'test');
+  $again=Jobs::afterSent(function(){$GLOBALS['log'][]='again';throw new RuntimeException('logged, not thrown');},'test');
+  return ['ran'=>$ran,'again'=>$again,'log'=>$GLOBALS['log'],'session'=>session_status()===PHP_SESSION_ACTIVE];
+ })(),
  // Jobs::maybe releases an open session first, even when sampling then skips all work (fresh jobs-tick).
  'jobs-release'=>(function()use($in){
   putenv('MATDRAW_CONFIG='.$in['dir'].'/config.php');ini_set('session.use_cookies','0');ini_set('session.cache_limiter','');session_save_path($in['dir']);

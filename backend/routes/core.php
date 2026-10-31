@@ -4,7 +4,7 @@
 //   Capabilities::avatarMode($config): 'gd-webp'|'gd-jpeg'|'off'      (accounts-profiles-backend; absent → 'off')
 //   ChatModeration::mutedUntil(PDO,$userId): null|false (not muted) | true (muted, no end) | int (muted until)
 //   Chat (class present = chat installed); chat_settings.data.on (§2.4) switches posting off from the Admin panel
-//   BillingSync::lazy(PDO,$config,$userId) after the response, when the account's next_sync_at is due (billing-backend)
+//   BillingSync::lazy(PDO,$config,$userId) after the response (only once it was sent), when next_sync_at is due (billing-backend)
 declare(strict_types=1);
 use MatDraw\{Access,Accounts,BillingSync,Capabilities,Chat,ChatModeration,Jobs,RouteContext,Routes};
 
@@ -33,12 +33,13 @@ return [
    'currency'=>Access::currency($row,$p['country'],$c),'amounts'=>$c['billing_amounts'],'exempt'=>$exempt,
    'hasCustomer'=>$sameMode&&$row['stripe_customer_id']!==null,'pending'=>$row!==null&&$row['pending_checkout_id']!==null&&(int)$row['pending_checkout_expires']>$now];
   $changeAt=$p['username_changed_at']!==null&&(int)$p['username_changed_at']+30*86400>$now?(int)$p['username_changed_at']+30*86400:null;
-  // After the response: jobs and a due payment sync, both releasing the session first (§3.7, §6.3).
+  // After the response: jobs and a due payment sync, both releasing the session first (§3.7, §6.3). The sync runs only
+  // once the response has been sent (Jobs::afterSent), never before it: Jobs::maybe does not flush when sampling skips it.
   $syncDue=!empty($c['billing_enabled'])&&$row!==null&&$row['stripe_customer_id']!==null&&$row['next_sync_at']!==null&&(int)$row['next_sync_at']<=$now;
   $userId=$u['id'];
   register_shutdown_function(static function()use($pdo,$c,$syncDue,$userId){
    Jobs::maybe($pdo,$c);
-   if($syncDue&&class_exists(BillingSync::class)&&method_exists(BillingSync::class,'lazy')){try{BillingSync::lazy($pdo,$c,$userId);}catch(Throwable $e){Routes::logThrowable($e,'MatDraw billing lazy');}}
+   if($syncDue&&class_exists(BillingSync::class)&&method_exists(BillingSync::class,'lazy'))Jobs::afterSent(static fn()=>BillingSync::lazy($pdo,$c,$userId),'MatDraw billing lazy');
   });
   return ['user'=>Accounts::safe($u),
    'profile'=>['publicId'=>$p['public_id'],'username'=>$p['username'],'firstName'=>$p['first_name'],'lastName'=>$p['last_name'],'country'=>$p['country'],

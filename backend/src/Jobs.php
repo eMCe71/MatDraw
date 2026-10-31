@@ -17,11 +17,13 @@ use PDO;
  *   4. the job runs with set_time_limit(20) and should stop after about 2 s of work (batches); a job with needsFlush
  *      (Stripe) is skipped when the response could not be sent first.
  * bin/cron.php runs every overdue job the same way. A failing job is logged without personal data and retried after
- * its interval. job_test_sleep_ms (tests only) makes a job slower.
+ * its interval. job_test_sleep_ms (tests only) makes a job slower. afterSent() runs other work that must never delay a
+ * response (BillingSync::lazy in me, §6.3 point 3) only once the response has been sent.
  */
 final class Jobs {
  public const TICK_SECONDS=30,CLAIM_SECONDS=120;
  private static array $cache=[];
+ private static bool $sent=false;
  public static function dir():string{return dirname(__DIR__).'/jobs';}
  /** name => definition from every *.php file in $dir (default backend/jobs). */
  public static function all(?string $dir=null):array {
@@ -45,15 +47,31 @@ final class Jobs {
    $tick=Paths::shared($c).'/jobs-tick';$now=time();clearstatcache(true,$tick);$m=@filemtime($tick);
    if($m!==false&&$now-$m<self::TICK_SECONDS&&$m<=$now)return;
    if(!@touch($tick))return;
-   ignore_user_abort(true);$flushed=self::flush();
+   $flushed=self::flush();
    self::run($pdo,$c,$now,$flushed,1);
   }catch(\Throwable $e){Routes::logThrowable($e,'MatDraw jobs');}
  }
- /** Sends the response now when the SAPI can; true when it did. */
+ /**
+  * Sends the response now when the SAPI can (fastcgi/litespeed_finish_request), releasing the session first; true when
+  * the response has been sent, by this call or an earlier one (a second fastcgi_finish_request() returns false).
+  */
  public static function flush():bool {
-  if(function_exists('fastcgi_finish_request'))return fastcgi_finish_request();
-  if(function_exists('litespeed_finish_request'))return (bool)litespeed_finish_request();
+  if(self::$sent)return true;
+  if(session_status()===PHP_SESSION_ACTIVE)session_write_close();
+  ignore_user_abort(true);
+  if(function_exists('fastcgi_finish_request'))return self::$sent=fastcgi_finish_request();
+  if(function_exists('litespeed_finish_request'))return self::$sent=(bool)litespeed_finish_request();
   return false;
+ }
+ /**
+  * Work that must never delay a response (§6.3 point 3): $fn runs only once the response has been sent, otherwise it is
+  * skipped (Jobs::maybe does not flush when sampling skips it, and php -S or mod_php cannot send early). Errors are
+  * logged without personal data. Returns whether $fn ran.
+  */
+ public static function afterSent(callable $fn,string $label):bool {
+  if(!self::flush())return false;
+  try{$fn();}catch(\Throwable $e){Routes::logThrowable($e,$label);}
+  return true;
  }
  /** Every overdue job (bin/cron.php; no response to send, so needsFlush jobs run too); $only limits it to one name. */
  public static function runAll(PDO $pdo,array $c,int $now,?string $only=null):array{return self::run($pdo,$c,$now,true,PHP_INT_MAX,$only);}

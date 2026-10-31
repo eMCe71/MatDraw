@@ -233,7 +233,12 @@ test('Route and job registries: modes, unique names, refused definitions; descri
   assert.deepEqual(r.session[0],{ok:null},'an anonymous session needs no database either');assert.match(r.session[1].error,/^PDOException/);
  }finally{rmSync(dbDir,{recursive:true,force:true});}
  const jobsDir=mkdtempSync(path.join(tmpdir(),'md-jobs-'));writeFileSync(path.join(jobsDir,'config.php'),'<?php return [];');writeFileSync(path.join(jobsDir,'jobs-tick'),'');
- try{assert.deepEqual(bridge({job:'jobs-release',dir:jobsDir}),{before:true,after:false,written:true},'Jobs::maybe closes the session before anything else');}
+ try{
+  assert.deepEqual(bridge({job:'jobs-release',dir:jobsDir}),{before:true,after:false,written:true},'Jobs::maybe closes the session before anything else');
+  // The lazy payment sync of me (§6.3 point 3) never runs before the response is out, also when sampling skipped the jobs.
+  assert.deepEqual(bridge({job:'after-sent',dir:jobsDir,fpm:true}),{ran:true,again:true,log:['jobs','sent','sync','again'],session:false},'sent once (session released), then the work');
+  assert.deepEqual(bridge({job:'after-sent',dir:jobsDir,fpm:false}),{ran:false,again:false,log:['jobs'],session:false},'no way to send early: skipped');
+ }
  finally{rmSync(jobsDir,{recursive:true,force:true});}
  const d=bridge({job:'describe',email:'secret.person@example.test'});
  assert.ok(!d.pdo.includes('secret.person'),d.pdo);assert.match(d.pdo,/^PDOException php-bridge-core\.php:\d+ SQLSTATE 23000 code 1062$/);
