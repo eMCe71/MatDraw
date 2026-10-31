@@ -37,7 +37,11 @@ Zastąp adres i nazwę klubu własnymi wartościami. Nie ma domyślnego konta pr
 
 5. Otwórz domenę przez HTTPS, zaloguj się i dodaj konta w „Konta i role”. Każde konto ma klub, e-mail, hasło i jedną z trzech ról. Hasła przekazuj klubom bezpiecznym kanałem. Użytkownik zmienia hasło w „Moje konto”. Administrator może ustawić nowe hasło po weryfikacji właściciela; nie wdrożono wysyłki e-mail ani automatycznego odzyskiwania hasła.
 6. Utwórz turniej i ustaw „Zapisy otwarte”. Klub wybiera osoby ze swojej bazy lub tworzy zawodnika wraz ze zgłoszeniem. „Zapisy zamknięte” blokują edycję klubom; organizator nadal prowadzi kontrolę i wyniki. „Zakończony” blokuje dane startowe i wyniki do czasu świadomego ponownego otwarcia przez uprawnionego organizatora.
-7. Przed pierwszym turniejem sprawdź logowanie z dwóch urządzeń, prawa reprezentanta, zapis wyniku, A4/A3 i ekran hali. Zatwierdź z trenerem kwestie wymienione w „Zasady turnieju”, w tym sposób obliczania wieku. Drabinka powyżej 64 osób i sporne kategorie pozostają zablokowane.
+7. Przed pierwszym turniejem sprawdź logowanie z dwóch urządzeń, prawa reprezentanta, zapis wyniku, A4/A3, ekran hali i przełącznik języka PL | EN. Zatwierdź z trenerem kwestie wymienione w „Zasady turnieju”, w tym sposób obliczania wieku. Drabinka powyżej 64 osób i sporne kategorie pozostają zablokowane.
+
+## Języki interfejsu
+
+Interfejs działa po polsku i po angielsku. Przy pierwszej wizycie język wynika z ustawień przeglądarki: polski → PL, każdy inny → EN. Przełącznik PL | EN w nagłówku i na ekranie logowania zapamiętuje wybór w tej przeglądarce. API i baza pozostają po polsku; angielska wersja tłumaczy komunikaty serwera i nazwy kategorii dopiero przy wyświetlaniu. Wdrożenie nie wymaga żadnej dodatkowej konfiguracji. Teksty angielskie są w `dist/i18n-en.js` (szczegóły w README).
 
 ## Dane i uprawnienia
 
