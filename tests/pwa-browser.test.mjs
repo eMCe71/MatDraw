@@ -1,6 +1,7 @@
 // PWA interface in a real browser (plan §9.4): the DOM wiring of dist/pwa.js (heartbeat, detectors, #screen and print, fullscreen,
 // in-app banner focus, logout, live regions). A harness page loads the real pwa.js in the API mode (runtime-config.js is overridden by
-// the test server), so no backend is needed; service workers are blocked. Skipped when Playwright or Chromium is missing.
+// the test server), so no backend is needed; service workers are blocked. Opt-in like the browser run in pwa-sw/pwa-build:
+// MATDRAW_BROWSER_TESTS=1 node --test tests/pwa-browser.test.mjs (skipped, not passed, without Playwright or when Chromium cannot start).
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
@@ -10,7 +11,7 @@ import {extname,join,normalize} from 'node:path';
 import {fileURLToPath} from 'node:url';
 
 const root=fileURLToPath(new URL('../dist/',import.meta.url));
-let chromium=null;try{({chromium}=createRequire(import.meta.url)('playwright'));}catch{}
+let chromium=null;if(process.env.MATDRAW_BROWSER_TESTS)try{({chromium}=createRequire(import.meta.url)('playwright'));}catch{}
 const TYPES={'.html':'text/html; charset=utf-8','.js':'text/javascript; charset=utf-8','.css':'text/css; charset=utf-8','.svg':'image/svg+xml','.webp':'image/webp','.png':'image/png','.json':'application/json','.webmanifest':'application/manifest+json'};
 const CSP="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self'";
 const HARNESS={
@@ -30,9 +31,9 @@ const ANDROID='Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTM
 const INSTAGRAM=ANDROID+' Instagram 330.0.0.0';
 const WS={user:{id:'u1',clubId:'club-1'},tournaments:[]};
 
-test('pwa.js in a browser: fullscreen is not an install, the card respects modal, signup mark, #screen and logout, in-app focus, live regions',{skip:!chromium&&'Playwright is not installed',timeout:120000},async()=>{
+test('pwa.js in a browser: fullscreen is not an install, the card respects modal, signup mark, #screen and logout, in-app focus, live regions',{skip:!chromium&&'set MATDRAW_BROWSER_TESTS=1 (needs playwright)',timeout:120000},async t=>{
  const {server,url}=await serve();let browser;
- try{browser=await chromium.launch();}catch(error){server.close();return;}
+ try{browser=await chromium.launch();}catch(error){server.close();t.skip('Chromium cannot start: '+error.message);return;}
  const errors=[];
  const open=async({ua,hash='',clipboard=false,seed=true}={})=>{
   const ctx=await browser.newContext({viewport:{width:390,height:800},serviceWorkers:'block',locale:'pl-PL',...(ua?{userAgent:ua,hasTouch:true,isMobile:true}:{})});
@@ -55,6 +56,7 @@ test('pwa.js in a browser: fullscreen is not an install, the card respects modal
     await page.waitForFunction(()=>!!document.fullscreenElement);await page.waitForTimeout(100);
     assert.equal(await page.evaluate(()=>matchMedia('(display-mode: fullscreen)').matches),true,'Chromium matches display-mode: fullscreen under the Fullscreen API');
     assert.equal(await page.evaluate(()=>document.documentElement.hasAttribute('data-standalone')),false);
+    assert.equal(await page.evaluate(()=>window.__registry.use('pwa').standalone()),false,'still fullscreen: not standalone');
     assert.equal(await page.evaluate(()=>JSON.parse(localStorage.getItem('matdraw.pwa')||'{}').installed||0),0,'fullscreen must not mute install prompts for good');
     await page.evaluate(()=>document.exitFullscreen());await page.waitForFunction(()=>!document.fullscreenElement);
     assert.equal(await page.evaluate(()=>JSON.parse(localStorage.getItem('matdraw.pwa')||'{}').installed||0),0);

@@ -390,6 +390,16 @@ test('#screen stuck and nothing installs: one retry after the loop guard (never 
 test('#screen stuck with a worker already waiting: left to the retry, not applied in a loop',async()=>{
  const h=await stuckScreen();assert.deepEqual(h.updater.state.waiting.sent,[]);assert.equal(h.log.reloads,0);assert.equal(h.updater.state.awaiting,true);
 });
+test('#screen stuck: bootstrap answers 409 before registration and a worker is already waiting: not applied at once (that worker may be the one whose SKIP_WAITING already failed), only by the retry, exactly once',async()=>{
+ const h=harness({waiting:new Worker()});h.flags.recent=true;h.flags.hash='#screen';
+ await h.updater.outdated();assert.equal(h.updater.state.awaiting,true,'409 came before the registration');
+ await h.updater.register();
+ assert.deepEqual(h.reg.waiting.sent,[],'offer() without fresh never applies');assert.equal(h.log.reloads,0);assert.equal(h.updater.state.awaiting,true);assert.deepEqual(h.log.shown,[]);
+ const retry=h.log.timers.find(([,ms])=>ms>=LOOP_GUARD_MS);assert.ok(retry,'the retry is scheduled after the guard');
+ await retry[0]();await new Promise(r=>setImmediate(r));
+ assert.deepEqual(h.reg.waiting.sent,['SKIP_WAITING'],'the retry applies it exactly once');assert.equal(h.updater.state.awaiting,false);
+ takeControl(h.sw);assert.equal(h.log.reloads,1);
+});
 test('a stuck non-screen tab keeps the blocking bar and is not auto-applied by a later worker (the person presses "Refresh now")',async()=>{
  const h=harness({waiting:new Worker()});await h.updater.register();h.flags.recent=true;await h.updater.outdated();
  const w=new Worker('installing');h.reg.installing=w;h.reg.dispatchEvent(new Event('updatefound'));w.become('installed');
