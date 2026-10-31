@@ -142,6 +142,14 @@ test('staff without a free account: preview only (402) until the payment is conf
  const sessionId=sessionOf((await c.req('billing-checkout',{})).data.url);await stub({op:'pay',sessionId});
  assert.equal((await c.req('billing-confirm',{sessionId})).data.status,'active');
  await c.cmd('profile.save',athlete);assert.equal(c.data.profiles.length,1);
+ // The Admin changes the paying club's e-mail (account.save, not a member route): the billing row becomes due at once,
+ // and the next billing-due run gives the Stripe customer the new address (§3.9), not the sync after the renewal.
+ const customer=row(id).stripe_customer_id,moved=email('staff-moved');assert.ok(row(id).next_sync_at>now()+D);
+ await admin.load();await admin.cmd('account.save',{id,email:moved,clubId:admin.data.users.find(u=>u.id===id).clubId,role:'club'});
+ assert.ok(row(id).next_sync_at<=now(),'due now');
+ const t=Date.now();run('due',{limit:20});
+ assert.deepEqual((await since(t,'POST',new RegExp('^/v1/customers/'+customer+'$'))).map(x=>x.body.email),[moved]);
+ assert.equal((await stub({op:'customer',id:customer})).email,moved);
 });
 
 test('incomplete payment: processing until Stripe says active; billing-sync allows one call per 10 s',{skip},async()=>{
