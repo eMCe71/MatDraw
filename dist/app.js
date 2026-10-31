@@ -116,8 +116,10 @@ function render(){
  const pages={tournaments:tournamentsPage,database:databasePage,accounts:accountsPage,draws:drawsPage,overview:overviewPage,athletes:()=>rosterPage(false),checkin:()=>rosterPage(true),rules:rulesPage,architecture:architecturePage};
  // Registered pages first (with their roles), then the built-in pages; a member never falls back to the tournaments page.
  // Registered pages must return SafeHtml (plan §5.9): setHtml throws for a plain string instead of injecting it unescaped.
- const reg=registry.page(ui.page),own=registry.allows(reg,role),app=document.querySelector('#app');
- if(own)registry.setHtml(app,reg.render(registry.parseRoute(location.hash).params));else app.innerHTML=member?memberHome():(pages[ui.page]||tournamentsPage)();
+ // A page that throws (or returns a plain string) gets the built-in page instead: one broken module must not stop the shell.
+ const reg=registry.page(ui.page),app=document.querySelector('#app');let own=registry.allows(reg,role);
+ if(own){try{registry.setHtml(app,reg.render(registry.parseRoute(location.hash).params));}catch(error){try{console.error('MatBravo page '+ui.page+' failed',error);}catch{}own=false;}}
+ if(!own)app.innerHTML=member?memberHome():(pages[ui.page]||tournamentsPage)();
  document.title='MatBravo — '+(own?registry.title(ui.page):member?T('Czat'):({tournaments:T('Turnieje'),database:T('Baza zawodników'),accounts:T('Konta i role'),draws:T('Drabinki'),athletes:T('Zgłoszenia'),checkin:T('Kontrola startowa'),overview:T('Przegląd'),rules:T('Zasady turnieju'),architecture:T('O projekcie')}[ui.page]||T('Turnieje')));
  registry.emit('painted',{view:'app',page:ui.page});
 }
@@ -245,14 +247,14 @@ function loadUpcoming(force=false){
 }
 function guestRouteId(){if(!location.hash.startsWith('#guest'))return null;const id=new URLSearchParams(location.hash.split('?')[1]||'').get('t');return id&&/^[A-Za-z0-9_-]{1,40}$/.test(id)?id:null;}
 /** Without a session: the login page, or – for #guest?t=… – the sponsor dialog first and the guest preview only after it is closed. */
-function renderPublic(){
+function renderPublic(message=''){
  // Public pages of feature modules (e.g. #signup, #chat for guests) render themselves (plan §8.3 point 7).
  const route=registry.parseRoute(location.hash),own=registry.publicPage(route.page);
  if(own){own.render(route.params);registry.emit('painted',{view:'public',page:route.page});return;}
  const id=guestRouteId();
- if(!id){guest=null;promo=null;renderLogin();return;}
+ if(!id){guest=null;promo=null;renderLogin(message);return;}
  if(guest?.id===id&&guest.unlocked){renderGuest();return;}
- renderLogin();showPromo(id);
+ renderLogin(message);showPromo(id);
 }
 function fetchGuest(id){
  const known=upcoming.data?.tournaments?.find(t=>t.id===id)||(guest?.id===id?guest.known:null);
@@ -353,7 +355,9 @@ async function commit(type,payload,expected=Number(document.querySelector('.moda
 }
 async function handleError(error,form){
  // An expired session (401) drops the previous person's state like a sign-out does (me.js and modules listen to 'logout').
- if(error.status===401){if(workspace)registry.emit('logout',{expired:true});workspace=null;closeModal();renderLogin(error.message);return;}
+ // The view then follows the hash, so a language switch or a reload shows the same page: a module's public page (the chat
+ // restarts on its public route, plan §5.4), the anonymous guest preview flow for #guest?t=…, otherwise the login page.
+ if(error.status===401){if(workspace)registry.emit('logout',{expired:true});workspace=null;closeModal();if(guest?.memberPreview){guest=null;promo=null;}renderPublic(error.message);return;}
  if(error.status===402)registry.emit('payment-required',{message:error.message});
  if(error.status===409&&error.code!=='client_outdated'){try{workspace=await Client.bootstrap();syncState();render();if(form)form.dataset.revision=workspace.revision;const dialog=document.querySelector('.modal');if(dialog)dialog.dataset.revision=workspace.revision;}catch{}}
  const message=translateMessage(error.message),box=form?.querySelector('.form-error')||document.querySelector('.form-error');if(box)box.textContent=message;else toast(message);

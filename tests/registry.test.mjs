@@ -106,8 +106,16 @@ test('dictionary merge: first wins, a collision is listed (no exception), the sh
 
 test('app.js paints registered pages through setHtml, so a page that returns a plain string throws instead of injecting it',async()=>{
  const {readFileSync}=await import('node:fs');const app=readFileSync(new URL('../dist/app.js',import.meta.url),'utf8');
- assert.match(app,/if\(own\)registry\.setHtml\(app,reg\.render\(registry\.parseRoute\(location\.hash\)\.params\)\);/);
+ assert.match(app,/let own=registry\.allows\(reg,role\);\n if\(own\)\{try\{registry\.setHtml\(app,reg\.render\(registry\.parseRoute\(location\.hash\)\.params\)\);\}catch\(error\)\{[^\n]*own=false;\}\}\n if\(!own\)app\.innerHTML=member\?memberHome\(\):\(pages\[ui\.page\]\|\|tournamentsPage\)\(\);/,'a page that throws or returns a string falls back to the built-in page instead of stopping render()');
  assert.ok(!/innerHTML=String\(own\?/.test(app),'no direct innerHTML for registered pages');
  registerPage({id:'qa-plain-string',label:'QA',roles:['member'],render:()=>'<img src=x onerror="alert(1)">'});
  const el={innerHTML:''};assert.throws(()=>setHtml(el,page('qa-plain-string').render(new URLSearchParams())),TypeError);assert.equal(el.innerHTML,'');
+});
+
+test('app.js: after a 401 the view follows the hash (public page, guest flow or login), and a member preview is dropped',async()=>{
+ const {readFileSync}=await import('node:fs');const app=readFileSync(new URL('../dist/app.js',import.meta.url),'utf8');
+ const branch=app.match(/if\(error\.status===401\)\{[^\n]*\}/)?.[0]||'';
+ assert.match(branch,/workspace=null;closeModal\(\);if\(guest\?\.memberPreview\)\{guest=null;promo=null;\}renderPublic\(error\.message\);return;/);
+ assert.ok(!/renderLogin\(/.test(branch),'no login page drawn under a hash that names a public page');
+ assert.match(app,/function renderPublic\(message=''\)\{/);assert.match(app,/if\(!id\)\{guest=null;promo=null;renderLogin\(message\);return;\}/);
 });
