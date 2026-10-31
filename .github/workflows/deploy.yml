@@ -171,9 +171,16 @@ jobs:
           ssh deploy "umask 022 && mkdir -p '$DEPLOY_BASE/bin' && cat > '$DEPLOY_BASE/bin/deploy-remote.sh'" < scripts/deploy-remote.sh
       - name: Przełączenie na nowe wydanie
         run: ssh deploy bash -s -- activate "$DEPLOY_BASE" "$DOCROOT" "$RELEASE" < scripts/deploy-remote.sh
-      - name: Weryfikacja HTTPS, strony i API
+      - name: Weryfikacja HTTPS, strony, bazy i API (z serwera)
         id: verify
-        run: sleep 5 && bash scripts/deploy-verify.sh
+        # Runs on the server: the hosting answers 403 to GitHub Actions addresses for every site.
+        run: |
+          set +e
+          sleep 5
+          out=$(ssh deploy "APP_URL='$APP_URL' DOCROOT='$DOCROOT' bash -s" < scripts/deploy-verify.sh); rc=$?
+          echo "$out"
+          echo "rollback=$(sed -n 's/^ROLLBACK=//p' <<<"$out" | tail -1)" >> "$GITHUB_OUTPUT"
+          exit $rc
       - name: Powrót do poprzedniego wydania po nieudanej weryfikacji
         if: failure() && steps.verify.outputs.rollback == 'true' && env.PREVIOUS != ''
         run: ssh deploy bash -s -- rollback "$DEPLOY_BASE" "$DOCROOT" < scripts/deploy-remote.sh
@@ -208,12 +215,11 @@ jobs:
           [ -f "$DEPLOY_BASE/shared/config.php" ] && echo "config.php: jest, app_url: $(php -r 'echo (require $argv[1])["app_url"] ?? "?";' "$DEPLOY_BASE/shared/config.php" 2>&1)" || echo "config.php: BRAK (krok 4)"
           echo "Aktywne wydanie: $(readlink "$DEPLOY_BASE/current" 2>/dev/null || echo brak)"
           SH
-      - name: Odpowiedź domeny widziana z internetu
+      - name: Stan strony (sprawdzenie z serwera, bez zmian)
         run: |
           host=${APP_URL#https://}
           for h in "$host" "www.$host"; do echo "DNS $h: $(getent ahostsv4 "$h" | awk '{print $1}' | sort -u | tr '\n' ' ')"; done
-          for u in "http://$host/" "https://$host/"; do echo "$u -> $(curl -sSk -o /dev/null --max-time 20 -w 'HTTP %{http_code}, %{size_download} B' "$u" 2>&1)"; done
-          curl -sS -o /dev/null --max-time 20 "https://$host/" 2>&1 && echo "Certyfikat HTTPS: ważny" || echo "Certyfikat HTTPS: brak lub nieważny"
+          ssh deploy "APP_URL='$APP_URL' DOCROOT='$DOCROOT' bash -s" < scripts/deploy-verify.sh || true
 
   rollback:
     name: Powrót do poprzedniego wydania
@@ -234,5 +240,5 @@ jobs:
         run: bash scripts/deploy-ssh-setup.sh
       - name: Przywrócenie
         run: ssh deploy bash -s -- rollback "$DEPLOY_BASE" "$DOCROOT" < scripts/deploy-remote.sh
-      - name: Weryfikacja
-        run: PREVIOUS=rollback bash scripts/deploy-verify.sh
+      - name: Weryfikacja (z serwera)
+        run: ssh deploy "APP_URL='$APP_URL' DOCROOT='$DOCROOT' bash -s" < scripts/deploy-verify.sh

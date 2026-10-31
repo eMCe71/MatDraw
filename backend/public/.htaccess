@@ -1,6 +1,7 @@
 Options -Indexes
 DirectoryIndex index.html
 # One canonical address, https without www: the session cookie is Secure and the API checks the Origin against app_url.
+# On AfterMarket hosting these rules also matter: without its own RewriteEngine the account-level ~/.htaccess answers 429.
 <IfModule mod_rewrite.c>
  RewriteEngine On
  RewriteCond %{REQUEST_URI} !^/\.well-known/
