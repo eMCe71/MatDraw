@@ -1,0 +1,775 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MatBravo · makieta: strona główna z czatem</title>
+<!-- Static mockup for docs/plan/research/05-ux-design.md. Self-contained: inline CSS, no scripts, no external requests.
+     Brand files are referenced from the repository (dist/brand, dist/fonts), so open this file from inside the repo. -->
+<style>
+@font-face{font-family:Manrope;font-style:normal;font-weight:400 800;font-display:swap;src:url(../../../dist/fonts/manrope-latin.woff2) format("woff2")}
+:root{--navy:#102447;--navy-2:#13294d;--navy-card:#183460;--navy-line:#27466f;--primary:#00448a;--primary-h:#00366f;--blue:#0072bc;--cyan:#00aeef;--cyan-2:#4ac1ed;--ink:#19324f;--muted:#617188;--line:#dfe7f0;--line-2:#e9eef5;--bg:#f5f8fc;--ice:#eff8ff;--soft:#eaf5fc;--amber:#8a5a12;--amber-bg:#fff6e5;--red:#b3424a;--red-bg:#fdeeee;--ok:#0b7a53}
+*{box-sizing:border-box;margin:0;padding:0}
+html{background:#e7edf4}
+body{font-family:Manrope,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:var(--ink);font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased;font-synthesis:none}
+button{font:inherit;color:inherit;border:0;background:none;cursor:pointer}
+svg.i{width:18px;height:18px;flex-shrink:0;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+
+/* ---------- Mockup chrome (not product UI) ---------- */
+.mock-page{max-width:1440px;margin:0 auto;padding:44px 40px 80px}
+.mock-intro{display:flex;align-items:flex-end;justify-content:space-between;gap:40px;margin-bottom:34px}
+.mock-intro h1{font-size:30px;letter-spacing:-.8px;line-height:1.15;color:var(--navy)}
+.mock-intro p{color:var(--muted);max-width:720px;margin-top:8px;font-size:14px}
+.mock-kicker{font-size:10px;letter-spacing:2px;font-weight:700;color:var(--blue);text-transform:uppercase}
+.mock-legend{display:flex;gap:10px;flex-wrap:wrap;justify-content:flex-end}
+.mock-legend span{font-size:11px;font-weight:600;background:#fff;border:1px solid var(--line);border-radius:999px;padding:6px 12px;color:#456481}
+.mock-section{margin-top:54px}
+.mock-section>h2{font-size:19px;letter-spacing:-.3px;color:var(--navy);display:flex;align-items:center;gap:12px}
+.mock-section>h2 em{font-style:normal;font-size:11px;font-weight:700;letter-spacing:1px;color:#fff;background:var(--primary);border-radius:6px;padding:3px 8px}
+.mock-section>p{color:var(--muted);font-size:13px;margin:6px 0 18px;max-width:900px}
+.browser{border-radius:14px;overflow:hidden;background:#fff;box-shadow:0 30px 80px #0b1d3a33,0 0 0 1px #0b1d3a14}
+.browser-bar{height:40px;background:#e9eef4;display:flex;align-items:center;gap:14px;padding:0 16px;border-bottom:1px solid #d6dfe9}
+.browser-dots{display:flex;gap:7px}.browser-dots i{width:11px;height:11px;border-radius:50%;background:#c9d3de}
+.browser-url{flex:1;max-width:520px;margin:0 auto;height:26px;border-radius:7px;background:#fff;display:flex;align-items:center;gap:8px;padding:0 12px;font-size:12px;color:#55708f}
+.browser-url svg{width:13px;height:13px;color:#7d93ad}
+.note{display:flex;gap:10px;align-items:flex-start;font-size:12px;color:#456481;background:#fff;border:1px solid var(--line);border-radius:10px;padding:10px 12px}
+.note b{color:var(--navy)}
+.note-num{flex-shrink:0;width:20px;height:20px;border-radius:50%;background:var(--cyan);color:#06243f;font-size:11px;font-weight:800;display:grid;place-items:center}
+.notes{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-top:16px}
+
+/* ---------- Shared product primitives (mirror dist/styles.css) ---------- */
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;border-radius:7px;font-size:13px;font-weight:650;padding:11px 16px;min-height:42px;border:1px solid transparent;white-space:nowrap}
+.btn svg.i{width:16px;height:16px}
+.btn.primary{background:var(--primary);color:#fff}
+.btn.cyan{background:var(--cyan);color:#06243f}
+.btn.secondary{background:#fff;border-color:#cfdceb;color:#24476b}
+.btn.ghost-dark{background:#ffffff10;border-color:#ffffff33;color:#fff}
+.btn.wide{width:100%}
+.btn.small{min-height:32px;padding:6px 11px;font-size:12px}
+.eyebrow{font-size:10px;letter-spacing:1.8px;font-weight:700;color:#6e839f;text-transform:uppercase}
+.badge{display:inline-flex;align-items:center;gap:4px;font-size:10px;font-weight:650;line-height:1.3;padding:2px 7px;border-radius:5px;white-space:nowrap}
+.badge.teal{color:#00679d;background:#e8f6fc}
+.badge.amber{color:var(--amber);background:var(--amber-bg)}
+.badge.navy{color:#fff;background:var(--primary)}
+.badge.neutral{color:#4d6480;background:#edf2f7}
+.lang{display:inline-flex;padding:3px;border-radius:9px;border:1px solid #d6e1ec;background:#f2f6fa;gap:2px}
+.lang b{font-size:11px;font-weight:700;padding:5px 9px;border-radius:6px;color:#6a7f99}
+.lang b.on{background:#fff;color:var(--primary);box-shadow:0 1px 2px #0b1d3a1a}
+.lang.dark{background:#1a355d;border-color:#36557c}.lang.dark b{color:#b7cbe3}.lang.dark b.on{background:#fff;color:var(--primary)}
+.field{display:block;font-size:12px;color:#456481;margin-top:16px}
+.field span{display:block;margin-bottom:7px}
+.input{height:44px;border:1px solid #d3deea;border-radius:7px;background:#fff;display:flex;align-items:center;padding:0 13px;color:#9aabbf;font-size:14px}
+
+/* Channel icons: inline SVG, never flag emoji (Windows renders those as letters) */
+.ch-ico{width:22px;height:22px;border-radius:50%;display:grid;place-items:center;flex-shrink:0;background:#e8f2fb;color:var(--primary)}
+.ch-ico svg.i{width:15px;height:15px}
+.flag{display:inline-block;width:16px;height:12px;border-radius:2px;overflow:hidden;box-shadow:0 0 0 1px #0b1d3a26;flex-shrink:0;vertical-align:-1px}
+.flag svg{display:block;width:100%;height:100%}
+.ch-ico .flag{width:15px;height:11px}
+
+/* ---------- Chat components (chat-*) ---------- */
+.chat-card{background:#fff;border-radius:16px;box-shadow:0 30px 70px #040d1d59,0 0 0 1px #ffffff14;display:flex;flex-direction:column;overflow:hidden;min-height:0}
+.chat-head{display:flex;align-items:center;gap:12px;padding:16px 18px 14px}
+.chat-head-ico{width:38px;height:38px;border-radius:11px;background:linear-gradient(135deg,#00448a,#0072bc);color:#fff;display:grid;place-items:center;flex-shrink:0}
+.chat-head-ico svg.i{width:20px;height:20px}
+.chat-head h2,.chat-head h3{font-size:16px;letter-spacing:-.3px;line-height:1.25;color:var(--navy)}
+.chat-head p{font-size:11.5px;color:var(--muted)}
+.chat-head .grow{flex:1;min-width:0}
+.chat-live{display:inline-flex;align-items:center;gap:7px;font-size:11px;font-weight:700;color:#0a6d8f;background:#e6f7fd;border-radius:999px;padding:4px 10px 4px 8px}
+.chat-live i{width:8px;height:8px;border-radius:50%;background:var(--cyan);box-shadow:0 0 0 3px #00aeef33}
+.chat-icon-btn{width:34px;height:34px;border-radius:8px;display:grid;place-items:center;color:#4f6987;border:1px solid var(--line)}
+.chat-icon-btn svg.i{width:16px;height:16px}
+.chat-tabs{display:flex;gap:6px;padding:0 14px 12px;border-bottom:1px solid var(--line-2);overflow:hidden}
+.chat-tab{display:flex;align-items:center;gap:8px;padding:7px 11px 7px 8px;border-radius:10px;border:1px solid var(--line);background:#fff;text-align:left;min-width:0;flex:1}
+.chat-tab b{display:block;font-size:12.5px;font-weight:700;color:var(--ink);line-height:1.2}
+.chat-tab small{display:block;font-size:10.5px;color:var(--muted);line-height:1.2}
+.chat-tab[aria-selected=true]{background:var(--primary);border-color:var(--primary)}
+.chat-tab[aria-selected=true] b{color:#fff}.chat-tab[aria-selected=true] small{color:#bcd6f0}
+.chat-tab[aria-selected=true] .ch-ico{background:#ffffff1f;color:#fff}
+.chat-tab{position:relative}.chat-tab .dot{position:absolute;left:24px;top:6px;width:9px;height:9px;border-radius:50%;background:var(--cyan);box-shadow:0 0 0 2px #fff}
+.chat-log{flex:1;min-height:0;overflow:hidden;padding:6px 18px 10px;background:linear-gradient(#fff,#fbfdff);position:relative}
+.chat-day{display:flex;align-items:center;gap:12px;margin:12px 0 6px;font-size:10.5px;font-weight:700;color:#5b6f89;letter-spacing:.6px;text-transform:uppercase}
+.chat-day:before,.chat-day:after{content:'';flex:1;height:1px;background:var(--line-2)}
+.chat-new-div{display:flex;align-items:center;gap:10px;margin:10px 0 4px;font-size:10.5px;font-weight:800;color:#c2410c;letter-spacing:.6px;text-transform:uppercase}
+.chat-new-div:after{content:'';flex:1;height:1px;background:#f3b58f}
+.chat-msg{display:grid;grid-template-columns:36px minmax(0,1fr);column-gap:11px;padding:7px 8px;margin:0 -8px;border-radius:10px;position:relative}
+.chat-msg.cont{padding-top:1px}
+.chat-msg.cont .chat-ava,.chat-msg.cont .chat-meta{display:none}
+.chat-msg.cont .chat-text{grid-column:2}
+.chat-msg.own{background:#f0f8fe;box-shadow:inset 3px 0 0 var(--cyan)}
+.chat-msg.hover{background:#f5f8fc}
+.chat-ava{grid-row:span 2;width:36px;height:36px;border-radius:50%;display:grid;place-items:center;font-size:12px;font-weight:700;background:#eaf3fb;color:#36658c;overflow:hidden;position:relative}
+.chat-ava.photo{color:transparent}
+.chat-ava.photo svg{position:absolute;inset:0;width:100%;height:100%}
+.chat-meta{display:flex;align-items:center;gap:7px;min-width:0;line-height:1.3;margin-bottom:2px}
+.chat-name{font-size:13px;font-weight:750;color:var(--navy);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.chat-sport{font-size:9.5px;font-weight:700;color:#00679d;background:#e8f6fc;border-radius:4px;padding:1px 6px;white-space:nowrap}
+.chat-sport.karate{color:#6b4aa0;background:#f2edfb}
+.chat-mod{font-size:9.5px;font-weight:700;color:#fff;background:var(--primary);border-radius:4px;padding:1px 6px}
+.chat-you{font-size:9.5px;font-weight:700;color:#0a6d8f;background:#dff3fc;border-radius:4px;padding:1px 6px}
+.chat-meta time{font-size:11px;color:#5b6f89;white-space:nowrap}
+.chat-text{font-size:13.5px;line-height:1.55;color:#22405f;overflow-wrap:anywhere}
+.chat-text a{color:var(--blue);font-weight:600;text-decoration:underline;text-underline-offset:2px}
+.chat-text .ext{display:inline-flex;align-items:center;gap:3px}
+.chat-tomb{font-size:12.5px;font-style:italic;color:#5b6f89;display:flex;align-items:center;gap:6px}
+.chat-tomb svg.i{width:14px;height:14px}
+.chat-actions{position:absolute;right:8px;top:-12px;display:flex;background:#fff;border:1px solid var(--line);border-radius:9px;box-shadow:0 6px 18px #0b1d3a1f;padding:2px}
+.chat-actions button{width:30px;height:28px;border-radius:7px;display:grid;place-items:center;color:#4f6987}
+.chat-actions button:first-child{background:#eef4fa}
+.chat-actions svg.i{width:15px;height:15px}
+/* Guest projection: nothing identifying is sent; these are decorative placeholders */
+.ghost-ava{grid-row:span 2;width:36px;height:36px;border-radius:50%;position:relative;overflow:hidden;background:var(--g1,#cfe0f1)}
+.ghost-ava:before{content:'';position:absolute;width:26px;height:26px;border-radius:50%;left:-4px;top:12px;background:var(--g2,#9ec3e6);filter:blur(3px)}
+.ghost-ava:after{content:'';position:absolute;width:16px;height:16px;border-radius:5px;right:2px;top:3px;background:var(--g3,#e8f2fb);transform:rotate(24deg);filter:blur(2px)}
+.g1{--g1:#d3e5f6;--g2:#7fb6e3;--g3:#f2f8fd}.g2{--g1:#dceefa;--g2:#00aeef;--g3:#bfe6f8}.g3{--g1:#d9e2f0;--g2:#5b7fb4;--g3:#eef3fa}.g4{--g1:#e3ecf6;--g2:#9fb5d3;--g3:#ffffff}.g5{--g1:#d6ecf5;--g2:#3e9fcf;--g3:#e5f5fb}
+.ghost-name{display:inline-block;height:11px;border-radius:6px;background:linear-gradient(90deg,#c8d7e7,#dbe5f0 60%,#cdd9e7);filter:blur(1.6px);vertical-align:middle}
+.ghost-name.w1{width:74px}.ghost-name.w2{width:96px}.ghost-name.w3{width:118px}
+.ghost-chip{display:inline-block;width:30px;height:10px;border-radius:4px;background:#e4ecf4;filter:blur(1.2px)}
+.chat-gate{border-top:1px solid var(--line-2);padding:14px 18px 16px;background:linear-gradient(180deg,#f6fbff,#eef6fd)}
+.chat-gate-row{display:flex;align-items:center;gap:14px}
+.chat-gate-ico{width:40px;height:40px;border-radius:11px;background:#fff;border:1px solid #d6e6f4;color:var(--primary);display:grid;place-items:center;flex-shrink:0}
+.chat-gate-copy{flex:1;min-width:0}
+.chat-gate-copy strong{display:block;font-size:14px;color:var(--navy);letter-spacing:-.2px}
+.chat-gate-copy span{display:block;font-size:12px;color:#4f6987;line-height:1.45}
+.chat-gate-actions{display:flex;gap:8px;flex-shrink:0}
+.chat-gate-price{font-size:11px;color:#4f6987;margin-top:9px;padding-left:54px}
+.chat-gate-price b{color:var(--navy)}
+.chat-composer{border-top:1px solid var(--line-2);padding:12px 16px 12px;background:#fff}
+.chat-input{display:flex;align-items:flex-end;gap:10px;border:1.5px solid #8296b0;border-radius:12px;padding:8px 8px 8px 14px;background:#fff}
+.chat-input.focus{border-color:var(--blue);box-shadow:0 0 0 3px #0072bc22}
+.chat-input .ph{flex:1;font-size:13.5px;color:#627690;padding:6px 0;line-height:1.45}
+.chat-input .typed{flex:1;font-size:13.5px;color:var(--ink);padding:6px 0;line-height:1.45}
+.chat-send{width:38px;height:38px;border-radius:9px;background:var(--primary);color:#fff;display:grid;place-items:center;flex-shrink:0}
+.chat-send.off{background:#c8d6e5}
+.chat-send svg.i{width:17px;height:17px}
+.chat-hint{display:flex;justify-content:space-between;gap:10px;font-size:10.5px;color:#5b6f89;margin-top:7px;padding:0 2px}
+.chat-hint kbd{font:inherit;font-weight:700;color:#4f6987;background:#eef3f8;border:1px solid #dbe4ee;border-radius:4px;padding:0 4px}
+.chat-pill{position:absolute;left:50%;bottom:12px;transform:translateX(-50%);display:inline-flex;align-items:center;gap:7px;background:var(--primary);color:#fff;font-size:12px;font-weight:700;border-radius:999px;padding:8px 14px 8px 12px;box-shadow:0 10px 24px #00448a55}
+.chat-pill svg.i{width:15px;height:15px}
+.chat-banner{display:flex;align-items:center;gap:9px;font-size:12px;padding:9px 12px;border-radius:9px}
+.chat-banner svg.i{width:16px;height:16px}
+.chat-banner.offline{background:var(--amber-bg);color:var(--amber);border:1px solid #f1dcb4}
+.chat-banner.archive{background:#edf2f7;color:#40597a;border:1px solid #dce4ee}
+.chat-banner.muted{background:#f3f0fa;color:#5a4590;border:1px solid #e2daf3}
+
+/* ---------- Desktop home (chosen concept A: "Live centre") ---------- */
+.home{display:grid;grid-template-columns:388px minmax(0,1fr) 430px;height:880px;background:#fff}
+.home-story{background:var(--navy);color:#fff;padding:38px 30px 0 52px;display:flex;flex-direction:column;position:relative;overflow:hidden}
+.home-story .logo{height:28px;width:auto;display:block;align-self:flex-start}
+.home-eyebrow{color:#65c8ec;font-size:10px;letter-spacing:2px;font-weight:700;margin-top:44px}
+.home-story h1{font-size:44px;line-height:1.06;letter-spacing:-1.8px;font-weight:700;margin:14px 0 14px}
+.home-story>p{font-size:14px;line-height:1.75;color:#aec5e0;max-width:300px}
+.up-stage{position:relative;margin-top:auto;padding-top:150px;padding-bottom:34px}
+.up-mascot{position:absolute;top:0;right:22px;height:196px;width:auto;pointer-events:none}
+.up-glow{position:absolute;right:-6px;top:30px;width:200px;height:200px;border-radius:50%;background:radial-gradient(circle,#4ac1ed38 0%,#00aeef1a 45%,transparent 70%)}
+.motion-btn{position:absolute;right:0;top:110px;width:30px;height:30px;border-radius:50%;display:grid;place-items:center;background:#ffffff12;border:1px solid #ffffff2e;color:#b7cfe9}
+.motion-btn svg.i{width:13px;height:13px}
+.up-card{position:relative;background:linear-gradient(180deg,#183460,#13294d);border:1px solid #2b4c79;border-radius:14px;box-shadow:0 24px 60px #040d1d4d;overflow:hidden}
+.up-head{display:flex;align-items:center;gap:12px;padding:15px 16px 13px;border-bottom:1px solid var(--navy-line)}
+.up-ico{width:34px;height:34px;border-radius:9px;background:#00aeef1f;color:var(--cyan-2);display:grid;place-items:center}
+.up-head h2{font-size:15px;letter-spacing:-.3px}
+.up-head p{font-size:10.5px;color:#8fb0d3}
+.up-list{list-style:none;padding:5px 8px 8px}
+.up-item{display:flex;align-items:center;gap:12px;padding:9px 8px;border-radius:10px}
+.up-item.first{background:#ffffff0a}
+.up-date{width:44px;height:50px;flex-shrink:0;border-radius:10px;background:#0d1f3d;border:1px solid #2c4c78;display:flex;flex-direction:column;align-items:center;justify-content:center;line-height:1}
+.up-date small{font-size:8.5px;font-weight:700;letter-spacing:1.3px;color:#65c8ec}
+.up-date strong{font-size:19px;margin-top:4px}
+.up-item.first .up-date{background:var(--cyan);border-color:var(--cyan);box-shadow:0 6px 18px #00aeef40}
+.up-item.first .up-date small{color:#0b2a50}.up-item.first .up-date strong{color:#0b1d3a}
+.up-text{flex:1;min-width:0}
+.up-next{display:block;font-size:9px;font-weight:700;letter-spacing:1.3px;color:var(--cyan-2);margin-bottom:2px}
+.up-name{display:block;font-size:13px;font-weight:700}
+.up-meta{display:flex;gap:10px;font-size:10.5px;color:#9db8d6;margin-top:2px;align-items:center}
+.up-meta svg.i{width:12px;height:12px;color:var(--cyan-2)}
+.up-chat{display:inline-flex;align-items:center;gap:4px;color:#cfe3f6;font-weight:700}
+.up-arrow{color:#6f8fb3}
+.home-centre{background:radial-gradient(120% 70% at 30% 0%,#173360 0%,var(--navy) 60%);padding:30px 22px 30px 4px;display:flex;min-width:0}
+.home-centre .chat-card{flex:1}
+.home-auth{background:#fff;padding:26px 48px 18px;display:flex;flex-direction:column;position:relative}
+.home-auth .lang{position:absolute;right:28px;top:24px}
+.auth-content{margin:auto 0;padding-top:28px}
+.auth-content h2{font-size:28px;letter-spacing:-.8px;color:var(--navy);margin:8px 0 6px}
+.auth-content>p{font-size:12.5px;color:var(--muted)}
+.auth-submit{margin-top:20px}
+.auth-submit svg.i{margin-left:auto}
+.auth-help{font-size:11px;color:var(--muted);margin-top:12px;line-height:1.6}
+.auth-help a{color:var(--blue);font-weight:650}
+.acct-join{margin-top:24px;border:1px solid #d6e6f4;border-radius:14px;padding:16px 16px 14px;background:linear-gradient(160deg,#f4faff,#fff 60%)}
+.acct-join-top{display:flex;justify-content:space-between;align-items:flex-start;gap:10px}
+.acct-join strong{display:block;font-size:15px;color:var(--navy);letter-spacing:-.2px;margin-top:3px}
+.acct-price{text-align:right;line-height:1.1}
+.acct-price b{display:block;font-size:20px;color:var(--navy);letter-spacing:-.5px}
+.acct-price span{font-size:10.5px;color:var(--muted)}
+.acct-join ul{list-style:none;margin:12px 0 14px;display:grid;gap:6px}
+.acct-join li{display:flex;gap:8px;align-items:center;font-size:12px;color:#2f4d6d}
+.acct-join li svg.i{width:15px;height:15px;color:var(--blue)}
+.acct-join .fine{font-size:10.5px;color:#5b6f89;margin-top:8px;text-align:center}
+.home-foot{display:flex;justify-content:center;align-items:center;gap:10px;font-size:11px;color:var(--muted);padding-top:12px}
+.home-foot img{height:30px;width:auto}
+
+/* ---------- Phone frames ---------- */
+.phones{display:grid;grid-template-columns:repeat(3,390px);justify-content:space-between;gap:30px}
+.phone-wrap figcaption{font-size:12.5px;font-weight:700;color:var(--navy);margin-top:14px}
+.phone-wrap figcaption span{display:block;font-weight:500;color:var(--muted);font-size:12px;margin-top:2px}
+.phone{width:390px;height:844px;border-radius:52px;background:#0b1426;padding:11px;box-shadow:0 30px 70px #0b1d3a40}
+.screen{width:100%;height:100%;border-radius:42px;overflow:hidden;position:relative;background:#fff;display:flex;flex-direction:column}
+.status{height:46px;flex-shrink:0;display:flex;align-items:center;justify-content:space-between;padding:6px 30px 0 34px;font-size:14px;font-weight:700}
+.status .island{width:118px;height:32px;border-radius:20px;background:#000}
+.status .sys{display:flex;gap:5px;align-items:center}
+.status .sys i{display:block;width:17px;height:10px;border-radius:3px;border:1.5px solid currentColor;opacity:.9}
+.status .sys s{display:block;width:16px;height:10px;background:currentColor;clip-path:polygon(0 100%,25% 100%,25% 70%,50% 70%,50% 40%,75% 40%,75% 10%,100% 10%,100% 100%);opacity:.9}
+.status.dark{background:var(--navy);color:#fff}
+.homebar{position:absolute;bottom:8px;left:50%;transform:translateX(-50%);width:134px;height:5px;border-radius:3px;background:#0b1426}
+.homebar.light{background:#fff}
+/* phone 1: guest home */
+.p-top{background:var(--navy);display:flex;align-items:center;gap:10px;padding:8px 16px 12px}
+.p-top .logo{height:22px;width:auto}
+.p-top .lang{margin-left:auto}
+.p-top .btn{min-height:34px;padding:6px 11px;font-size:12px}
+.p-hero{background:var(--navy);color:#fff;padding:10px 20px 74px}
+.p-hero .home-eyebrow{margin-top:4px;font-size:9px}
+.p-hero h1{font-size:30px;line-height:1.08;letter-spacing:-1.1px;margin:8px 0 8px}
+.p-hero p{font-size:12.5px;color:#aec5e0;line-height:1.6}
+.p-chat{margin:-60px 14px 0;position:relative;z-index:1}
+.p-chat .chat-card{box-shadow:0 18px 40px #0b1d3a33,0 0 0 1px #0b1d3a12}
+.p-chat .chat-head{padding:13px 14px 10px}
+.p-chat .chat-head h2{font-size:15px}
+.chips{display:flex;gap:6px;padding:0 14px 10px;overflow:hidden;border-bottom:1px solid var(--line-2);-webkit-mask-image:linear-gradient(90deg,#000 82%,transparent);mask-image:linear-gradient(90deg,#000 82%,transparent)}
+.chip{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);border-radius:999px;padding:5px 10px 5px 6px;font-size:12px;font-weight:700;color:var(--ink);white-space:nowrap;flex-shrink:0}
+.chip .ch-ico{width:20px;height:20px}
+.chip[aria-selected=true]{background:var(--primary);border-color:var(--primary);color:#fff}
+.chip[aria-selected=true] .ch-ico{background:#ffffff1f;color:#fff}
+.chip small{font-weight:600;color:var(--muted);font-size:11px}
+.chip[aria-selected=true] small{color:#bcd6f0}
+.p-chat .chat-log{padding:2px 14px 6px}
+.p-chat .chat-text{font-size:13px}
+.p-chat-foot{padding:10px 14px 14px;border-top:1px solid var(--line-2);background:#f8fbfe}
+.p-chat-foot p{font-size:11px;color:#4f6987;text-align:center;margin-top:8px}
+.p-chat-foot p b{color:var(--navy)}
+.p-login{padding:22px 22px 0}
+.p-login h2{font-size:24px;letter-spacing:-.6px;color:var(--navy);margin-top:6px}
+/* phone 2: member full-screen chat */
+.m-head{display:flex;align-items:center;gap:8px;padding:6px 10px 10px;border-bottom:1px solid var(--line-2);background:#fff}
+.m-back{width:38px;height:38px;border-radius:10px;display:grid;place-items:center;color:var(--primary)}
+.m-chan{display:flex;align-items:center;gap:8px;flex:1;min-width:0;padding:4px 8px;border-radius:10px}
+.m-chan b{display:block;font-size:15px;color:var(--navy);letter-spacing:-.2px;line-height:1.2}
+.m-chan small{display:flex;align-items:center;gap:5px;font-size:11px;color:var(--muted)}
+.m-chan small i{width:7px;height:7px;border-radius:50%;background:var(--cyan)}
+.m-chan svg.i.dd{width:14px;height:14px;color:#6a7f99}
+.m-log{flex:1;overflow:hidden;padding:4px 14px 54px;background:#fff;position:relative;display:flex;flex-direction:column;justify-content:flex-end}
+.m-log .chat-msg{grid-template-columns:34px minmax(0,1fr)}
+.m-log .chat-ava,.m-log .ghost-ava{width:34px;height:34px}
+.m-log .chat-text{font-size:13.5px}
+.m-comp{padding:10px 12px 30px;border-top:1px solid var(--line-2);background:#fff}
+/* phone 3: iOS install sheet */
+.ios-bg{flex:1;background:linear-gradient(#102447 0 300px,#f5f8fc 300px);position:relative;overflow:hidden}
+.ios-dim{position:absolute;inset:0;background:#06122680}
+.ios-ghost{position:absolute;left:14px;right:14px;top:250px;height:330px;border-radius:16px;background:#fff;box-shadow:0 18px 40px #0b1d3a33}
+.ios-sheet{position:absolute;left:0;right:0;bottom:0;background:#fff;border-radius:26px 26px 0 0;padding:10px 22px 40px;box-shadow:0 -10px 40px #0b1d3a40}
+.ios-grab{width:40px;height:5px;border-radius:3px;background:#d3dce6;margin:0 auto 14px}
+.ios-close{position:absolute;right:16px;top:16px;width:32px;height:32px;border-radius:50%;background:#eef3f8;display:grid;place-items:center;color:#4f6987}
+.ios-close svg.i{width:15px;height:15px}
+.ios-art{height:128px;border-radius:16px;background:linear-gradient(160deg,#dff1fc,#f4f9fe);position:relative;overflow:hidden;margin-bottom:16px}
+.ios-apps{position:absolute;left:22px;top:20px;display:grid;grid-template-columns:repeat(4,46px);gap:14px 16px}
+.ios-apps i{width:46px;height:46px;border-radius:12px;background:#ffffffcc;box-shadow:0 1px 2px #0b1d3a14}
+.ios-apps img{width:46px;height:46px;border-radius:12px;box-shadow:0 6px 16px #00448a4d}
+.ios-apps .lbl{grid-column:3;font-size:9px;font-weight:700;color:#24476b;text-align:center;margin-top:-10px}
+.ios-mascot{position:absolute;right:6px;bottom:-6px;height:130px}
+.ios-sheet h3{font-size:19px;letter-spacing:-.4px;color:var(--navy);line-height:1.25}
+.ios-sheet>p{font-size:12.5px;color:#4f6987;margin:6px 0 14px;line-height:1.55}
+.ios-steps{list-style:none;display:grid;gap:9px;margin-bottom:18px}
+.ios-steps li{display:flex;align-items:center;gap:12px;font-size:13px;color:#22405f}
+.ios-steps .n{width:24px;height:24px;border-radius:50%;background:var(--soft);color:var(--primary);font-size:12px;font-weight:800;display:grid;place-items:center;flex-shrink:0}
+.ios-key{display:inline-flex;align-items:center;gap:5px;font-weight:700;color:var(--navy);background:#f2f6fa;border:1px solid #dbe4ee;border-radius:7px;padding:2px 7px}
+.ios-key svg.i{width:15px;height:15px;color:var(--blue)}
+.ios-actions{display:flex;gap:10px}
+.ios-actions .btn{flex:1}
+
+/* ---------- Desktop shell: member chat page ---------- */
+.shell{display:grid;grid-template-columns:236px minmax(0,1fr);height:820px;background:var(--bg)}
+.side{background:var(--navy);color:#fff;padding:22px 16px 16px;display:flex;flex-direction:column}
+.side .logo{height:22px;width:auto;margin:6px 0 26px 12px;align-self:flex-start}
+.nav{display:flex;align-items:center;gap:11px;padding:10px 12px;border-radius:8px;font-size:13px;color:#d2e1f2;margin-bottom:3px}
+.nav svg.i{width:17px;height:17px;color:#9fbbdb}
+.nav.on{background:#eaf5fc;color:var(--primary);font-weight:700}
+.nav.on svg.i{color:var(--primary)}
+.nav .cnt{margin-left:auto;font-size:11px;font-weight:700;background:#bee9fa;color:#00448a;padding:1px 6px;border-radius:4px}
+.nav .unread{margin-left:auto;font-size:10.5px;font-weight:800;background:var(--cyan);color:#06243f;padding:1px 7px;border-radius:999px}
+.nav.on .unread{background:var(--primary);color:#fff}
+.side-div{height:1px;background:#ffffff1a;margin:14px 4px}
+.side-lbl{font-size:9.5px;letter-spacing:1.8px;font-weight:700;color:#8daacb;padding:0 12px 8px}
+.side-sel{border:1px solid #36557c;background:#1a355d;border-radius:8px;padding:10px 12px;font-size:12px;display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+.side-bottom{margin-top:auto}
+.side-prof{display:flex;align-items:center;gap:10px;padding:10px 6px;border-top:1px solid #ffffff1a}
+.side-prof .chat-ava{width:36px;height:36px}
+.side-prof b{display:block;font-size:12.5px}
+.side-prof small{display:block;font-size:11px;color:#9fbbdb}
+.main{display:flex;flex-direction:column;min-width:0}
+.topbar{height:62px;flex-shrink:0;background:#fff;border-bottom:1px solid var(--line);display:flex;align-items:center;padding:0 28px;gap:10px;font-size:12px;color:#4f6987}
+.topbar .cur{color:var(--navy);font-weight:650}
+.topbar .rt{margin-left:auto;display:flex;align-items:center;gap:14px}
+.topbar svg.i{width:13px;height:13px}
+.chat-page{flex:1;min-height:0;display:grid;grid-template-columns:282px minmax(0,1fr);gap:18px;padding:20px 24px 22px}
+.rail{background:#fff;border:1px solid var(--line);border-radius:14px;display:flex;flex-direction:column;overflow:hidden}
+.rail-sec{padding:14px 12px 4px}
+.rail-sec h3{font-size:10px;letter-spacing:1.6px;font-weight:700;color:#5b6f89;padding:0 6px 8px}
+.rail-item{display:flex;align-items:center;gap:10px;padding:8px 8px;border-radius:9px;margin-bottom:2px}
+.rail-item.on{background:var(--soft)}
+.rail-item .grow{flex:1;min-width:0}
+.rail-item b{display:block;font-size:13px;color:var(--ink);line-height:1.25}
+.rail-item small{display:block;font-size:11px;color:var(--muted);line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rail-item.on b{color:var(--primary)}
+.rail-item .ub{font-size:10.5px;font-weight:800;background:var(--primary);color:#fff;border-radius:999px;padding:1px 7px}
+.rail-item .mdot{width:7px;height:7px;border-radius:50%;background:#9fb5cf}
+.rail-t{width:30px;height:32px;border-radius:7px;background:#0d1f3d;color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;line-height:1;flex-shrink:0}
+.rail-t small{font-size:7.5px;font-weight:700;letter-spacing:1px;color:#65c8ec}
+.rail-t strong{font-size:13px;margin-top:2px}
+.rail-t.next{background:var(--cyan)}.rail-t.next small{color:#0b2a50}.rail-t.next strong{color:#0b1d3a}
+.rail-arch{display:flex;align-items:center;gap:8px;font-size:12px;color:#4f6987;padding:8px 8px;font-weight:650}
+.rail-arch svg.i{width:14px;height:14px}
+.pwa-card{margin:auto 12px 12px;border-radius:12px;background:linear-gradient(150deg,#00448a,#0072bc 70%,#0a8fd0);color:#fff;padding:14px 14px 12px;position:relative;overflow:hidden}
+.pwa-card:after{content:'';position:absolute;right:-30px;top:-30px;width:120px;height:120px;border-radius:50%;background:#ffffff14}
+.pwa-card-top{display:flex;gap:11px;align-items:center}
+.pwa-card img{width:40px;height:40px;border-radius:10px;box-shadow:0 4px 12px #0003}
+.pwa-card b{display:block;font-size:13.5px;letter-spacing:-.2px}
+.pwa-card p{font-size:11.5px;color:#d3e6f8;line-height:1.45;margin:9px 0 11px}
+.pwa-card .acts{display:flex;gap:8px;position:relative;z-index:1}
+.pwa-card .btn{min-height:32px;padding:6px 12px;font-size:12px}
+.pwa-card .btn.light{background:#fff;color:var(--primary)}
+.pwa-card .btn.text{color:#d3e6f8;background:transparent;border-color:transparent}
+.conv{background:#fff;border:1px solid var(--line);border-radius:14px;display:flex;flex-direction:column;min-width:0;position:relative;overflow:hidden}
+.conv .chat-head{border-bottom:1px solid var(--line-2);padding:14px 18px}
+.conv .chat-head .ch-ico{width:38px;height:38px;border-radius:11px}
+.conv .chat-head .ch-ico .flag{width:20px;height:14px}
+.conv .chat-log{padding:4px 22px 12px;display:flex;flex-direction:column;justify-content:flex-end}
+.conv-rules{color:var(--blue);font-weight:650}
+.popover{position:absolute;left:40px;top:30px;width:300px;background:#fff;border-radius:14px;box-shadow:0 22px 60px #0b1d3a3d,0 0 0 1px #0b1d3a14;padding:16px;z-index:5}
+.popover:before{content:'';position:absolute;left:22px;top:-7px;width:14px;height:14px;background:#fff;transform:rotate(45deg);box-shadow:-1px -1px 0 #0b1d3a14}
+.pop-top{display:flex;gap:12px;align-items:center}
+.pop-top .chat-ava{width:56px;height:56px;font-size:18px}
+.pop-top b{display:block;font-size:15px;color:var(--navy);letter-spacing:-.2px}
+.pop-top small{display:block;font-size:12px;color:var(--muted)}
+.pop-rows{display:grid;gap:7px;margin:13px 0 13px;font-size:12px;color:#2f4d6d}
+.pop-rows div{display:flex;align-items:center;gap:8px}
+.pop-rows svg.i{width:15px;height:15px;color:#6a86a6}
+.pop-acts{display:flex;gap:8px;border-top:1px solid var(--line-2);padding-top:12px}
+.pop-acts .btn{min-height:32px;font-size:12px;padding:6px 10px}
+
+/* ---------- State gallery ---------- */
+.gallery{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px}
+.g-card{background:#fff;border-radius:14px;border:1px solid var(--line);padding:16px;box-shadow:0 1px 2px #0b1d3a08}
+.g-card h4{font-size:11px;letter-spacing:1.2px;text-transform:uppercase;color:#6e839f;margin-bottom:12px;font-weight:700}
+.g-card .chat-msg{margin:0}
+.fail{display:flex;align-items:center;gap:8px;font-size:11.5px;color:var(--red);margin-top:4px;font-weight:650}
+.fail svg.i{width:14px;height:14px}
+.fail button{font-size:11.5px;font-weight:700;color:var(--primary);text-decoration:underline}
+.sending{display:flex;align-items:center;gap:6px;font-size:11px;color:#5b6f89;margin-top:3px}
+.sending svg.i{width:12px;height:12px}
+.counter{font-weight:800;color:var(--amber)}
+.rate{display:flex;align-items:center;gap:8px;font-size:12px;color:#40597a;background:#eef4fa;border-radius:8px;padding:8px 10px;margin-bottom:8px}
+.rate svg.i{width:15px;height:15px;color:var(--blue)}
+.cd{min-width:38px;height:38px;border-radius:9px;background:#c8d6e5;color:#fff;display:grid;place-items:center;font-size:12px;font-weight:800}
+.toast{display:flex;align-items:center;gap:12px;background:var(--navy);color:#fff;border-radius:12px;padding:12px 12px 12px 14px;box-shadow:0 14px 34px #0b1d3a40}
+.toast svg.i{color:var(--cyan-2)}
+.toast span{flex:1;font-size:12.5px}
+.toast .btn{min-height:32px;padding:5px 12px;font-size:12px;background:#fff;color:var(--primary)}
+.empty{text-align:center;padding:6px 6px 2px}
+.empty img{width:76px;height:76px;border-radius:50%;background:var(--ice);box-shadow:0 0 0 5px #f4f9fe,0 0 0 6px #d8e8f6;margin:4px auto 14px;display:block}
+.empty b{display:block;font-size:14px;color:var(--navy)}
+.empty p{font-size:12px;color:var(--muted);margin-top:4px}
+.seg{display:inline-flex;padding:3px;border-radius:10px;background:#eef3f8;border:1px solid #dbe4ee;gap:3px}
+.seg b{font-size:12px;padding:7px 12px;border-radius:7px;color:#4f6987}
+.seg b.on{background:#fff;color:var(--primary);box-shadow:0 1px 3px #0b1d3a1f}
+.plan{display:flex;align-items:flex-end;gap:6px;margin:12px 0 4px}
+.plan b{font-size:30px;letter-spacing:-1px;color:var(--navy);line-height:1}
+.plan span{font-size:12px;color:var(--muted);padding-bottom:3px}
+.icons-demo{display:flex;flex-wrap:wrap;gap:8px}
+.icons-demo .chip{background:#fff}
+.ux-foot{margin-top:46px;font-size:12px;color:var(--muted);text-align:center}
+/* Viewing the mockup on a smaller screen: frames keep their real size and scroll sideways */
+@media(max-width:1439px){.browser{overflow-x:auto}.home,.shell{min-width:1280px}.phones{grid-template-columns:repeat(auto-fit,390px);justify-content:center}.notes{grid-template-columns:repeat(2,minmax(0,1fr))}.gallery{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:820px){.mock-page{padding:24px 12px 60px}.mock-intro{display:block}.mock-legend{justify-content:flex-start;margin-top:14px}.notes,.gallery{grid-template-columns:1fr}.phone{transform-origin:top left}}
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+ <defs>
+  <symbol id="i-chat" viewBox="0 0 24 24"><path d="M5 4h14a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2h-8l-5 4v-4H5a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2Z"/><path d="M8 9h8M8 12.5h5"/></symbol>
+  <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.6 2.6 3.8 5.6 3.8 9s-1.2 6.4-3.8 9M12 3C9.4 5.6 8.2 8.6 8.2 12s1.2 6.4 3.8 9"/></symbol>
+  <symbol id="i-send" viewBox="0 0 24 24"><path d="M4.5 11.2 20 4l-6.6 16-2.3-6.7-6.6-2.1Z"/><path d="m11.1 13.3 4.2-4.3"/></symbol>
+  <symbol id="i-flag" viewBox="0 0 24 24"><path d="M5 21V4M5 4h12l-2.5 4.5L17 13H5"/></symbol>
+  <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5.5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="18.5" cy="12" r="1.2"/></symbol>
+  <symbol id="i-expand" viewBox="0 0 24 24"><path d="M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7"/></symbol>
+  <symbol id="i-down" viewBox="0 0 24 24"><path d="M12 5v13M6.5 12.5 12 18l5.5-5.5"/></symbol>
+  <symbol id="i-dd" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect x="4" y="10" width="16" height="11" rx="2.5"/><path d="M8 10V7a4 4 0 0 1 8 0v3M12 14.5v2.5"/></symbol>
+  <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M4 12h16m-6-6 6 6-6 6"/></symbol>
+  <symbol id="i-left" viewBox="0 0 24 24"><path d="m15 5-7 7 7 7"/></symbol>
+  <symbol id="i-right" viewBox="0 0 24 24"><path d="m9 5 7 7-7 7"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+  <symbol id="i-cal" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2.5"/><path d="M3 10h18M8 3v4M16 3v4"/><path d="M7.5 14h.01M12 14h.01M16.5 14h.01M7.5 17.5h.01M12 17.5h.01"/></symbol>
+  <symbol id="i-pin" viewBox="0 0 24 24"><path d="M12 21s-7-6.2-7-11.5a7 7 0 0 1 14 0C19 14.8 12 21 12 21Z"/><circle cx="12" cy="9.5" r="2.5"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 24 24"><path d="M9 6v12M15 6v12"/></symbol>
+  <symbol id="i-trophy" viewBox="0 0 24 24"><path d="M7 3h10v6a5 5 0 0 1-10 0V3ZM7 5H3v3a4 4 0 0 0 4 4m10-7h4v3a4 4 0 0 1-4 4M12 14v5M8 21h8M10 19h4"/></symbol>
+  <symbol id="i-users" viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3 21v-3a6 6 0 0 1 12 0v3M16 5a3 3 0 0 1 0 6M19 21v-3a6 6 0 0 0-3-5"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6l8-3Z"/><path d="m8 12 3 3 5-5"/></symbol>
+  <symbol id="i-settings" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="m10 3-1 3-3 1-3-1-1 4 2 2-1 3 3 3 3-1 2 2 4-1 1-3 3-1 1-4-2-2 1-3-3-2-3 1-2-2Z"/></symbol>
+  <symbol id="i-bell" viewBox="0 0 24 24"><path d="M6 9a6 6 0 0 1 12 0c0 6 2.5 8 2.5 8h-17S6 15 6 9Z"/><path d="M10.3 20.5a2 2 0 0 0 3.4 0"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3"/></symbol>
+  <symbol id="i-ext" viewBox="0 0 24 24"><path d="M14 4h6v6M20 4l-9 9M18 14v6H4V6h6"/></symbol>
+  <symbol id="i-share" viewBox="0 0 24 24"><path d="M12 15V3M8 7l4-4 4 4"/><path d="M7 10H5v11h14V10h-2"/></symbol>
+  <symbol id="i-plussq" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="3.5"/><path d="M12 8v8M8 12h8"/></symbol>
+  <symbol id="i-dl" viewBox="0 0 24 24"><path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5"/></symbol>
+  <symbol id="i-wifi" viewBox="0 0 24 24"><path d="M3 3l18 18M8.5 16.4a5 5 0 0 1 7 0M5 12.9a10 10 0 0 1 4.3-2.5M19 12.9a10 10 0 0 0-2.1-1.6M2 9.3a15 15 0 0 1 4.5-2.8M22 9.3A15 15 0 0 0 12 5c-.9 0-1.8.1-2.6.2M12 20h.01"/></symbol>
+  <symbol id="i-archive" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="5" rx="1.5"/><path d="M5 9v10a1.5 1.5 0 0 0 1.5 1.5h11A1.5 1.5 0 0 0 19 19V9M10 13h4"/></symbol>
+  <symbol id="i-pause-c" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M10 9v6M14 9v6"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+  <symbol id="i-alert" viewBox="0 0 24 24"><path d="m12 3 10 18H2L12 3Z"/><path d="M12 9v5M12 17h.01"/></symbol>
+  <symbol id="i-sparkle" viewBox="0 0 24 24"><path d="M12 3c.6 4.3 1.7 5.4 6 6-4.3.6-5.4 1.7-6 6-.6-4.3-1.7-5.4-6-6 4.3-.6 5.4-1.7 6-6Z"/></symbol>
+  <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 7v5h-5M4 17v-5h5M6 6a8 8 0 0 1 13 2M18 18A8 8 0 0 1 5 16"/></symbol>
+  <symbol id="i-person" viewBox="0 0 40 40"><rect width="40" height="40" fill="var(--pa,#cfe3f5)"/><circle cx="20" cy="16" r="7.5" fill="var(--pb,#5f8fbf)"/><path d="M6 40c1.5-8.5 7-13 14-13s12.5 4.5 14 13Z" fill="var(--pb,#5f8fbf)"/></symbol>
+  <symbol id="f-pl" viewBox="0 0 16 12"><rect width="16" height="6" fill="#fff"/><rect y="6" width="16" height="6" fill="#dc143c"/></symbol>
+  <symbol id="f-de" viewBox="0 0 15 12"><rect width="15" height="4" fill="#000"/><rect y="4" width="15" height="4" fill="#dd0000"/><rect y="8" width="15" height="4" fill="#ffce00"/></symbol>
+  <symbol id="f-ua" viewBox="0 0 16 12"><rect width="16" height="6" fill="#0057b7"/><rect y="6" width="16" height="6" fill="#ffd700"/></symbol>
+  <symbol id="f-nl" viewBox="0 0 15 12"><rect width="15" height="4" fill="#ae1c28"/><rect y="4" width="15" height="4" fill="#fff"/><rect y="8" width="15" height="4" fill="#21468b"/></symbol>
+  <symbol id="f-it" viewBox="0 0 15 12"><rect width="5" height="12" fill="#009246"/><rect x="5" width="5" height="12" fill="#fff"/><rect x="10" width="5" height="12" fill="#ce2b37"/></symbol>
+  <symbol id="f-lt" viewBox="0 0 15 12"><rect width="15" height="4" fill="#fdb913"/><rect y="4" width="15" height="4" fill="#006a44"/><rect y="8" width="15" height="4" fill="#c1272d"/></symbol>
+ </defs>
+</svg>
+
+<div class="mock-page">
+ <header class="mock-intro">
+  <div>
+   <span class="mock-kicker">MatBravo · makieta UX · v1 · 31.10.2026</span>
+   <h1>Strona główna z czatem na żywo</h1>
+   <p>Wybrana koncepcja A „Czat w centrum”: na komputerze czat jest środkową kolumną strony głównej, obok terminarza i logowania. Na telefonie — karta podglądu prowadząca do pełnoekranowego czatu. Goście czytają wszystko, ale nie widzą, kto pisze. Specyfikacja: <b>docs/plan/research/05-ux-design.md</b>.</p>
+  </div>
+  <div class="mock-legend"><span>Gość: tożsamość ukryta</span><span>Członek: pełny czat</span><span>PWA: zachęta do instalacji</span></div>
+ </header>
+
+ <!-- ============ 1. Desktop home, guest ============ -->
+ <section class="mock-section">
+  <h2><em>1</em> Strona główna · gość · komputer ≥ 1200 px</h2>
+  <p>Trzy kolumny: marka i terminarz (z machającym Matbravo) · czat na żywo · logowanie i nowe konto. Powracający reprezentanci klubów logują się dokładnie tam, gdzie dziś.</p>
+  <div class="browser">
+   <div class="browser-bar"><div class="browser-dots"><i></i><i></i><i></i></div><div class="browser-url"><svg class="i"><use href="#i-lock"/></svg>matbravo.com</div></div>
+   <main class="home">
+    <!-- Column 1: story + upcoming tournaments -->
+    <section class="home-story">
+     <img class="logo" src="../../../dist/brand/matbravo-logo-white.svg" alt="MatBravo" width="525" height="74">
+     <span class="home-eyebrow">TWÓJ TURNIEJ. TWOJA EKIPA.</span>
+     <h1>Od zgłoszenia<br>do finału.</h1>
+     <p>Turnieje, drabinki i rozmowy środowiska sztuk walki — w jednym miejscu.</p>
+     <div class="up-stage">
+      <span class="up-glow"></span>
+      <img class="up-mascot" src="../../../dist/brand/matbravo-welcome.webp" alt="" aria-hidden="true" width="333" height="488">
+      <button class="motion-btn" aria-label="Zatrzymaj animację postaci"><svg class="i"><use href="#i-pause"/></svg></button>
+      <div class="up-card">
+       <div class="up-head"><span class="up-ico"><svg class="i"><use href="#i-cal"/></svg></span><div><h2>Najbliższe turnieje</h2><p>Terminarz otwarty dla wszystkich</p></div></div>
+       <ol class="up-list">
+        <li class="up-item first"><span class="up-date"><small>LIS</small><strong>14</strong></span><span class="up-text"><span class="up-next">NAJBLIŻSZY · ZA 14 DNI</span><span class="up-name">Puchar Jesieni 2026</span><span class="up-meta"><span>Warszawa</span><span class="up-chat"><svg class="i"><use href="#i-chat"/></svg>czat · 12</span></span></span><svg class="i up-arrow"><use href="#i-right"/></svg></li>
+        <li class="up-item"><span class="up-date"><small>GRU</small><strong>5</strong></span><span class="up-text"><span class="up-name">Grand Prix Pomorza 2026</span><span class="up-meta"><span>Gdańsk</span><span class="up-chat"><svg class="i"><use href="#i-chat"/></svg>czat · 3</span></span></span><svg class="i up-arrow"><use href="#i-right"/></svg></li>
+        <li class="up-item"><span class="up-date"><small>LUT</small><strong>20</strong></span><span class="up-text"><span class="up-name">Puchar Zimy 2027</span><span class="up-meta"><span>Kraków</span></span></span><svg class="i up-arrow"><use href="#i-right"/></svg></li>
+       </ol>
+      </div>
+     </div>
+    </section>
+
+    <!-- Column 2: the live chat (guest projection) -->
+    <section class="home-centre" aria-label="Czat MatBravo">
+     <div class="chat-card">
+      <header class="chat-head">
+       <span class="chat-head-ico"><svg class="i"><use href="#i-chat"/></svg></span>
+       <div class="grow"><h2>Czat MatBravo</h2><p>Rozmowy środowiska — czytać może każdy</p></div>
+       <span class="chat-live"><i></i>Na żywo</span>
+       <button class="chat-icon-btn" aria-label="Otwórz pełny czat"><svg class="i"><use href="#i-expand"/></svg></button>
+      </header>
+      <div class="chat-tabs" role="tablist" aria-label="Kanały">
+       <button class="chat-tab" role="tab" aria-selected="false"><span class="ch-ico"><svg class="i"><use href="#i-globe"/></svg></span><span><b>Taekwondo</b><small>Świat</small></span><span class="dot" title="Nowe od ostatniej wizyty"></span></button>
+       <button class="chat-tab" role="tab" aria-selected="true"><span class="ch-ico"><span class="flag"><svg><use href="#f-pl"/></svg></span></span><span><b>Taekwondo</b><small>Polska</small></span></button>
+       <button class="chat-tab" role="tab" aria-selected="false"><span class="ch-ico"><svg class="i"><use href="#i-globe"/></svg></span><span><b>Karate</b><small>Świat</small></span></button>
+       <button class="chat-tab" role="tab" aria-selected="false"><span class="ch-ico"><svg class="i"><use href="#i-globe"/></svg></span><span><b>Ogólny</b><small>Świat</small></span><span class="dot"></span></button>
+      </div>
+      <div class="chat-log" role="feed" aria-label="Wiadomości: Taekwondo · Polska">
+       <div class="chat-day"><span>Wczoraj</span></div>
+       <article class="chat-msg"><span class="ghost-ava g3" aria-hidden="true"></span><div class="chat-meta"><span class="ghost-name w2" aria-hidden="true"></span><span class="sr-only">Uczestnik ukryty dla gości</span><time>21:40</time></div><p class="chat-text">Gratulacje dla juniorów z Gdańska za Grand Prix — świetne układy, czysta technika!</p></article>
+       <div class="chat-day"><span>Dziś</span></div>
+       <article class="chat-msg"><span class="ghost-ava g1" aria-hidden="true"></span><div class="chat-meta"><span class="ghost-name w3" aria-hidden="true"></span><span class="sr-only">Uczestnik ukryty dla gości</span><time>08:12</time></div><p class="chat-text">Czy ktoś wie, o której zaczyna się ważenie na Pucharze Jesieni? W komunikacie jest 8:00, a na stronie klubu 7:30.</p></article>
+       <article class="chat-msg cont"><p class="chat-text">Pytam, bo jedziemy z Krakowa z dwunastką dzieci.</p></article>
+       <article class="chat-msg"><span class="ghost-ava g2" aria-hidden="true"></span><div class="chat-meta"><span class="ghost-name w1" aria-hidden="true"></span><span class="sr-only">Uczestnik ukryty dla gości</span><time>08:15</time></div><p class="chat-text">Ważenie od 7:30, organizator potwierdził wczoraj. Weźcie legitymacje zawodników.</p></article>
+       <article class="chat-msg"><span class="ghost-ava g1" aria-hidden="true"></span><div class="chat-meta"><span class="ghost-name w3" aria-hidden="true"></span><span class="sr-only">Uczestnik ukryty dla gości</span><time>08:17</time></div><p class="chat-text">Dzięki! A czy przed ważeniem będzie gdzie się rozgrzać?</p></article>
+       <article class="chat-msg"><span class="ghost-ava g5" aria-hidden="true"></span><div class="chat-meta"><span class="ghost-name w2" aria-hidden="true"></span><span class="sr-only">Uczestnik ukryty dla gości</span><time>08:21</time></div><p class="chat-text">Tak, mała sala obok głównej — otwarta od 7:00. Drabinki będą w aplikacji od piątku.</p></article>
+       <article class="chat-msg"><span class="ghost-ava g4" aria-hidden="true"></span><div class="chat-meta"><span class="ghost-name w1" aria-hidden="true"></span><span class="sr-only">Uczestnik ukryty dla gości</span><time>teraz</time></div><p class="chat-text">Do zobaczenia na macie!</p></article>
+      </div>
+      <footer class="chat-gate">
+       <div class="chat-gate-row">
+        <span class="chat-gate-ico"><svg class="i"><use href="#i-lock"/></svg></span>
+        <div class="chat-gate-copy"><strong>Dołącz do rozmowy</strong><span>Załóż konto, aby pisać i widzieć, kto rozmawia.</span></div>
+        <div class="chat-gate-actions"><a class="btn primary">Załóż konto</a><a class="btn secondary">Zaloguj się</a></div>
+       </div>
+       <p class="chat-gate-price"><b>8,99 zł / mies.</b> · anulujesz w dowolnym momencie</p>
+      </footer>
+     </div>
+    </section>
+
+    <!-- Column 3: log in + new account -->
+    <section class="home-auth">
+     <div class="lang"><b class="on">PL</b><b>EN</b></div>
+     <div class="auth-content">
+      <span class="eyebrow">WITAJ W MATBRAVO</span>
+      <h2>Zaloguj się</h2>
+      <p>Konta klubów od Administratora działają jak dotąd.</p>
+      <label class="field"><span>E-mail</span><div class="input">twoj@klub.pl</div></label>
+      <label class="field"><span>Hasło</span><div class="input"></div></label>
+      <a class="btn primary wide auth-submit">Zaloguj się <svg class="i"><use href="#i-arrow"/></svg></a>
+      <p class="auth-help">Nie pamiętasz hasła? <a>Odzyskaj dostęp</a></p>
+      <div class="acct-join">
+       <div class="acct-join-top"><div><span class="eyebrow">NOWE KONTO</span><strong>Dołącz do społeczności</strong></div><div class="acct-price"><b>8,99 zł</b><span>miesięcznie</span></div></div>
+       <ul>
+        <li><svg class="i"><use href="#i-check"/></svg>Pisz w czatach i czatach turniejów</li>
+        <li><svg class="i"><use href="#i-check"/></svg>Profil z Twoim sportem, krajem i klubem</li>
+        <li><svg class="i"><use href="#i-check"/></svg>Widzisz, kto rozmawia</li>
+       </ul>
+       <a class="btn secondary wide">Załóż konto <svg class="i"><use href="#i-arrow"/></svg></a>
+       <p class="fine">Poza Polską: $2.99 / miesiąc · płatność przez Stripe</p>
+      </div>
+     </div>
+     <div class="home-foot">Wykonano przez <img src="../../../dist/assets/meducase.png" alt="MEDUCASE" width="150" height="48"></div>
+    </section>
+   </main>
+  </div>
+  <div class="notes">
+   <div class="note"><span class="note-num">1</span><div><b>Ukryta tożsamość.</b> Serwer nie wysyła gościom imion, krajów ani sportów. Rozmyty pasek i abstrakcyjny awatar to ozdoba, nie zamazane dane.</div></div>
+   <div class="note"><span class="note-num">2</span><div><b>Ikony zamiast emoji.</b> Glob = „Świat”, flaga SVG = „Polska”. Emoji flag na Windows wyglądają jak litery „PL”.</div></div>
+   <div class="note"><span class="note-num">3</span><div><b>Cena od razu.</b> Bez ukrytych kosztów i sztucznej presji. Waluta wg kraju; można ją zmienić przed płatnością.</div></div>
+   <div class="note"><span class="note-num">4</span><div><b>Czat turnieju</b> widać w terminarzu („czat · 12”) i w podglądzie gościa jako zakładka.</div></div>
+  </div>
+ </section>
+
+ <!-- ============ 2. Phones ============ -->
+ <section class="mock-section">
+  <h2><em>2</em> Telefon 390 px · gość, członek, instalacja</h2>
+  <p>Na telefonie strona główna pokazuje kartę podglądu czatu (ostatnie wiadomości). „Otwórz czat” przechodzi do pełnoekranowego widoku z własnym adresem (#chat?c=taekwondo-pl), więc działa przycisk Wstecz i można udostępnić link.</p>
+  <div class="phones">
+   <!-- Phone 1: guest home -->
+   <figure class="phone-wrap">
+    <div class="phone"><div class="screen">
+     <div class="status dark"><span>9:41</span><span class="island"></span><span class="sys"><s></s><i></i></span></div>
+     <div class="p-top"><img class="logo" src="../../../dist/brand/matbravo-logo-white.svg" alt="MatBravo" width="525" height="74"><div class="lang dark"><b class="on">PL</b><b>EN</b></div><a class="btn cyan">Zaloguj</a></div>
+     <div class="p-hero"><span class="home-eyebrow">TWÓJ TURNIEJ. TWOJA EKIPA.</span><h1>Od zgłoszenia do finału.</h1><p>Turnieje, drabinki i rozmowy środowiska — w jednym miejscu.</p></div>
+     <div class="p-chat"><div class="chat-card">
+      <header class="chat-head"><span class="chat-head-ico"><svg class="i"><use href="#i-chat"/></svg></span><div class="grow"><h2>Czat MatBravo</h2></div><span class="chat-live"><i></i>Na żywo</span></header>
+      <div class="chips" role="tablist"><span class="chip" aria-selected="true"><span class="ch-ico"><span class="flag"><svg><use href="#f-pl"/></svg></span></span>Taekwondo <small>PL</small></span><span class="chip"><span class="ch-ico"><svg class="i"><use href="#i-globe"/></svg></span>Taekwondo <small>Świat</small></span><span class="chip"><span class="ch-ico"><svg class="i"><use href="#i-globe"/></svg></span>Karate</span></div>
+      <div class="chat-log">
+       <article class="chat-msg"><span class="ghost-ava g1"></span><div class="chat-meta"><span class="ghost-name w3"></span><time>08:17</time></div><p class="chat-text">Dzięki! A czy przed ważeniem będzie gdzie się rozgrzać?</p></article>
+       <article class="chat-msg"><span class="ghost-ava g5"></span><div class="chat-meta"><span class="ghost-name w2"></span><time>08:21</time></div><p class="chat-text">Tak, mała sala obok głównej — otwarta od 7:00.</p></article>
+       <article class="chat-msg"><span class="ghost-ava g4"></span><div class="chat-meta"><span class="ghost-name w1"></span><time>teraz</time></div><p class="chat-text">Do zobaczenia na macie!</p></article>
+      </div>
+      <div class="p-chat-foot"><a class="btn primary wide">Otwórz czat <svg class="i"><use href="#i-arrow"/></svg></a><p>Pisanie po założeniu konta · <b>8,99 zł / mies.</b></p></div>
+     </div></div>
+     <div class="p-login"><span class="eyebrow">WITAJ W MATBRAVO</span><h2>Zaloguj się</h2><label class="field"><span>E-mail</span><div class="input">twoj@klub.pl</div></label></div>
+     <span class="homebar"></span>
+    </div></div>
+    <figcaption>Strona główna · gość<span>Podgląd czatu nad formularzem logowania; „Zaloguj” w pasku przewija do formularza.</span></figcaption>
+   </figure>
+
+   <!-- Phone 2: member full chat -->
+   <figure class="phone-wrap">
+    <div class="phone"><div class="screen">
+     <div class="status"><span>9:41</span><span class="island"></span><span class="sys"><s></s><i></i></span></div>
+     <div class="m-head">
+      <button class="m-back" aria-label="Wstecz"><svg class="i"><use href="#i-left"/></svg></button>
+      <button class="m-chan" aria-label="Zmień kanał"><span class="ch-ico"><span class="flag"><svg><use href="#f-pl"/></svg></span></span><span><b>Taekwondo · Polska</b><small><i></i>Na żywo</small></span><svg class="i dd"><use href="#i-dd"/></svg></button>
+      <button class="chat-icon-btn" aria-label="Więcej"><svg class="i"><use href="#i-more"/></svg></button>
+     </div>
+     <div class="m-log">
+      <div class="chat-day"><span>Wczoraj</span></div>
+      <article class="chat-msg"><span class="chat-ava" style="background:#e6f5ee;color:#2f7a58">MZ</span><div class="chat-meta"><span class="chat-name">Michał Zawada</span><span class="flag"><svg><use href="#f-pl"/></svg></span><span class="chat-sport">Taekwondo</span><time>21:40</time></div><p class="chat-text">Gratulacje dla juniorów z Gdańska za Grand Prix — czysta technika!</p></article>
+      <div class="chat-day"><span>Dziś</span></div>
+      <article class="chat-msg"><span class="chat-ava photo" style="--pa:#d7e9f7;--pb:#2f6aa3"><svg><use href="#i-person"/></svg></span><div class="chat-meta"><span class="chat-name">Marta Kowalska</span><span class="flag"><svg><use href="#f-pl"/></svg></span><span class="chat-sport">Taekwondo</span><time>08:12</time></div><p class="chat-text">Czy ktoś wie, o której zaczyna się ważenie na Pucharze Jesieni?</p></article>
+      <article class="chat-msg"><span class="chat-ava">TN</span><div class="chat-meta"><span class="chat-name">Tomasz Nowicki</span><span class="flag"><svg><use href="#f-pl"/></svg></span><span class="chat-mod">Moderator</span><time>08:15</time></div><p class="chat-text">Ważenie od 7:30. Komunikat: <a class="ext">matbravo.com/#guest?t=pj26</a></p></article>
+      <article class="chat-msg"><span class="chat-ava" style="background:#f2edfb;color:#6b4aa0">PL</span><div class="chat-meta"><span class="chat-name">Piotr Lis</span><span class="flag"><svg><use href="#f-pl"/></svg></span><span class="chat-sport">Taekwondo</span><time>08:16</time></div><p class="chat-tomb"><svg class="i"><use href="#i-shield"/></svg>Wiadomość usunięta przez moderatora</p></article>
+      <article class="chat-msg own"><span class="chat-ava photo" style="--pa:#ffe9d6;--pb:#c26a2b"><svg><use href="#i-person"/></svg></span><div class="chat-meta"><span class="chat-name">Anna Wiśniewska</span><span class="chat-you">Ty</span><time>08:17</time></div><p class="chat-text">Dzięki! A czy przed ważeniem będzie gdzie się rozgrzać?</p></article>
+      <div class="chat-new-div">Nowe</div>
+      <article class="chat-msg"><span class="chat-ava photo" style="--pa:#dff3ea;--pb:#2f8a64"><svg><use href="#i-person"/></svg></span><div class="chat-meta"><span class="chat-name">Kasia Zielińska</span><span class="flag"><svg><use href="#f-pl"/></svg></span><span class="chat-sport">Taekwondo</span><time>08:21</time></div><p class="chat-text">Tak, mała sala obok głównej — otwarta od 7:00.</p></article>
+      <article class="chat-msg"><span class="chat-ava">JW</span><div class="chat-meta"><span class="chat-name">Jonas Weber</span><span class="flag"><svg><use href="#f-de"/></svg></span><span class="chat-sport">Taekwondo</span><time>teraz</time></div><p class="chat-text">We are coming too!</p></article>
+      <span class="chat-pill"><svg class="i"><use href="#i-down"/></svg>Nowe wiadomości: 2</span>
+     </div>
+     <div class="m-comp">
+      <div class="chat-input focus"><span class="typed">Super, to jedziemy wcześniej</span><button class="chat-send" aria-label="Wyślij"><svg class="i"><use href="#i-send"/></svg></button></div>
+     </div>
+     <span class="homebar"></span>
+    </div></div>
+    <figcaption>Pełny czat · członek<span>Imię, flaga kraju, sport; własne wiadomości z akcentem; „Nowe wiadomości” zamiast skoku listy.</span></figcaption>
+   </figure>
+
+   <!-- Phone 3: iOS install sheet -->
+   <figure class="phone-wrap">
+    <div class="phone"><div class="screen">
+     <div class="status dark"><span>9:41</span><span class="island"></span><span class="sys"><s></s><i></i></span></div>
+     <div class="ios-bg"><div class="p-top"><img class="logo" src="../../../dist/brand/matbravo-logo-white.svg" alt="" width="525" height="74"></div><div class="p-hero"><span class="home-eyebrow">TWÓJ TURNIEJ. TWOJA EKIPA.</span><h1>Od zgłoszenia do finału.</h1></div><div class="ios-ghost"></div><div class="ios-dim"></div>
+      <div class="ios-sheet" role="dialog" aria-labelledby="ios-t">
+       <div class="ios-grab"></div>
+       <div class="ios-art">
+        <div class="ios-apps"><i></i><i></i><img src="../../../dist/brand/icon-192.png" alt=""><i></i><i></i><i></i><span class="lbl">MatBravo</span></div>
+        <img class="ios-mascot" src="../../../dist/brand/matbravo-guide.webp" alt="" aria-hidden="true">
+       </div>
+       <h3 id="ios-t">Dodaj MatBravo do ekranu początkowego</h3>
+       <p>Drabinki i czat jednym stuknięciem — także w hali, bez szukania karty w przeglądarce.</p>
+       <ol class="ios-steps">
+        <li><span class="n">1</span><span>Stuknij <span class="ios-key"><svg class="i"><use href="#i-share"/></svg>Udostępnij</span></span></li>
+        <li><span class="n">2</span><span>Wybierz <span class="ios-key"><svg class="i"><use href="#i-plussq"/></svg>Do ekranu początk.</span></span></li>
+        <li><span class="n">3</span><span>Potwierdź przyciskiem <span class="ios-key">Dodaj</span></span></li>
+       </ol>
+       <div class="ios-actions"><a class="btn secondary">Nie teraz</a><a class="btn primary">Gotowe</a></div>
+      </div>
+     </div>
+     <span class="homebar light"></span>
+    </div></div>
+    <figcaption>Instalacja na iPhonie<span>Pokazujemy po zalogowaniu (2. wizyta) lub w dniu turnieju; „Nie teraz” = cisza na 30 dni.</span></figcaption>
+   </figure>
+  </div>
+ </section>
+
+ <!-- ============ 3. Desktop shell, member ============ -->
+ <section class="mock-section">
+  <h2><em>3</em> Aplikacja po zalogowaniu · strona „Czat” · członek</h2>
+  <p>„Czat” w menu z licznikiem nieprzeczytanych. Kanały ogólne i czaty turniejów w jednej liście. Karta instalacji siedzi w liście kanałów, nie zasłania rozmowy. Kliknięcie autora otwiera kartę profilu.</p>
+  <div class="browser">
+   <div class="browser-bar"><div class="browser-dots"><i></i><i></i><i></i></div><div class="browser-url"><svg class="i"><use href="#i-lock"/></svg>matbravo.com/#chat?c=taekwondo-pl</div></div>
+   <div class="shell">
+    <aside class="side">
+     <img class="logo" src="../../../dist/brand/matbravo-logo-white.svg" alt="MatBravo" width="525" height="74">
+     <a class="nav"><svg class="i"><use href="#i-trophy"/></svg>Turnieje</a>
+     <a class="nav on"><svg class="i"><use href="#i-chat"/></svg>Czat<span class="unread" aria-label="5 nieprzeczytanych">5</span></a>
+     <a class="nav"><svg class="i"><use href="#i-users"/></svg>Baza zawodników</a>
+     <div class="side-div"></div>
+     <div class="side-lbl">AKTYWNY TURNIEJ</div>
+     <div class="side-sel">Puchar Jesieni 2026 <svg class="i" style="width:14px;height:14px"><use href="#i-dd"/></svg></div>
+     <a class="nav"><svg class="i"><use href="#i-users"/></svg>Zgłoszenia klubu<span class="cnt">8</span></a>
+     <a class="nav"><svg class="i"><use href="#i-chat"/></svg>Czat turnieju<span class="unread">2</span></a>
+     <div class="side-bottom">
+      <a class="nav"><svg class="i"><use href="#i-settings"/></svg>Zasady turnieju</a>
+      <div class="side-prof"><span class="chat-ava photo" style="--pa:#ffe9d6;--pb:#c26a2b"><svg><use href="#i-person"/></svg></span><div><b>Anna Wiśniewska</b><small>@anna.w · TKD Warszawa</small></div></div>
+     </div>
+    </aside>
+    <div class="main">
+     <div class="topbar"><span>MatBravo</span><svg class="i"><use href="#i-right"/></svg><span class="cur">Czat</span><div class="rt"><div class="lang"><b class="on">PL</b><b>EN</b></div></div></div>
+     <div class="chat-page">
+      <nav class="rail" aria-label="Kanały czatu">
+       <div class="rail-sec"><h3>KANAŁY</h3>
+        <div class="rail-item"><span class="ch-ico"><svg class="i"><use href="#i-globe"/></svg></span><span class="grow"><b>Taekwondo · Świat</b><small>Jonas: See you in Hamburg!</small></span><span class="ub">3</span></div>
+        <div class="rail-item on"><span class="ch-ico"><span class="flag"><svg><use href="#f-pl"/></svg></span></span><span class="grow"><b>Taekwondo · Polska</b><small>Kasia: Tak, mała sala obok…</small></span></div>
+        <div class="rail-item"><span class="ch-ico"><svg class="i"><use href="#i-globe"/></svg></span><span class="grow"><b>Karate · Świat</b><small>Wyciszony</small></span><span class="mdot" title="Wyciszony: tylko kropka"></span></div>
+        <div class="rail-item"><span class="ch-ico"><svg class="i"><use href="#i-globe"/></svg></span><span class="grow"><b>Ogólny · Świat</b><small>Witamy nowych członków!</small></span></div>
+       </div>
+       <div class="rail-sec"><h3>CZATY TURNIEJÓW</h3>
+        <div class="rail-item"><span class="rail-t next"><small>LIS</small><strong>14</strong></span><span class="grow"><b>Puchar Jesieni 2026</b><small>Za 14 dni · Warszawa</small></span><span class="ub">2</span></div>
+        <div class="rail-item"><span class="rail-t"><small>GRU</small><strong>5</strong></span><span class="grow"><b>Grand Prix Pomorza 2026</b><small>Gdańsk</small></span></div>
+        <div class="rail-arch"><svg class="i"><use href="#i-archive"/></svg>Archiwum · 3 zakończone<svg class="i" style="margin-left:auto"><use href="#i-dd"/></svg></div>
+       </div>
+       <div class="pwa-card">
+        <div class="pwa-card-top"><img src="../../../dist/brand/icon-192.png" alt=""><div><b>Zainstaluj MatBravo</b></div></div>
+        <p>Otwieraj z pulpitu jak aplikację. Bez sklepu, zajmuje mniej niż 1 MB.</p>
+        <div class="acts"><a class="btn light"><svg class="i"><use href="#i-dl"/></svg>Zainstaluj</a><a class="btn text">Nie teraz</a></div>
+       </div>
+      </nav>
+      <section class="conv" aria-labelledby="conv-t">
+       <header class="chat-head">
+        <span class="ch-ico"><span class="flag"><svg><use href="#f-pl"/></svg></span></span>
+        <div class="grow"><h3 id="conv-t">Taekwondo · Polska</h3><p>Rozmowy po polsku · <a class="conv-rules">Zasady kanału</a></p></div>
+        <span class="chat-live"><i></i>Na żywo</span>
+        <button class="chat-icon-btn" aria-label="Powiadomienia kanału"><svg class="i"><use href="#i-bell"/></svg></button>
+        <button class="chat-icon-btn" aria-label="Więcej"><svg class="i"><use href="#i-more"/></svg></button>
+       </header>
+       <div class="chat-log" role="feed">
+        <div class="chat-day"><span>Wczoraj</span></div>
+        <article class="chat-msg"><span class="chat-ava" style="background:#e6f5ee;color:#2f7a58">MZ</span><div class="chat-meta"><span class="chat-name">Michał Zawada</span><span class="flag"><svg><use href="#f-pl"/></svg></span><span class="chat-sport">Taekwondo</span><time>21:40</time></div><p class="chat-text">Gratulacje dla juniorów z Gdańska za Grand Prix — świetne układy, czysta technika!</p></article>
+        <div class="chat-day"><span>Dziś</span></div>
+        <article class="chat-msg"><span class="chat-ava photo" style="--pa:#d7e9f7;--pb:#2f6aa3"><svg><use href="#i-person"/></svg></span><div class="chat-meta"><span class="chat-name">Marta Kowalska</span><span class="flag" title="Polska"><svg><use href="#f-pl"/></svg></span><span class="chat-sport">Taekwondo</span><time>08:12</time></div><p class="chat-text">Czy ktoś wie, o której zaczyna się ważenie na Pucharze Jesieni? W komunikacie jest 8:00, a na stronie klubu 7:30.</p><div class="popover" role="dialog" aria-label="Profil: Marta Kowalska">
+        <div class="pop-top"><span class="chat-ava photo" style="--pa:#d7e9f7;--pb:#2f6aa3"><svg><use href="#i-person"/></svg></span><div><b>Marta Kowalska</b><small>@marta.k</small></div></div>
+        <div class="pop-rows">
+         <div><span class="flag"><svg><use href="#f-pl"/></svg></span>Polska</div>
+         <div><svg class="i"><use href="#i-trophy"/></svg>Taekwondo</div>
+         <div><svg class="i"><use href="#i-users"/></svg>KS Tygrys Kraków</div>
+         <div><svg class="i"><use href="#i-cal"/></svg>W MatBravo od października 2026</div>
+        </div>
+        <div class="pop-acts"><a class="btn secondary"><svg class="i"><use href="#i-flag"/></svg>Zgłoś</a><a class="btn secondary">Wycisz u mnie</a></div>
+       </div></article>
+        <article class="chat-msg cont"><p class="chat-text">Pytam, bo jedziemy z Krakowa z dwunastką dzieci.</p></article>
+        <article class="chat-msg hover"><span class="chat-ava">TN</span><div class="chat-meta"><span class="chat-name">Tomasz Nowicki</span><span class="flag"><svg><use href="#f-pl"/></svg></span><span class="chat-mod">Moderator</span><time>08:15</time></div><p class="chat-text">Ważenie od 7:30, organizator potwierdził wczoraj. Komunikat: <a class="ext">matbravo.com/#guest?t=pj26 <svg class="i" style="width:12px;height:12px"><use href="#i-ext"/></svg></a></p><div class="chat-actions"><button aria-label="Zgłoś wiadomość"><svg class="i"><use href="#i-flag"/></svg></button><button aria-label="Więcej działań"><svg class="i"><use href="#i-more"/></svg></button></div></article>
+        <article class="chat-msg"><span class="chat-ava" style="background:#f2edfb;color:#6b4aa0">PL</span><div class="chat-meta"><span class="chat-name">Piotr Lis</span><span class="flag"><svg><use href="#f-pl"/></svg></span><span class="chat-sport">Taekwondo</span><time>08:16</time></div><p class="chat-tomb"><svg class="i"><use href="#i-shield"/></svg>Wiadomość usunięta przez moderatora</p></article>
+        <article class="chat-msg own"><span class="chat-ava photo" style="--pa:#ffe9d6;--pb:#c26a2b"><svg><use href="#i-person"/></svg></span><div class="chat-meta"><span class="chat-name">Anna Wiśniewska</span><span class="chat-you">Ty</span><time>08:17</time></div><p class="chat-text">Dzięki! A czy przed ważeniem będzie gdzie się rozgrzać?</p></article>
+        <div class="chat-new-div">Nowe</div>
+        <article class="chat-msg"><span class="chat-ava photo" style="--pa:#dff3ea;--pb:#2f8a64"><svg><use href="#i-person"/></svg></span><div class="chat-meta"><span class="chat-name">Kasia Zielińska</span><span class="flag"><svg><use href="#f-pl"/></svg></span><span class="chat-sport">Taekwondo</span><time>08:21</time></div><p class="chat-text">Tak, mała sala obok głównej — otwarta od 7:00. Drabinki będą w aplikacji od piątku.</p></article>
+        <article class="chat-msg"><span class="chat-ava">JW</span><div class="chat-meta"><span class="chat-name">Jonas Weber</span><span class="flag" title="Niemcy"><svg><use href="#f-de"/></svg></span><span class="chat-sport">Taekwondo</span><span class="chat-sport karate">Karate</span><time>teraz</time></div><p class="chat-text">Grüße aus Berlin — we are coming with 6 athletes too!</p></article>
+       </div>
+       <div class="chat-composer">
+        <div class="chat-input"><span class="ph">Napisz w kanale Taekwondo · Polska…</span><button class="chat-send off" aria-label="Wyślij" aria-disabled="true"><svg class="i"><use href="#i-send"/></svg></button></div>
+        <div class="chat-hint"><span><kbd>Enter</kbd> wyślij · <kbd>Shift</kbd>+<kbd>Enter</kbd> nowa linia</span><span>Nie publikuj danych dzieci ani numerów telefonów.</span></div>
+       </div>
+      </section>
+     </div>
+    </div>
+   </div>
+  </div>
+ </section>
+
+ <!-- ============ 4. States ============ -->
+ <section class="mock-section">
+  <h2><em>4</em> Stany komponentów</h2>
+  <p>Każdy stan ma tekst PL i EN w specyfikacji (sekcja „Copy deck”).</p>
+  <div class="gallery">
+   <div class="g-card"><h4>Wysyłanie i błąd wysyłki</h4>
+    <article class="chat-msg own"><span class="chat-ava photo" style="--pa:#ffe9d6;--pb:#c26a2b"><svg><use href="#i-person"/></svg></span><div class="chat-meta"><span class="chat-name">Anna Wiśniewska</span><span class="chat-you">Ty</span></div><div><p class="chat-text">Do zobaczenia w sobotę!</p><div class="fail"><svg class="i"><use href="#i-alert"/></svg>Nie wysłano. <button>Ponów</button> <button>Usuń</button></div></div></article>
+    <article class="chat-msg own cont" style="margin-top:6px"><p class="chat-text">Bierzemy też sędziów.<span class="sending"><svg class="i"><use href="#i-clock"/></svg>Wysyłanie…</span></p></article>
+   </div>
+   <div class="g-card"><h4>Limit wiadomości</h4>
+    <div class="rate"><svg class="i"><use href="#i-clock"/></svg>Zwolnij trochę — kolejna wiadomość za 4 s.</div>
+    <div class="chat-input"><span class="typed">Czy są jeszcze miejsca w kategorii…</span><span class="cd" aria-label="Wysyłanie możliwe za 4 sekundy">4 s</span></div>
+   </div>
+   <div class="g-card"><h4>Licznik znaków (od 800 / 1000)</h4>
+    <div class="chat-input focus"><span class="typed">…i dlatego proponuję, żebyśmy na kolejnym zebraniu omówili zasady ważenia oraz harmonogram dla młodzików, bo w zeszłym sezonie…</span><button class="chat-send"><svg class="i"><use href="#i-send"/></svg></button></div>
+    <div class="chat-hint"><span><kbd>Shift</kbd>+<kbd>Enter</kbd> nowa linia</span><span class="counter">962 / 1000</span></div>
+   </div>
+   <div class="g-card"><h4>Offline / ponowne łączenie</h4>
+    <div class="chat-banner offline" role="status"><svg class="i"><use href="#i-wifi"/></svg>Brak połączenia. Nowe wiadomości pojawią się po powrocie sieci.</div>
+    <div class="chat-banner archive" style="margin-top:8px" role="status"><svg class="i"><use href="#i-refresh"/></svg>Łączenie ponownie…</div>
+   </div>
+   <div class="g-card"><h4>Archiwum czatu turnieju</h4>
+    <div class="chat-banner archive"><svg class="i"><use href="#i-archive"/></svg><span>Turniej zakończył się 14 listopada. Czat jest tylko do odczytu.</span></div>
+    <div class="chat-banner muted" style="margin-top:8px"><svg class="i"><use href="#i-pause-c"/></svg><span>Moderator wstrzymał Twoje pisanie do 18:30.</span></div>
+   </div>
+   <div class="g-card"><h4>Zalogowany bez subskrypcji</h4>
+    <div class="chat-gate" style="border:1px solid #d6e6f4;border-radius:12px">
+     <div class="chat-gate-row"><span class="chat-gate-ico"><svg class="i"><use href="#i-sparkle"/></svg></span><div class="chat-gate-copy"><strong>Aktywuj konto, aby pisać</strong><span>Zobaczysz też, kto rozmawia.</span></div><a class="btn primary">Aktywuj</a></div>
+     <p class="chat-gate-price"><b>8,99 zł / mies.</b> · anulujesz w dowolnym momencie</p>
+    </div>
+   </div>
+   <div class="g-card"><h4>Pusty kanał (Matbravo wita)</h4>
+    <div class="empty"><img src="../../../dist/brand/matbravo-avatar.webp" alt="" aria-hidden="true"><b>Zacznij rozmowę</b><p>W kanale Karate · Świat nikt jeszcze nie napisał. Przywitaj się!</p></div>
+   </div>
+   <div class="g-card"><h4>Wybór waluty przed płatnością</h4>
+    <div class="seg" role="radiogroup" aria-label="Waluta"><b class="on" role="radio" aria-checked="true">PLN · Polska</b><b role="radio" aria-checked="false">USD · inne kraje</b></div>
+    <div class="plan"><b>8,99 zł</b><span>/ miesiąc</span></div>
+    <p style="font-size:11.5px;color:var(--muted)">Odnawia się co miesiąc. Anulujesz w panelu Stripe jednym kliknięciem; dostęp zostaje do końca opłaconego okresu.</p>
+   </div>
+   <div class="g-card"><h4>Nowa wersja (PWA) i ikony kanałów</h4>
+    <div class="toast" role="status"><svg class="i"><use href="#i-sparkle"/></svg><span>Dostępna jest nowa wersja MatBravo.</span><a class="btn">Odśwież</a></div>
+    <div class="icons-demo" style="margin-top:12px">
+     <span class="chip"><span class="ch-ico"><svg class="i"><use href="#i-globe"/></svg></span>Świat</span>
+     <span class="chip"><span class="ch-ico"><span class="flag"><svg><use href="#f-pl"/></svg></span></span>Polska</span>
+     <span class="chip"><span class="flag"><svg><use href="#f-ua"/></svg></span>UA</span>
+     <span class="chip"><span class="flag"><svg><use href="#f-lt"/></svg></span>LT</span>
+     <span class="chip"><span class="flag"><svg><use href="#f-it"/></svg></span>IT</span>
+     <span class="chip"><span class="flag"><svg><use href="#f-nl"/></svg></span>NL</span>
+    </div>
+   </div>
+  </div>
+ </section>
+ <p class="ux-foot">Makieta statyczna, bez skryptów i zasobów zewnętrznych. Dane, imiona i wiadomości są przykładowe. MatBravo · MEDUCASE Sp. z o.o.</p>
+</div>
+</body>
+</html>
