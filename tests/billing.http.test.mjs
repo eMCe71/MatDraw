@@ -542,6 +542,37 @@ test('checkout while another sync holds the claim: Stripe is read without writin
  assert.ok(audit(p.id,'customer.replace').some(a=>a.detail===`${p.customer} -> ${swapped.stripe_customer_id}`));
 });
 
+test('checkout on a cached ongoing status without access asks Stripe first: past_due after the grace days → Portal, a stale active row → Checkout',{skip},async()=>{
+ const portal=['Masz już aktywną subskrypcję.',true];
+ // past_due beyond the grace days while Stripe still retries the card: no access, and Stripe confirms the subscription,
+ // so the answer stays 409 {portal:true} (the card is updated in the Portal, not with a second subscription).
+ const p=await paidMember('stale-pastdue');
+ await stub({op:'subscription',id:p.sub,status:'past_due',current_period_start:now()-9*D,invoice:'open',event:false});
+ assert.equal(run('sync',{userId:p.id}).sub_status,'past_due');
+ let m=await me(p.c);assert.deepEqual([m.access.full,m.access.state,m.access.block],[false,'none','payment']);
+ let t=Date.now();let r=await p.c.req('billing-checkout',{});assert.deepEqual([r.status,r.data.error,r.data.portal],[409,...portal]);
+ assert.equal((await since(t,'GET',/^\/v1\/subscriptions$/)).length,1,'Stripe is asked before the refusal');assert.deepEqual(await since(t,'POST'),[]);
+ // A stale active row (not synced since its period ended + 72 h) while Stripe says canceled: Checkout opens.
+ const s=await paidMember('stale-active');await stub({op:'subscription',id:s.sub,status:'canceled',event:false});
+ fixture('billing',{userId:s.id,current_period_start:now()-33*D,current_period_end:now()-80*3600,next_sync_at:now()+D});
+ m=await me(s.c);assert.deepEqual([m.access.full,m.access.state],[false,'none']);assert.equal(row(s.id).sub_status,'active');
+ t=Date.now();r=await s.c.req('billing-checkout',{});assert.equal(r.status,200,JSON.stringify(r.data));
+ assert.match(r.data.url,/^https:\/\/checkout\.stripe\.com\//);assert.equal(row(s.id).sub_status,'canceled','the sync wrote what Stripe said');
+ assert.equal((await since(t,'POST',/^\/v1\/checkout\/sessions$/))[0].body.customer,s.customer,'same customer, same currency');
+ // A renewal the row missed (no lazy sync, no jobs): the click repairs the row and sends to the Portal; access is back.
+ const n=await paidMember('stale-renewed');await stub({op:'subscription',id:n.sub,current_period_start:now()-D,current_period_end:now()+29*D,event:false});
+ fixture('billing',{userId:n.id,current_period_start:now()-33*D,current_period_end:now()-80*3600,next_sync_at:now()+D});
+ assert.equal((await me(n.c)).access.state,'none');
+ r=await n.c.req('billing-checkout',{});assert.deepEqual([r.status,r.data.error,r.data.portal],[409,...portal]);
+ m=await me(n.c);assert.deepEqual([m.access.full,m.access.state],[true,'active']);assert.ok(row(n.id).current_period_end>now()+28*D);
+ // While another sync holds the claim, Stripe's read-only answer decides, not the stale row.
+ const b=await paidMember('stale-busy');await stub({op:'subscription',id:b.sub,status:'canceled',event:false});
+ fixture('billing',{userId:b.id,current_period_start:now()-33*D,current_period_end:now()-80*3600,next_sync_at:now()+D,sync_claimed_at:now()});
+ r=await b.c.req('billing-checkout',{});assert.equal(r.status,200,JSON.stringify(r.data));
+ // A row whose cached status still gives access keeps the fast refusal without any Stripe call.
+ const f=await paidMember('fast-lock');t=Date.now();r=await f.c.req('billing-checkout',{});assert.deepEqual([r.status,r.data.portal],[409,true]);assert.deepEqual(await since(t),[]);
+});
+
 test('billing-due: refused customer deletions take at most half of the slots and then wait; due accounts are still synced',{skip},async()=>{
  const p=await paidMember('due-share');fixture('billing',{userId:p.id,next_sync_at:now()-1});
  const stuck=Array.from({length:5},(_,i)=>{const s=member('stuck'+i);fixture('billing',{userId:s.id,stripe_customer_id:`cus_stuck${process.pid}x${i}`,stripe_redact_pending:1,deleted_at:now(),livemode:0,updated_at:now()-7200+i});return s;});

@@ -54,7 +54,10 @@ final class Billing {
  // ---- Checkout --------------------------------------------------------------------------------------------------
  /**
   * billing-checkout (§6.2): 409 {portal:true} with an ongoing subscription (active, trialing, past_due and incomplete:
-  * an async payment still running would charge twice next to a second subscription); 422 without a country; an open
+  * an async payment still running would charge twice next to a second subscription). The cached status alone refuses
+  * only while it gives full access; a cached ongoing status without it (past_due after the grace days, an active row not
+  * synced since its period ended, incomplete) is checked against Stripe first, so a stale row never locks the person out
+  * of both Checkout and access. 422 without a country; an open
   * session of the same currency that expires in more than 5 minutes is reused; otherwise Stripe's view of a returning
   * customer comes first (BillingSync::syncUser: one list call; while another sync holds the claim, the same read without
   * writing, BillingSync::fetchCustomer): an ongoing subscription the cache did not know yet (a stale 'incomplete', a
@@ -65,14 +68,15 @@ final class Billing {
  public static function checkout(PDO $pdo,array $c,array $u,mixed $lang=null):array {
   $row=Access::row($pdo,$u['id']);$now=time();
   if($row&&$row['deleted_at']!==null)throw new AppError('Brak uprawnień.',403);
-  $status=Access::subStatus($row,$c);
-  if($status!=='incomplete'&&in_array($status,BillingSync::ONGOING,true))self::locked();
+  $status=Access::subStatus($row,$c);$ongoing=in_array($status,BillingSync::ONGOING,true);
+  $known=$row!==null&&$row['stripe_customer_id']!==null&&self::sameMode($row,$c);
+  // The fast refusal needs no Stripe call, but only a status that still gives access is trusted without one.
+  if($ongoing&&(!$known||Access::compute($row,$u,['billing_enforce'=>true]+$c,$now)['full']))self::locked();
   $country=self::country($pdo,$u['id']);$currency=self::currencyFor($pdo,$c,$row,$country,$u['id']);
   if($currency===null)throw new AppError('Wybierz kraj w profilu, aby wybrać plan.',422);
   $client=StripeClient::interactive($c);
   if(!isset($c['stripe_prices'][$currency]))throw new StripeError('No price for '.$currency,0,'config');
-  $known=$row!==null&&$row['stripe_customer_id']!==null&&self::sameMode($row,$c);
-  if($known&&$status!=='incomplete'&&$row['pending_checkout_id']!==null&&(int)$row['pending_checkout_expires']>$now+300&&$row['currency']===$currency){
+  if($known&&!$ongoing&&$row['pending_checkout_id']!==null&&(int)$row['pending_checkout_expires']>$now+300&&$row['currency']===$currency){
    try{$s=$client->get('/v1/checkout/sessions/'.$row['pending_checkout_id']);
     if(($s['status']??null)==='open'&&BillingSync::ref($s['customer']??null)===$row['stripe_customer_id']&&self::checkoutUrl($s['url']??null))return ['url'=>$s['url']];
    }catch(StripeError $e){if(!$e->missing())throw $e;}
@@ -84,11 +88,11 @@ final class Billing {
     // Another sync holds the claim (the lazy sync after me, a double click) and only the cached row came back: Stripe is
     // read here without writing, so a subscription the cache does not know yet still refuses the checkout and the
     // Customer.currency check below still has the customer.
+    // The cached row may be the stale one this checkout is checking, so Stripe's answer decides here.
     [$subs,$cus]=BillingSync::fetchCustomer($client,(string)$row['stripe_customer_id']);
     if(BillingSync::ongoingIds($c,$subs))self::locked();
     if(!empty($cus['deleted']))$r['outcome']='customer-deleted';
-   }
-   if(in_array(Access::subStatus($row,$c),BillingSync::ONGOING,true))self::locked();
+   }elseif(in_array(Access::subStatus($row,$c),BillingSync::ONGOING,true))self::locked();
    $currency=self::currencyFor($pdo,$c,$row,$country,$u['id'])??$currency;
    if(!isset($c['stripe_prices'][$currency]))throw new StripeError('No price for '.$currency,0,'config');
    $cur=is_array($cus)&&empty($cus['deleted'])&&is_string($cus['currency']??null)?strtolower($cus['currency']):'';
