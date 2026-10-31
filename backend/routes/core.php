@@ -24,9 +24,10 @@ return [
   if(class_exists(ChatModeration::class)&&method_exists(ChatModeration::class,'mutedUntil')){
    $m=ChatModeration::mutedUntil($pdo,$u['id']);if($m===true)$muted=true;elseif(is_int($m)&&$m>$now){$muted=true;$mutedUntil=$m;}
   }
-  // One reason the composer is closed, the one the person can act on first: a temporary password (§3.10), payment,
-  // the profile, a moderator's mute, then the chat being off.
-  $block=$mustChange?'password':(!$access['full']?'payment':(!$complete?'profile':($muted?'muted':(!$chatOn?'off':null))));
+  // One reason the composer is closed, in the order of the chat-send checks (§5.5 points 3–6: payment 402, profile,
+  // temporary password, mute), then the chat being off (§4.3 order), so the hint names the error the server answers.
+  // The forced redirect of §3.10 follows profile.mustChangePassword, which stays true whatever block says.
+  $block=!$access['full']?'payment':(!$complete?'profile':($mustChange?'password':($muted?'muted':(!$chatOn?'off':null))));
   $exempt=$u['role']==='admin'||($row?!empty($row['billing_exempt'])&&($row['exempt_until']===null||(int)$row['exempt_until']>$now):in_array($u['role'],['editor','club'],true));
   $live=$c['billing_mode']==='live';$sameMode=$row&&((int)$row['livemode']===1)===$live;
   $billing=empty($c['billing_enabled'])?['enabled'=>false]:['enabled'=>true,'enforce'=>!empty($c['billing_enforce']),'mode'=>$c['billing_mode'],

@@ -113,6 +113,13 @@ test('me returns the §4.3 shape for admin, staff and members; public-config for
  fixture('member',{email:'tymczasowe.me@test.example',password:PASSWORD,profile:{pwResetAt:t},exempt:true});
  const temp=await me(await signIn('tymczasowe.me@test.example'));
  assert.equal(temp.profile.mustChangePassword,true);assert.equal(temp.access.block,'password');assert.equal(temp.access.canPost,false);
+ // block follows the chat-send checks (§5.5: payment, profile, temporary password); mustChangePassword stays true.
+ fixture('member',{email:'tymczasowe.nieplacacy.me@test.example',password:PASSWORD,profile:{pwResetAt:t}});
+ const tempUnpaid=await me(await signIn('tymczasowe.nieplacacy.me@test.example'));
+ assert.deepEqual([tempUnpaid.access.block,tempUnpaid.profile.mustChangePassword],['payment',true]);
+ fixture('member',{email:'tymczasowe.niepelny.me@test.example',password:PASSWORD,profile:{pwResetAt:t,sports:[]},exempt:true});
+ const tempIncomplete=await me(await signIn('tymczasowe.niepelny.me@test.example'));
+ assert.deepEqual([tempIncomplete.access.block,tempIncomplete.profile.complete,tempIncomplete.profile.mustChangePassword],['profile',false,true]);
  const bare=fixture('member',{email:'bez.profilu.me@test.example',password:PASSWORD,exempt:true});
  const n=await me(await signIn('bez.profilu.me@test.example'));
  assert.equal(bare.publicId,null);assert.match(n.profile.publicId,/^[0-9A-Za-z]{12}$/);assert.equal(n.profile.complete,false);assert.equal(n.access.block,'profile');assert.deepEqual(n.profile.sports,[]);
