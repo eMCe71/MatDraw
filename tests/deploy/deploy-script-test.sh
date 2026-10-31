@@ -14,6 +14,8 @@
 # Usage: tests/deploy/deploy-script-test.sh [port] [db_name]   (defaults 8090 and matdraw_deploy_test_<port>)
 # Databases <db_name> and <db_name>_r (restore target); the test user md_<port>. The database server is reached as in
 # scripts/test-http.sh: MATDRAW_TEST_DB_ROOT (default `mariadb -uroot`), MATDRAW_TEST_DB_HOST/PORT, MATDRAW_TEST_DB_USER_HOST.
+#  - server-check reports only the rights granted on this database (or *.*), item by item (CREATE TEMPORARY TABLES is
+#    not CREATE); the floor guard ignores PHP notices around the floor number.
 # KEEP=1 keeps the work directory and the databases.
 set -uo pipefail
 port=${1:-8090} dbn=${2:-matdraw_deploy_test_${1:-8090}}
@@ -33,12 +35,16 @@ ok(){ if eval "$2"; then echo "ok - $1"; else echo "not ok - $1"; fails=$((fails
 sql(){ $root "$dbn" -e "$1"; }
 q1(){ $root -N -B "$dbn" -e "$1"; }
 count(){ ls -1 "$base"/backups/$1 2>/dev/null | wc -l; }
-start_server(){ [[ -n $srvpid ]] && { kill "$srvpid" 2>/dev/null; wait "$srvpid" 2>/dev/null; }
+# The test's own server must hold the port: another server there would answer every verify/probe step instead.
+start_server(){ [[ -n $srvpid ]] && { kill "$srvpid" 2>/dev/null; wait "$srvpid" 2>/dev/null; srvpid=; }
+ curl -s -o /dev/null "$app/" && { echo "Port $port is busy (another server answers there)." >&2; fails=$((fails+1)); exit 2; }
  PHP_CLI_SERVER_WORKERS=2 "$php" -S "127.0.0.1:$port" -t "$docroot" > "$work/php-server.log" 2>&1 & srvpid=$!
- for _ in $(seq 1 30); do curl -fsS "$app/api/index.php?route=session" >/dev/null 2>&1 && break; sleep 0.3; done; }
+ for _ in $(seq 1 30); do curl -fsS "$app/api/index.php?route=session" >/dev/null 2>&1 && break; sleep 0.3; done
+ kill -0 "$srvpid" 2>/dev/null || { echo "php -S did not start on port $port: $(head -c 300 "$work/php-server.log")" >&2; srvpid=; fails=$((fails+1)); exit 2; }
+ [[ ! -f $docroot/version.json || "$(curl -sS "$app/version.json")" == "$(cat "$docroot/version.json")" ]] || { echo "The server on port $port does not serve $docroot." >&2; fails=$((fails+1)); exit 2; }; }
 cleanup(){ [[ -n $srvpid ]] && kill "$srvpid" 2>/dev/null; wait 2>/dev/null
  if [[ $fails == 0 && -z ${KEEP:-} ]]; then rm -rf "$work"; drop="DROP DATABASE IF EXISTS \`$dbn\`; DROP DATABASE IF EXISTS \`$rdb\`;"
-  for h in "${uhosts[@]}"; do drop+=" DROP USER IF EXISTS 'md_$port'@'$h';"; done; $root -e "$drop" 2>/dev/null; fi; }
+  for h in "${uhosts[@]}"; do drop+=" DROP USER IF EXISTS 'md_$port'@'$h'; DROP USER IF EXISTS 'md_${port}h'@'$h';"; done; $root -e "$drop" 2>/dev/null; fi; }
 trap cleanup EXIT
 
 # --- database: baseline v1 with sample data; the test user's password has characters the option file must escape ---
@@ -132,9 +138,10 @@ ok 'poll-probe reports the status codes and exits 0' '[[ $rc == 0 ]] && grep -q 
 sleep 1; run backup-db remote backup-db
 f=$(ls -1t "$base"/backups/db-*-manual-*.sql.gz 2>/dev/null | head -1); restore "$f"
 ok 'backup-db (dump tool) restores with an equal data hash' '[[ $rc == 0 && -n $f && "$(dhash "$rdb")" == "$(dhash "$dbn")" ]]'
+ok 'backup-db made the copy with the dump tool, not with the bin/dump.php fallback' '! grep -q "Próbuję backend/bin/dump.php" <<<"$out" && gzip -dc "$f" | head -5 | grep -qE "(MySQL|MariaDB) dump"'
 sleep 1; run 'backup-db (dump.php)' env MATDRAW_DUMP=php bash "$repo/scripts/deploy-remote.sh" backup-db "$base" "$docroot"
 g=$(ls -1t "$base"/backups/db-*-manual-*.sql.gz 2>/dev/null | head -1); restore "$g"
-ok 'backup-db (bin/dump.php) restores with an equal data hash' '[[ $rc == 0 && $g != "$f" && "$(dhash "$rdb")" == "$(dhash "$dbn")" ]]'
+ok 'backup-db (bin/dump.php) restores with an equal data hash' '[[ $rc == 0 && $g != "$f" && "$(dhash "$rdb")" == "$(dhash "$dbn")" ]] && gzip -dc "$g" | head -1 | grep -q "MatDraw database dump"'
 run backup-files remote backup-files
 ok 'backup-files succeeds' '[[ $rc == 0 && $(count "uploads-*.tar.gz") -ge 1 ]]'
 
@@ -152,13 +159,17 @@ ok 'rollback returns to the previous release' '[[ $rc == 0 && $(readlink -f "$ba
 
 # --- floor guard (plan §2.8): R0 has no migrations (code before 0002) ---
 printf '%s\n' "$base/releases/$R0" > "$base/releases/$R1/.previous"
-run 'rollback to R0 without members' remote rollback
-ok 'rollback to a release before 0002 is allowed without members' '[[ $rc == 0 && $(readlink -f "$base/current") == "$base/releases/$R0" ]]'
+# PHP noise around the floor number (a notice on STDOUT and a deprecation through display_errors), only in migrate.php
+# --rollback-floor: the guard must still read the floor and allow the rollback.
+mkdir "$work/ini"; printf '%s\n' '<?php if(in_array("--rollback-floor",$argv??[],true)){echo "Deprecated: test notice on STDOUT\n";trigger_error("test deprecation",E_USER_DEPRECATED);}' > "$work/noise.php"
+printf 'auto_prepend_file=%s\nerror_reporting=E_ALL\ndisplay_errors=1\n' "$work/noise.php" > "$work/ini/zz-noise.ini"
+run 'rollback to R0 without members (PHP notices)' env PHP_INI_SCAN_DIR=":$work/ini" bash "$repo/scripts/deploy-remote.sh" rollback "$base" "$docroot"
+ok 'rollback to a release before 0002 is allowed without members, despite PHP notices' '[[ $rc == 0 && $(readlink -f "$base/current") == "$base/releases/$R0" ]] && ! grep -q "Powrót zablokowany" <<<"$out"'
 run 'activate R1 again' remote activate "$R1"
 ok 'activate a newer release needs no floor check' '[[ $rc == 0 && $(readlink -f "$base/current") == "$base/releases/$R1" && $(cat "$base/releases/$R1/.previous") == "$base/releases/$R0" ]]'
 sql "INSERT INTO users (id,club_id,email,role,active,password_hash,auth_version) VALUES ('m1',NULL,'member@test.example','member',1,'x',1)"
-run 'rollback to R0 with a member' remote rollback
-ok 'the floor guard blocks the rollback while a member exists' '[[ $rc != 0 && $(readlink -f "$base/current") == "$base/releases/$R1" ]] && grep -q "Powrót zablokowany" <<<"$out" && grep -q FORCE_ROLLBACK <<<"$out"'
+run 'rollback to R0 with a member' env PHP_INI_SCAN_DIR=":$work/ini" bash "$repo/scripts/deploy-remote.sh" rollback "$base" "$docroot"
+ok 'the floor guard blocks the rollback while a member exists' '[[ $rc != 0 && $(readlink -f "$base/current") == "$base/releases/$R1" ]] && grep -q "dane w bazie wymagają kodu co najmniej w wersji" <<<"$out" && grep -q FORCE_ROLLBACK <<<"$out"'
 run 'activate R0 with a member' remote activate "$R0"
 ok 'the floor guard also blocks activating the old release by name' '[[ $rc != 0 && $(readlink -f "$base/current") == "$base/releases/$R1" ]]'
 run 'FORCE_ROLLBACK=1 rollback' env FORCE_ROLLBACK=1 bash "$repo/scripts/deploy-remote.sh" rollback "$base" "$docroot"
@@ -195,7 +206,17 @@ cp -p "$work/config.keep" "$shared/config.php"
 
 # --- server-check (read-only) ---
 run server-check remote server-check
-ok 'server-check reports the database rights, schema and copies' '[[ $rc == 0 ]] && grep -q "Prawo bazy ALTER: tak" <<<"$out" && grep -q "Prawo bazy REFERENCES: tak" <<<"$out" && grep -q "Schemat bazy: v5" <<<"$out" && grep -q "Najnowsza kopia db-\*.sql.gz: db-" <<<"$out" && grep -q "Stripe:" <<<"$out"'
+ok 'server-check reports the database rights, schema and copies' '[[ $rc == 0 ]] && grep -q "Prawo bazy ALTER: tak" <<<"$out" && grep -q "Prawo bazy CREATE: tak" <<<"$out" && grep -q "Prawo bazy REFERENCES: tak" <<<"$out" && grep -q "Schemat bazy: v5" <<<"$out" && grep -q "Najnowsza kopia db-\*.sql.gz: db-" <<<"$out" && grep -q "Stripe:" <<<"$out"'
+# A hardened account (db_migrate): no CREATE/ALTER/REFERENCES here although it has CREATE TEMPORARY TABLES and ALL
+# PRIVILEGES on another database; the grant names this database by an escaped pattern (`a\_b`.*, as phpMyAdmin writes it).
+hpass=$(openssl rand -hex 12); hg=; edb=${dbn//_/\\_}
+for h in "${uhosts[@]}"; do hg+="CREATE USER IF NOT EXISTS 'md_${port}h'@'$h' IDENTIFIED BY '$hpass'; ALTER USER 'md_${port}h'@'$h' IDENTIFIED BY '$hpass';
+ GRANT SELECT, INSERT, UPDATE, DELETE, INDEX, CREATE TEMPORARY TABLES, LOCK TABLES ON \`$edb\`.* TO 'md_${port}h'@'$h'; GRANT ALL ON \`$rdb\`.* TO 'md_${port}h'@'$h'; "; done
+$root -e "$hg FLUSH PRIVILEGES;"
+"$php" -r '$c=require $argv[1];$c["db_migrate"]=["dsn"=>$c["db"]["dsn"],"user"=>$argv[2],"password"=>$argv[3]];echo "<?php\nreturn ",var_export($c,true),";\n";' "$work/config.keep" "md_${port}h" "$hpass" > "$shared/config.php"
+run 'server-check (hardened account)' remote server-check
+ok 'server-check counts only the exact rights on this database' '[[ $rc == 0 ]] && grep -q "Prawo bazy CREATE: NIE" <<<"$out" && grep -q "Prawo bazy ALTER: NIE" <<<"$out" && grep -q "Prawo bazy REFERENCES: NIE" <<<"$out" && grep -q "Prawo bazy INDEX: tak" <<<"$out" && grep -q "Schemat bazy: v5" <<<"$out"'
+cp -p "$work/config.keep" "$shared/config.php"
 
 echo "DEPLOY_SCRIPT_TEST: $n steps, $fails failed (work dir: $work)"
 [[ $fails == 0 ]]

@@ -45,14 +45,21 @@ code_target(){ local n=1 f id; for f in "$1"/backend/migrations/[0-9][0-9][0-9][
 # show members data they may not see. The floor comes from migrate.php of the active release, which knows every
 # migration the data could need; a target release at least as new as the active one never needs the database.
 floor_guard(){
- local dir=$1 cur want have floor
+ local dir=$1 cur want have floor= raw= err= tmp
  cur=$(readlink -f "$base/current" 2>/dev/null || true); [[ -n $cur && -d $cur && $cur != "$(readlink -f "$dir")" ]] || return 0
  want=$(code_target "$dir"); have=$(code_target "$cur"); ((want>=have)) && return 0
- if [[ -f $cur/backend/bin/migrate.php ]] && floor=$(MATDRAW_CONFIG=$cfg "$php" "$cur/backend/bin/migrate.php" --rollback-floor 2>&1) && [[ $floor =~ ^[0-9]+$ ]]; then
+ # PHP notices go to STDERR and only the last number-only line of STDOUT counts: a deprecation notice must not make the
+ # floor undeterminable (that would block the automatic rollback after a failed verify).
+ if [[ -f $cur/backend/bin/migrate.php ]]; then
+  tmp=$(mktemp "$base/shared/.floor.XXXXXX")
+  raw=$(MATDRAW_CONFIG=$cfg "$php" -d display_errors=stderr "$cur/backend/bin/migrate.php" --rollback-floor 2>"$tmp") && floor=$(grep -E '^[0-9]+$' <<<"$raw" | tail -1) || floor=
+  err=$(head -c 300 "$tmp" | tr '\n' ' '); rm -f "$tmp"
+ fi
+ if [[ -n $floor ]]; then
   ((floor<=want)) && return 0
   msg="Powrót zablokowany: dane w bazie wymagają kodu co najmniej w wersji $floor (np. istnieją konta członków), a wydanie $(basename "$dir") obsługuje tylko wersję $want. Starszy kod pokazałby członkom dane, których nie wolno im widzieć. Popraw błąd nowym wdrożeniem."
  else
-  msg="Powrót zablokowany: nie udało się sprawdzić, jakiej wersji kodu wymagają dane (${floor:-brak migrate.php}). Wydanie $(basename "$dir") obsługuje tylko wersję $want."
+  msg="Powrót zablokowany: nie udało się sprawdzić, jakiej wersji kodu wymagają dane ($(head -c 300 <<<"${err:-${raw:-brak migrate.php}}" | tr '\n' ' ')). Wydanie $(basename "$dir") obsługuje tylko wersję $want."
  fi
  [[ ${FORCE_ROLLBACK:-} == 1 ]] || fail "$msg Wymuszenie: FORCE_ROLLBACK=1 (tylko na własną odpowiedzialność, DEPLOY-PL.md)."
  warn "FORCE_ROLLBACK=1: $msg Kontynuuję na własną odpowiedzialność operatora."
@@ -131,8 +138,13 @@ if [[ $cmd == server-check ]]; then
   (cd "$site" && MATDRAW_CONFIG=$cfg "$php" -r 'require "backend/bootstrap.php";
    try{$c=matdraw_config();}catch(Throwable $e){exit("Konfiguracja: błąd (".$e->getMessage().")\n");}
    if(class_exists("MatDraw\\StripeClient")&&method_exists("MatDraw\\StripeClient","probe")){$p=MatDraw\StripeClient::probe($c);echo "Stripe: ",$p["reachable"]?"osiągalny":"NIEOSIĄGALNY"," status=",$p["status"]??"-"," czas=",$p["ms"]??"-","ms TLS=",$p["tls"]??"-",$p["error"]?" błąd=".$p["error"]:"","\n";}
-   try{$pdo=matdraw_database(["db"=>is_array($c["db_migrate"]??null)?$c["db_migrate"]:$c["db"]]);$g=implode(" ",$pdo->query("SHOW GRANTS FOR CURRENT_USER()")->fetchAll(PDO::FETCH_COLUMN));
-    $all=(bool)preg_match("/GRANT ALL PRIVILEGES/i",$g);foreach(["ALTER","CREATE","INDEX","REFERENCES"] as $r)echo "Prawo bazy $r: ",$all||preg_match("/\\b$r\\b/i",$g)?"tak":"NIE (potrzebne do migracji, DEPLOY-PL.md)","\n";
+   try{$pdo=matdraw_database(["db"=>is_array($c["db_migrate"]??null)?$c["db_migrate"]:$c["db"]]);$db=(string)$pdo->query("SELECT DATABASE()")->fetchColumn();$p=[];
+    // Only grants ON *.* or ON <a pattern matching this database>.* count; the privilege list is compared item by item
+    // ("CREATE TEMPORARY TABLES" is not CREATE, ALL PRIVILEGES on another database is not a right here).
+    foreach($pdo->query("SHOW GRANTS FOR CURRENT_USER()")->fetchAll(PDO::FETCH_COLUMN) as $l){if(!preg_match("/^GRANT (.+?) ON (.+)\\.\\* TO /i",$l,$m))continue;$t=str_replace("`","",$m[2]);
+     $re="";for($i=0,$n=strlen($t);$i<$n;$i++){$ch=$t[$i];$re.=$ch==="\\"&&$i+1<$n?preg_quote($t[++$i],"/"):($ch==="%"?".*":($ch==="_"?".":preg_quote($ch,"/")));}
+     if($t==="*"||preg_match("/^$re\$/s",$db))foreach(explode(",",$m[1]) as $x)$p[strtoupper(trim($x))]=1;}
+    foreach(["ALTER","CREATE","INDEX","REFERENCES"] as $r)echo "Prawo bazy $r: ",isset($p["ALL PRIVILEGES"])||isset($p["ALL"])||isset($p[$r])?"tak":"NIE (potrzebne do migracji, DEPLOY-PL.md)","\n";
     if(class_exists("MatDraw\\Migrator")){$m=new MatDraw\Migrator($pdo,"backend/migrations");echo "Schemat bazy: v",$m->current()," (kod v",MatDraw\Migrator::target("backend/migrations"),")\n";}
    }catch(Throwable $e){echo "Baza: błąd połączenia (",get_class($e),")\n";}' 2>&1) || true
  else echo 'Stripe i prawa bazy: brak config.php albo wdrożonego backendu.'; fi
