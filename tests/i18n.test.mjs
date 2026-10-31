@@ -137,11 +137,12 @@ test('activity entries stored in Polish by PHP and the demo adapter are translat
 
 test('promotional texts (dist/promo.js: advertisement and login/access offer) all have English entries',()=>english(()=>{
  const strings=[];
- const walk=(value,key)=>{if(['kind','brand','icon'].includes(key))return;if(typeof value==='string')strings.push(value);else if(value&&typeof value==='object')for(const [k,v] of Object.entries(value))walk(v,Array.isArray(value)?key:k);};
+ const walk=(value,key)=>{if(['kind','brand','icon','src','small','width','height'].includes(key))return;if(typeof value==='string')strings.push(value);else if(value&&typeof value==='object')for(const [k,v] of Object.entries(value))walk(v,Array.isArray(value)?key:k);};
  walk(AD);walk(ACCESS);
  assert.ok(strings.length>=20,'texts found: '+strings.length);
  const missing=strings.filter(s=>!Object.hasOwn(EN,s));assert.deepEqual(missing,[]);
  for(const s of strings){const out=t(s);assert.notEqual(out,s);assert.ok(!POLISH_LETTERS.test(out),out);}
  assert.match(t(AD.disclaimer),/fictional/,'the advertisement says the brand is fictional in both languages');
  assert.match(AD.disclaimer,/fikcyjn/);
+ assert.ok(AD.image&&AD.image.alt&&Object.hasOwn(EN,AD.image.alt),'the advertisement photo has a translated description');
 }));

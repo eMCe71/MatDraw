@@ -85,31 +85,29 @@
 }
 /* Sponsor pop-up (content in promo.js). Inline SVG only: the CSP allows no external images or fonts. */
 .promo-backdrop{background:#0a1a33b8}
-.modal.promo{position:relative;width:860px;flex-direction:row;border-radius:16px;box-shadow:0 40px 100px #050f2166}
+.modal.promo{position:relative;width:920px;flex-direction:row;border-radius:16px;box-shadow:0 40px 100px #050f2166}
 .modal.promo:focus{outline:none}
 .promo-close{position:absolute;top:14px;right:14px;z-index:3;width:38px;height:38px;border-radius:50%;display:grid;place-items:center;background:#f1f6fb;color:#2b4a6c;border:1px solid #d6e3f0;transition:background .18s,color .18s}
 .promo-close:hover{background:#e1edf8;color:#00448a}
 .promo-close .icon{width:18px;height:18px}
-.promo-kind{position:absolute;top:16px;left:16px;z-index:3;font-size:9px;font-weight:700;letter-spacing:1.6px;text-transform:uppercase;color:#fff;background:#0b1a33a6;border:1px solid #ffffff45;border-radius:999px;padding:5px 10px}
-.promo-visual{position:relative;flex:0 0 300px;display:flex;flex-direction:column;justify-content:flex-end;padding:28px 26px;color:#fff;overflow:hidden;background:radial-gradient(circle at 80% 12%,#00aeef5c,transparent 46%),linear-gradient(160deg,#0072bc 0%,#00448a 38%,#102447 100%)}
-.promo-art{position:absolute;top:40px;left:50%;width:250px;height:250px;transform:translateX(-50%)}
-.promo-brand{position:relative;font-size:28px;font-weight:800;letter-spacing:4px;line-height:1}
-.promo-tagline{position:relative;font-size:11px;line-height:1.5;color:#bfe3f7;margin-top:8px}
-.promo-main{flex:1;min-width:0;display:flex;flex-direction:column;overflow:auto}
+.promo-kind{position:absolute;bottom:16px;left:16px;z-index:3;font-size:9px;font-weight:700;letter-spacing:1.6px;text-transform:uppercase;color:#fff;background:#0b1a33a6;border:1px solid #ffffff45;border-radius:999px;padding:5px 10px}
+/* Advertising creative: a photo and warm colours from it (bordeaux, cream, wood, amber), so the ad reads as a separate brand. */
+.promo-visual{position:relative;flex:0 0 400px;overflow:hidden;background:#3a2018}.promo-visual img{display:block;width:100%;height:100%;object-fit:cover;object-position:50.5% 40%}
+.promo-main{flex:1;min-width:0;display:flex;flex-direction:column;overflow:auto;background:#fffaf3}
 .promo-body{padding:34px 34px 20px}
-.promo-eyebrow{display:block;font-size:9px;font-weight:700;letter-spacing:1.6px;text-transform:uppercase;color:#0072bc;margin-bottom:10px;padding-right:48px}
-.modal.promo h2{font-size:25px;letter-spacing:-.7px;line-height:1.2;color:#102447;padding-right:24px}
-.promo-body>#promo-text{font-size:12.5px;line-height:1.75;color:#5a6f88;margin-top:10px}
+.promo-eyebrow{display:block;font-size:9px;font-weight:700;letter-spacing:1.6px;text-transform:uppercase;color:#a3262c;margin-bottom:10px;padding-right:48px}
+.modal.promo h2{font-size:25px;letter-spacing:-.7px;line-height:1.2;color:#2f1a12;padding-right:24px}
+.promo-body>#promo-text{font-size:12.5px;line-height:1.75;color:#6b5546;margin-top:10px}
 .promo-products{list-style:none;margin:20px 0 0;padding:0;display:grid;grid-template-columns:1fr 1fr;gap:10px}
-.promo-products li{display:flex;gap:11px;align-items:flex-start;padding:12px;border:1px solid #e3ebf4;border-radius:10px;background:#fbfdff}
-.promo-product-icon{width:36px;height:36px;flex-shrink:0;border-radius:9px;background:#eaf5fc;color:#0072bc;display:grid;place-items:center}
+.promo-products li{display:flex;gap:11px;align-items:flex-start;padding:12px;border:1px solid #efdfca;border-radius:10px;background:#fff}
+.promo-product-icon{width:36px;height:36px;flex-shrink:0;border-radius:9px;background:#f9e6cf;color:#a3262c;display:grid;place-items:center}
 .promo-product-icon .icon{width:21px;height:21px}
-.promo-products strong{display:block;font-size:12px;line-height:1.35;color:#19324f}
-.promo-products small{display:block;font-size:10.5px;line-height:1.45;color:#6b7f97;margin-top:3px}
-.promo-offer{display:flex;align-items:center;flex-wrap:wrap;gap:8px 10px;margin-top:14px;padding:12px 14px;border-radius:10px;background:#102447;color:#e3f2fd;font-size:12px;font-weight:550}
-.promo-offer>.icon{width:17px;height:17px;color:#65c8ec}
-.promo-offer em{margin-left:auto;font-style:normal;font-size:10px;font-weight:700;letter-spacing:.3px;color:#0b1d3a;background:#65c8ec;border-radius:999px;padding:4px 10px}
-.promo-disclaimer{font-size:10px;line-height:1.6;color:#7f90a5;margin-top:12px}
+.promo-products strong{display:block;font-size:12px;line-height:1.35;color:#2f1a12}
+.promo-products small{display:block;font-size:10.5px;line-height:1.45;color:#806a5a;margin-top:3px}
+.promo-offer{display:flex;align-items:center;flex-wrap:wrap;gap:8px 10px;margin-top:14px;padding:12px 14px;border-radius:10px;background:#7e1d24;color:#fdf1e2;font-size:12px;font-weight:550}
+.promo-offer>.icon{width:17px;height:17px;color:#f6c35b}
+.promo-offer em{margin-left:auto;font-style:normal;font-size:10px;font-weight:700;letter-spacing:.3px;color:#3a1d0e;background:#f6c35b;border-radius:999px;padding:4px 10px}
+.promo-disclaimer{font-size:10px;line-height:1.6;color:#94806f;margin-top:12px}
 .promo-foot{margin-top:auto;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px 16px;padding:16px 34px;background:#f5f8fc;border-top:1px solid var(--line)}
 .promo-next{display:flex;align-items:center;gap:8px;flex:1 1 200px;min-width:0;font-size:11px;line-height:1.5;color:#5a6f88}
 .promo-next .icon{width:16px;height:16px;color:#0072bc}
@@ -117,22 +115,19 @@
 .promo-actions{display:flex;flex-wrap:wrap;gap:8px}
 @media(max-width:760px){
  .modal.promo{flex-direction:column;overflow:auto}
- .promo-visual{flex:0 0 auto;min-height:170px;padding:20px 22px}
- .promo-art{top:-8px;left:auto;right:-14px;transform:none;width:196px;height:196px}
- .promo-brand{font-size:24px}
+ .promo-visual{flex:0 0 auto;height:240px}
+ .promo-visual img{object-position:50% 0}
  .promo-main{overflow:visible}
  .promo-body{padding:24px 22px 16px}
  .modal.promo h2{font-size:22px;padding-right:0}
  .promo-eyebrow{padding-right:0}
- .promo-tagline{max-width:58%}
  .promo-foot{position:sticky;bottom:0;z-index:2;padding:12px 22px 16px;box-shadow:0 -10px 24px #0f24470f}
  .promo-next{display:none}
  .promo-actions{width:100%;flex-direction:column-reverse;gap:6px}
  .promo-actions .btn{width:100%;min-height:42px}
 }
 @media(max-width:440px){
- .promo-visual{min-height:150px;padding:18px 18px 18px}
- .promo-art{width:172px;height:172px;right:-30px}
+ .promo-visual{height:205px}
  .promo-body{padding:20px 18px 14px}
  .modal.promo h2{font-size:21px}
  .promo-products{gap:8px;margin-top:16px}

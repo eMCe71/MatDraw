@@ -4,7 +4,8 @@
  * No external links, images, scripts or tracking: the page CSP allows only the app's own files. */
 
 /** Advertisement shown after a guest picks a tournament from "Upcoming tournaments". Closing it opens the guest preview.
- * KYORUVO is an invented brand; it does not refer to any real company. */
+ * KYORUVO is an invented brand; it does not refer to any real company. The photo is a generated image (dist/promo/);
+ * its warm colours deliberately differ from the MatBravo blues so the ad reads as a separate brand. */
 export const AD={
  kind:'advertisement',
  label:'Reklama',
@@ -12,7 +13,8 @@ export const AD={
  eyebrow:'Sprzęt do taekwondo',
  headline:'Sprzęt, który wytrzyma cały sezon.',
  text:'Doboki, rękawice i ochraniacze dla zawodników, trenerów i całych sekcji — od pierwszego treningu po finał.',
- tagline:'Wyposażenie zawodnika od stóp do głów',
+ image:{src:'./promo/kyoruvo-storefront-1200.webp',small:'./promo/kyoruvo-storefront-720.webp',width:1200,height:800,
+  alt:'Witryna sklepu KYORUVO z dobokami, pasami, kaskami i rękawicami, widziana z ulicy'},
  products:[
   {icon:'dobok',title:'Doboki',text:'Lekkie, przewiewne, z haftem klubu'},
   {icon:'glove',title:'Rękawice',text:'Otwarte i zamknięte, od rozmiarów dziecięcych'},

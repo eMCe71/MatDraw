@@ -481,7 +481,7 @@ export default {
  'Sprzęt do taekwondo':'Taekwondo equipment',
  'Sprzęt, który wytrzyma cały sezon.':'Gear built to last the whole season.',
  'Doboki, rękawice i ochraniacze dla zawodników, trenerów i całych sekcji — od pierwszego treningu po finał.':'Doboks, gloves and protectors for athletes, coaches and whole clubs — from the first training session to the final.',
- 'Wyposażenie zawodnika od stóp do głów':'Kit for every athlete, from head to toe',
+ 'Witryna sklepu KYORUVO z dobokami, pasami, kaskami i rękawicami, widziana z ulicy':'The KYORUVO shop window with doboks, belts, head guards and gloves, seen from the street',
  'Doboki':'Doboks',
  'Lekkie, przewiewne, z haftem klubu':'Light, breathable, with your club’s embroidery',
  'Rękawice':'Gloves',
