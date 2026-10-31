@@ -2,7 +2,9 @@
 // member isolation, me for every role, public-config, the payment gate for staff, read-only peek sessions (no file, no
 // cookie, activity refresh after idle/4), maintenance and schema-behind 503, client_outdated, the session lock during
 // background jobs, login timing and limits, and session housekeeping through bin/cron.php. Run through scripts/test-http.sh.
-import test,{before,beforeEach} from 'node:test';
+// Routes::dispatch paths that no route of this slice uses yet (session POST, upload, webhook, chat-off, null → 204, user
+// rules, work after a session POST) run against test-only routes (TEST_ROUTES) written into the disposable release.
+import test,{after,before,beforeEach} from 'node:test';
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
 import {existsSync,readdirSync,unlinkSync,utimesSync,writeFileSync} from 'node:fs';
@@ -14,9 +16,18 @@ const repo=path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const backend=path.join(process.env.MATDRAW_TEST_RELEASE||repo,'backend');
 const shared=process.env.MATDRAW_TEST_SHARED_DIR,sessions=shared?path.join(shared,'sessions'):'';
 const skip=!base||!shared;
+// The test-only routes go into the disposable build of scripts/test-http.sh only, never into the repository.
+const release=process.env.MATDRAW_TEST_RELEASE,routesFile=release?path.join(release,'backend','routes','zz-test-routes.php'):null,skipRoutes=skip||!release;
 const ADMIN=['admin@test.example','AdminForTests2026!'],PASSWORD='MemberPassword2026!';
 const sessionFiles=()=>readdirSync(sessions).filter(f=>f.startsWith('sess_')).sort();
 const now=()=>Math.floor(Date.now()/1000);
+/** A POST with an exact body and Content-Type (none when type is null); never stores cookies. */
+async function send(route,{cookie,csrf,type='application/json',data='',json,headers={}}={}){
+ const body=Buffer.from(json!==undefined?JSON.stringify(json):data);
+ const r=await fetch(base+'?route='+route,{method:'POST',headers:{'X-MatBravo-Client':'1',...(cookie?{Cookie:cookie}:{}),...(csrf?{'X-CSRF-Token':csrf}:{}),...(type?{'Content-Type':type}:{}),...headers},body});
+ const text=await r.text();let parsed=null;try{parsed=text?JSON.parse(text):null;}catch{parsed={raw:text};}
+ return {status:r.status,headers:r.headers,data:parsed,text};
+}
 /** One request with full control over cookies and headers; never stores cookies. */
 async function raw(route,{method='GET',cookie,headers={},body}={}){
  const r=await fetch(base+'?route='+route,{method,headers:{'X-MatBravo-Client':'1',...(cookie?{Cookie:cookie}:{}),...(body?{'Content-Type':'application/json'}:{}),...headers},...(body?{body:JSON.stringify(body)}:{})});
@@ -42,7 +53,32 @@ const blockOr=(data,block)=>block??(data.features.chat?null:'off');
 // The server may serve a cached config.php for up to opcache.revalidate_freq (2 s) after a rewrite.
 const CONFIG_RELOAD_MS=2600;
 async function until(probe,expected,ms=6000){let v;for(const end=Date.now()+ms;Date.now()<end;await sleep(200))if((v=await probe())===expected)break;return v;}
-before(()=>fixture('reset-limits'));
+const TEST_ROUTES=String.raw`<?php
+// Test-only routes of tests/accounts.http.test.mjs, written into the disposable release and removed after the tests.
+declare(strict_types=1);
+use MatDraw\{ApiError,Jobs,RouteContext};
+$echo=static fn(RouteContext $ctx):array=>['route'=>$ctx->name,'role'=>$ctx->user()['role']??null,'body'=>$ctx->body,'len'=>strlen($ctx->raw())];
+return [
+ // Work after the response of a session POST, as in chat-send (§3.7): Jobs::maybe must release the session lock first.
+ 'zt-jobs'=>['method'=>'POST','auth'=>'session','handler'=>function(RouteContext $ctx):array{$pdo=$ctx->pdo();$c=$ctx->config;register_shutdown_function(static fn()=>Jobs::maybe($pdo,$c));return ['ok'=>true];}],
+ // Control: slow work after the response that keeps the session open holds the next request of the same person.
+ 'zt-hold'=>['method'=>'POST','auth'=>'session','handler'=>function():array{register_shutdown_function(static fn()=>usleep(1500000));return ['ok'=>true];}],
+ 'zt-post'=>['method'=>'POST','auth'=>'session','user'=>'optional','max'=>200,'handler'=>$echo],
+ 'zt-none'=>['method'=>'POST','auth'=>'session','user'=>'optional','handler'=>fn()=>null],
+ 'zt-fail'=>['method'=>'POST','auth'=>'session','user'=>'optional','handler'=>fn()=>throw new ApiError('Brak uprawnień.',409,['code'=>'zt'])],
+ 'zt-upload'=>['method'=>'POST','auth'=>'upload','types'=>['image/png','image/jpeg'],'max'=>16,'handler'=>$echo],
+ 'zt-upload-own'=>['method'=>'POST','auth'=>'upload','types'=>['image/png'],'max'=>16,'reject'=>fn(int $s)=>throw new ApiError('own '.$s,$s,['code'=>'own']),'handler'=>$echo],
+ 'zt-webhook'=>['method'=>'POST','auth'=>'webhook','max'=>32,'handler'=>$echo],
+ 'zt-chat'=>['method'=>'GET','auth'=>'public','tag'=>'chat','handler'=>fn()=>['ok'=>true]],
+ 'zt-anon'=>['method'=>'GET','auth'=>'session','user'=>'anon','handler'=>$echo],
+ 'zt-required'=>['method'=>'GET','auth'=>'session','handler'=>$echo],
+ 'zt-member'=>['method'=>'GET','auth'=>'session','user'=>'member','handler'=>$echo],
+ 'zt-admin'=>['method'=>'GET','auth'=>'session','user'=>'admin','handler'=>$echo],
+ 'zt-admin-peek'=>['method'=>'GET','auth'=>'peek','user'=>'admin','handler'=>$echo],
+];
+`;
+before(()=>{fixture('reset-limits');if(!skipRoutes)writeFileSync(routesFile,TEST_ROUTES);});
+after(()=>{if(routesFile&&existsSync(routesFile))unlinkSync(routesFile);});
 // Every scenario signs in several times from 127.0.0.1 (8 attempts per address and e-mail in 15 minutes).
 beforeEach(()=>fixture('reset-limits'));
 
@@ -209,21 +245,93 @@ test('maintenance file and schema behind code answer 503 with Retry-After; an ou
  const list=await fetch(base+'?route[]=me');assert.equal(list.status,404);
 });
 
-test('a slow background job does not hold the session: a second request with the same cookie answers in < 1 s',{skip},async()=>{
- const c=await signIn(...ADMIN);
+test('work after the response never holds the session: a second request with the same cookie answers in < 1 s',{skip:skipRoutes},async()=>{
+ const c=await signIn(...ADMIN),second=async()=>{const t=performance.now(),r=await raw('session',{cookie:c.cookie});assert.equal(r.status,200);assert.equal(r.data.user.id,c.login.data.user.id);return performance.now()-t;};
+ // Control: a shutdown function that keeps the session open holds the next request (so this measurement can fail).
+ const hold=c.req('zt-hold',{});await sleep(300);const held=await second();assert.equal((await hold).status,200);
+ assert.ok(held>=1000,`the held session lock was not noticed (${Math.round(held)} ms)`);
  const old=fixture('config-set',{set:{job_test_sleep_ms:2500}});await sleep(CONFIG_RELOAD_MS);
  try{
-  fixture('jobs-reset');const start=now(),t0=performance.now();
-  const first=raw('me',{cookie:c.cookie}).then(r=>({...r,took:performance.now()-t0}));await sleep(400);
-  const t=performance.now(),second=await raw('session',{cookie:c.cookie}),took=performance.now()-t;
-  assert.equal(second.status,200);assert.equal(second.data.user.id,c.login.data.user.id);assert.ok(took<1000,`second request took ${Math.round(took)} ms`);
+  // A session POST (as chat-send) runs a slowed job after its response: Jobs::maybe released the session first.
+  fixture('jobs-reset');let start=now(),t0=performance.now();
+  const first=c.req('zt-jobs',{}).then(r=>({...r,took:performance.now()-t0}));await sleep(400);
+  const took=await second();assert.ok(took<1000,`second request took ${Math.round(took)} ms`);
   // php -S has no fastcgi_finish_request: the first answer ends after the slowed job, which proves the job ran meanwhile.
   const a=await first;assert.equal(a.status,200);assert.ok(a.took>=2000,`the job was not slowed down (${Math.round(a.took)} ms)`);
-  const ran=fixture('job-runs').filter(r=>r.last_run_at>=start);assert.equal(ran.length,1,'exactly one job per request: '+JSON.stringify(fixture('job-runs')));
+  assert.equal(fixture('job-runs').filter(r=>r.last_run_at>=start).length,1,'exactly one job per request: '+JSON.stringify(fixture('job-runs')));
   assert.ok(existsSync(path.join(shared,'jobs-tick')),'the sampling file is touched');
-  // Sampling: within 30 s of the tick no further job runs.
-  assert.equal((await raw('me',{cookie:c.cookie})).status,200);assert.equal(fixture('job-runs').filter(r=>r.last_run_at>=start).length,1);
+  // Sampling: within 30 s of the tick no further job runs (me and the session POST).
+  assert.equal((await raw('me',{cookie:c.cookie})).status,200);assert.equal((await c.req('zt-jobs',{})).status,200);
+  assert.equal(fixture('job-runs').filter(r=>r.last_run_at>=start).length,1);
+  // me runs one job after its response too.
+  fixture('jobs-reset');start=now();t0=performance.now();
+  const m=await raw('me',{cookie:c.cookie});assert.equal(m.status,200);assert.ok(performance.now()-t0>=2000,'me ran the slowed job');
+  assert.equal(fixture('job-runs').filter(r=>r.last_run_at>=start).length,1);
  }finally{fixture('config-set',{set:{job_test_sleep_ms:old.job_test_sleep_ms}});}
+});
+
+test('dispatch of session POST: Origin and CSRF, JSON type, size, depth and shape; errors carry csrf; null answers 204',{skip:skipRoutes},async()=>{
+ const c=await fresh(),{cookie,csrf}=c,fail=error=>({error,csrf});
+ assert.deepEqual(await send('zt-post',{cookie,json:{a:1}}).then(r=>[r.status,r.data]),[403,fail('Sesja formularza wygasła. Odśwież stronę.')]);
+ assert.deepEqual(await send('zt-post',{cookie,csrf:'0'.repeat(64),json:{a:1}}).then(r=>[r.status,r.data]),[403,fail('Sesja formularza wygasła. Odśwież stronę.')]);
+ assert.deepEqual(await send('zt-post',{cookie,csrf,json:{a:1},headers:{Origin:'https://evil.example'}}).then(r=>[r.status,r.data]),[403,fail('Niedozwolone źródło żądania.')]);
+ let r=await c.req('zt-post',{a:'Zażółć'});assert.equal(r.status,200);assert.deepEqual(r.data,{route:'zt-post',role:null,body:{a:'Zażółć'},len:0});
+ assert.deepEqual((await c.req('zt-post',[1,[2]])).data.body,[1,[2]]);
+ assert.equal((await send('zt-post',{cookie,csrf,type:'Application/JSON; charset=utf-8',json:{b:2}})).status,200);
+ assert.equal((await send('zt-post',{cookie,csrf,data:JSON.stringify({x:'y'.repeat(192)})})).status,200,'200 bytes is the limit');
+ const nested=n=>'['.repeat(n)+']'.repeat(n);assert.equal((await send('zt-post',{cookie,csrf,data:nested(20)})).status,200);
+ for(const [type,data,status,error] of [['text/plain','{"a":1}',415,'Wymagany format JSON.'],[null,'{"a":1}',415,'Wymagany format JSON.'],
+  ['application/json',JSON.stringify({x:'y'.repeat(193)}),413,'Żądanie jest zbyt duże.'],['application/json','{',400,'Niepoprawny JSON.'],['application/json','',400,'Niepoprawny JSON.'],
+  ['application/json',nested(40),400,'Niepoprawny JSON.'],['application/json','"x"',400,'Niepoprawny formularz.'],['application/json','12',400,'Niepoprawny formularz.']]){
+  r=await send('zt-post',{cookie,csrf,type,data});assert.deepEqual([r.status,r.data],[status,fail(error)],`${type} ${data.slice(0,20)}`);
+ }
+ r=await send('zt-none',{cookie,csrf,json:{}});assert.equal(r.status,204);assert.equal(r.text,'');assert.equal(r.headers.get('content-type'),null);
+ r=await c.req('zt-fail',{});assert.deepEqual([r.status,r.data],[409,{error:'Brak uprawnień.',csrf,code:'zt'}]);
+ r=await raw('zt-post',{cookie});assert.equal(r.status,405);assert.equal(r.headers.get('allow'),'POST');assert.equal(r.data.error,'Niedozwolona metoda.');
+});
+
+test('dispatch of upload and webhook: content types, size limits, own rejection messages, no session for webhooks',{skip:skipRoutes},async()=>{
+ const admin=await signIn(...ADMIN),{cookie,csrf}=admin,png=Buffer.alloc(10,0x89),fail=error=>({error,csrf});
+ let r=await send('zt-upload',{cookie,csrf,type:'image/png',data:png});assert.deepEqual([r.status,r.data],[200,{route:'zt-upload',role:'admin',body:[],len:10}]);
+ assert.equal((await send('zt-upload',{cookie,csrf,type:'IMAGE/JPEG; charset=binary',data:Buffer.alloc(16)})).status,200);
+ for(const [type,data,status,error] of [['image/gif',png,415,'Nieobsługiwany format danych.'],[null,png,415,'Nieobsługiwany format danych.'],['image/png',Buffer.alloc(17),413,'Żądanie jest zbyt duże.']]){
+  r=await send('zt-upload',{cookie,csrf,type,data});assert.deepEqual([r.status,r.data],[status,fail(error)],String(type));
+ }
+ assert.deepEqual(await send('zt-upload-own',{cookie,csrf,type:'image/gif',data:png}).then(r=>[r.status,r.data]),[415,{...fail('own 415'),code:'own'}]);
+ assert.deepEqual(await send('zt-upload-own',{cookie,csrf,type:'image/png',data:Buffer.alloc(17)}).then(r=>[r.status,r.data]),[413,{...fail('own 413'),code:'own'}]);
+ assert.deepEqual(await send('zt-upload',{cookie,type:'image/png',data:png}).then(r=>[r.status,r.data]),[403,fail('Sesja formularza wygasła. Odśwież stronę.')]);
+ const guest=await fresh();
+ assert.deepEqual(await send('zt-upload',{cookie:guest.cookie,csrf:guest.csrf,type:'image/png',data:png}).then(r=>[r.status,r.data]),[401,{error:'Zaloguj się ponownie.',csrf:guest.csrf}]);
+ // Webhook: no session, no CSRF, any content type; the raw body reaches the handler.
+ for(const c of [undefined,cookie]){
+  r=await send('zt-webhook',{cookie:c,type:'application/json',data:'{"id":"evt_1"}',headers:{'Stripe-Signature':'t=1,v1=x'}});
+  assert.deepEqual([r.status,r.data],[200,{route:'zt-webhook',role:null,body:[],len:14}]);assert.equal(r.headers.get('set-cookie'),null);
+ }
+ r=await send('zt-webhook',{data:'x'.repeat(33)});assert.deepEqual([r.status,r.data],[413,{error:'Żądanie jest zbyt duże.'}]);
+ r=await raw('zt-webhook');assert.equal(r.status,405);assert.equal(r.headers.get('allow'),'POST');
+});
+
+test('dispatch: a chat-tagged route answers 503 chat_off while <shared>/chat-off exists; user rules answer 401 and 403 first',{skip:skipRoutes},async()=>{
+ const flag=path.join(shared,'chat-off');
+ assert.deepEqual(await raw('zt-chat').then(r=>[r.status,r.data]),[200,{ok:true}]);
+ writeFileSync(flag,'');
+ try{
+  const r=await raw('zt-chat');assert.equal(r.status,503);assert.equal(r.headers.get('retry-after'),'300');
+  assert.deepEqual(r.data,{error:'Czat jest chwilowo wyłączony. Spróbuj później.',code:'chat_off'});
+ }finally{unlinkSync(flag);}
+ assert.equal((await raw('zt-chat')).status,200);
+ fixture('member',{email:'reguly.api@test.example',password:PASSWORD,profile:true,exempt:true});
+ const guest=await fresh(),member=await signIn('reguly.api@test.example'),admin=await signIn(...ADMIN);
+ const who={guest,member,admin},E401='Zaloguj się ponownie.',E403='Brak uprawnień.';
+ // route: [guest, member, admin] → role on 200, else the status
+ const rules={'zt-anon':[null,403,403],'zt-required':[401,'member','admin'],'zt-member':[401,'member',403],'zt-admin':[401,403,'admin'],'zt-admin-peek':[401,403,'admin']};
+ for(const [route,expected] of Object.entries(rules))for(const [i,[name,c]] of Object.entries(Object.entries(who))){
+  const r=await raw(route,{cookie:c.cookie}),want=expected[i],peek=route==='zt-admin-peek',label=route+' '+name;
+  if(typeof want==='number'){assert.equal(r.status,want,label);assert.deepEqual(r.data,{error:want===401?E401:E403,...(peek?{}:{csrf:c.csrf})},label);}
+  else{assert.equal(r.status,200,label);assert.equal(r.data.role,want,label);}
+  if(peek)assert.equal(r.headers.get('set-cookie'),null,label);
+ }
+ assert.equal((await member.req('session')).data.user.role,'member','a refused route keeps the session');
 });
 
 test('login: equal cost for known and unknown e-mails; 8 attempts per address and e-mail, then 429 with Retry-After',{skip},async()=>{
