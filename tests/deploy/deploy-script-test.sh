@@ -11,6 +11,9 @@
 #  - a rollback to a release without sw.js (the code before the PWA) leaves a kill-switch sw.js with no-cache in the
 #    docroot, and the next activate of a release with its own sw.js replaces it;
 #  - cleanup deletes copies older than 30 days and always keeps the newest one of each kind;
+#  - the release's public/.htaccess keeps what php -S never exercises: the own RewriteEngine block (without it the
+#    AfterMarket account-level ~/.htaccess answers 429), the CSP, the PWA MIME types and no-cache for sw.js; no other
+#    .htaccess under public/ has a RewriteEngine line;
 #  - deploy-verify: ROLLBACK=false on a good release, ROLLBACK=true for a schema older than the code, ROLLBACK=false
 #    with the maintenance file, 503 chat_off accepted with the chat-off file; poll-probe.sh reports the status codes.
 # Usage: tests/deploy/deploy-script-test.sh [port] [db_name]   (defaults 8090 and matdraw_deploy_test_<port>)
@@ -95,6 +98,13 @@ foreach($cols as $t=>$cs){$rows=[];$q=$pdo->query('SELECT `'.implode('`,`',$cs).
 PHP
 dhash(){ "$php" "$work/hash.php" "$@"; }
 restore(){ $root -e "DROP DATABASE IF EXISTS \`$rdb\`; CREATE DATABASE \`$rdb\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;" && gzip -dc "$1" | $root "$rdb"; }
+
+# --- the release's .htaccess (php -S ignores it, so only this check protects it) ---
+ht=$work/build/matdraw-php/public/.htaccess
+ok '.htaccess keeps its own RewriteEngine block with the https/www redirect (AfterMarket answers 429 without it)' 'grep -qx "<IfModule mod_rewrite.c>" "$ht" && grep -qx " RewriteEngine On" "$ht" && grep -qxF " RewriteRule ^ https://%2%{REQUEST_URI} [R=301,L]" "$ht"'
+ok '.htaccess sends the CSP and the PWA MIME types' 'grep -qF "Header always set Content-Security-Policy \"default-src '"'"'self'"'"'; script-src '"'"'self'"'"';" "$ht" && grep -qx " AddType application/manifest+json .webmanifest" "$ht" && grep -qx " AddType text/javascript .js .mjs" "$ht"'
+ok '.htaccess serves sw.js with no-cache' 'grep -A1 -xF " <FilesMatch \"^sw\\.js\$\">" "$ht" | grep -qF "Header set Cache-Control \"no-cache, max-age=0\""'
+ok 'no other .htaccess under public/ has its own RewriteEngine line' '[[ -z $(find "$work/build/matdraw-php/public" -name .htaccess ! -path "$ht" -exec grep -l RewriteEngine {} +) ]]'
 
 # --- check: directories outside the release ---
 run check remote check "$app"
