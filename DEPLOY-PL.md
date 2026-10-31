@@ -344,7 +344,7 @@ W hali wiele telefonów ma ten sam adres IP (wspólne Wi-Fi), więc limity liczo
 | Klucz | Domyślnie | Co liczy |
 |---|---|---|
 | `signup_limit_ip_hour` / `signup_limit_ip_day` | 30 / 100 | nowe konta z jednego IP na godzinę / dobę |
-| `signup_limit_global_hour` | 200 | wszystkie nowe konta na godzinę (hamulec przed botami) |
+| `signup_limit_global_hour` | 200 | wszystkie nowe konta na godzinę (hamulec przed botami); liczą się tylko konta faktycznie założone, nie nieudane próby; `0` wyłącza hamulec |
 | `login_limit_ip` | 100 | próby logowania z jednego IP na 15 minut (para IP + e-mail: 8) |
 | `username_check_limit_session` / `username_check_limit_ip` | 30 / 300 | sprawdzenia nazwy użytkownika na 10 minut |
 

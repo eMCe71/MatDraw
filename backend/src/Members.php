@@ -75,21 +75,26 @@ final class Members {
   $_SESSION['signup_at']=time();return ['ok'=>true];
  }
  /**
-  * signup (§3.6): open check, limits per address (/64) and globally, bot trap and server-measured fill time (one
-  * message for both), validation, one transaction users + user_profiles + billing_accounts (not exempt), then sign-in.
+  * signup (§3.6): open check, attempt limits per address (/64), the global brake, bot trap and server-measured fill time
+  * (one message for both), validation, one transaction users + user_profiles + billing_accounts (not exempt), then
+  * sign-in. The global brake (signup_limit_global_hour, 0 = off) counts accounts created in the hour, not attempts: a
+  * junk or bot-trap request costs only its own address's quota and can never block everybody else's sign-up.
   */
  public static function signup(PDO $pdo,array $c,array $in):array {
   if(!self::signupOpen($c,$in['invite']??null))throw new AppError('Rejestracja jest chwilowo wyłączona.',404);
-  $ip=ClientIp::bucket($c);
-  foreach([['signup-ip-hour',$ip,(int)$c['signup_limit_ip_hour'],3600],['signup-ip-day',$ip,(int)$c['signup_limit_ip_day'],86400],['signup-global','all',(int)$c['signup_limit_global_hour'],3600]] as [$scope,$key,$limit,$window])
-   if($s=RateLimit::hit($pdo,$c['app_key'],$scope,$key,$limit,$window)){Routes::retryAfter($s);throw new ApiError('Zbyt wiele prób zakładania konta. Spróbuj ponownie później.',429,['retry'=>$s]);}
+  $ip=ClientIp::bucket($c);$global=(int)$c['signup_limit_global_hour'];
+  foreach([['signup-ip-hour',$ip,(int)$c['signup_limit_ip_hour'],3600],['signup-ip-day',$ip,(int)$c['signup_limit_ip_day'],86400]] as [$scope,$key,$limit,$window])
+   if($s=RateLimit::hit($pdo,$c['app_key'],$scope,$key,$limit,$window))self::tooManySignups($s);
+  if($global>0&&($s=RateLimit::peek($pdo,$c['app_key'],'signup-global','all',$global,3600)))self::tooManySignups($s);
   $started=$_SESSION['signup_at']??null;$age=is_int($started)?time()-$started:-1;
   if(!in_array($in['website']??null,[null,''],true)||$age<self::SIGNUP_MIN_SECONDS||$age>self::SIGNUP_MAX_SECONDS)throw new AppError('Nie udało się założyć konta. Spróbuj ponownie.',400);
   $email=self::email($in['email']??null);$hash=Domain::password(is_string($in['password']??null)?$in['password']:'');$profile=Profiles::validate($in);
   $id=self::create($pdo,$email,$hash,$profile,['billing_exempt'=>0],time(),null);
+  if($global>0)RateLimit::hit($pdo,$c['app_key'],'signup-global','all',$global,3600);
   unset($_SESSION['signup_at']);$u=Accounts::find($pdo,$id);Auth::enter($u,$c);
   return ['user'=>Accounts::safe($u),'csrf'=>$_SESSION['csrf']];
  }
+ private static function tooManySignups(int $s):never{Routes::retryAfter($s);throw new ApiError('Zbyt wiele prób zakładania konta. Spróbuj ponownie później.',429,['retry'=>$s]);}
  /**
   * The rows of a new member in one transaction. Duplicates: e-mail → neutral 409 (signup) or the Admin's message, username
   * → 409, public_id collision → new id (3 tries). Returns the user id.
