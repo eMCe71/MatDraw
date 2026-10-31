@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<!-- Served by the service worker when a page outside the app shell cannot be loaded (plan §9.2, research 04 §1.4.4). Static and
+     self-contained: inline style only (the CSP forbids inline scripts), files from the precache, both languages chosen by lang-boot.js. -->
+<title>MatBravo</title>
+<meta name="robots" content="noindex"><meta name="theme-color" content="#00448a">
+<link rel="icon" href="./favicon.svg" type="image/svg+xml">
+<script src="./lang-boot.js"></script>
+<style>
+@font-face{font-family:Manrope;font-style:normal;font-weight:400 800;font-display:swap;src:url(./fonts/manrope-latin.woff2) format("woff2")}
+*{box-sizing:border-box}
+html{font-family:Manrope,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:#19324f;background:#eff8ff;font-size:16px;line-height:1.5;-webkit-font-smoothing:antialiased}
+body{margin:0;min-height:100vh;min-height:100dvh;display:flex;align-items:center;justify-content:center;padding:24px 16px}
+main{width:100%;max-width:440px;background:#fff;border:1px solid #dfe7f0;border-radius:12px;box-shadow:0 12px 32px #00448a14;padding:32px 28px;text-align:center}
+.logo{display:block;height:28px;width:auto;margin:0 auto 20px}
+.mascot{display:block;width:132px;height:auto;margin:0 auto 12px}
+h1{font-size:22px;line-height:1.25;font-weight:800;margin:0 0 10px;color:#102447;letter-spacing:-.01em}
+p{margin:0 0 24px;color:#617188;font-size:15px}
+.btn{display:inline-flex;align-items:center;justify-content:center;min-height:44px;padding:11px 22px;border-radius:6px;background:#00448a;color:#fff;font-weight:700;font-size:15px;text-decoration:none}
+.btn:hover{background:#003a75}.btn:focus-visible{outline:3px solid #00aeef;outline-offset:2px}
+html[lang=en] .pl,html:not([lang=en]) .en{display:none}
+@media (max-width:420px){main{padding:28px 20px}h1{font-size:20px}}
+</style>
+</head>
+<body>
+<main>
+<img class="logo" src="./brand/matbravo-logo-color.svg" alt="MatBravo" width="200" height="28">
+<img class="mascot" src="./brand/matbravo-guide.webp" alt="" width="301" height="320">
+<div class="pl" lang="pl"><h1>Brak połączenia z internetem</h1><p>MatBravo potrzebuje internetu, aby pobrać turnieje i czat. Sprawdź połączenie i spróbuj ponownie.</p><a class="btn" href="./">Spróbuj ponownie</a></div>
+<div class="en" lang="en"><h1>You are offline</h1><p>MatBravo needs the internet to load tournaments and chat. Check your connection and try again.</p><a class="btn" href="./">Try again</a></div>
+</main>
+</body>
+</html>

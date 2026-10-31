@@ -1,15 +1,9 @@
 // Requires an isolated initialized test DB, PHP server, and MATDRAW_TEST_URL.
 // Fixture credentials are test-only; never deploy test database/configuration.
-import test from 'node:test';
+import test,{before} from 'node:test';
 import assert from 'node:assert/strict';
-const base=process.env.MATDRAW_TEST_URL;
-class Client{
- cookie='';csrf='';data=null;
- async req(route,body,extra={}){const r=await fetch(base+'?route='+route,{method:body?'POST':'GET',headers:{'Content-Type':'application/json',Cookie:this.cookie,'X-CSRF-Token':this.csrf,...extra},...(body?{body:JSON.stringify(body)}:{})});const cookie=r.headers.getSetCookie()?.at(-1);if(cookie)this.cookie=cookie.split(';')[0];const data=await r.json();if(data.csrf)this.csrf=data.csrf;return {status:r.status,data};}
- async login(email,password='TestPassword2026!'){await this.req('session');const r=await this.req('login',{email,password});assert.equal(r.status,200,JSON.stringify(r.data));return this.load();}
- async load(){const r=await this.req('bootstrap');assert.equal(r.status,200,JSON.stringify(r.data));this.data=r.data;return r.data;}
- async cmd(type,payload,status=200,revision=this.data.revision){const r=await this.req('command',{type,payload,expectedRevision:revision});assert.equal(r.status,status,JSON.stringify(r.data));if(status===200)this.data=r.data.workspace;return r.data.result;}
-}
+import {Client,base,fixture} from './helpers/http-client.mjs';
+before(()=>fixture('reset-limits'));
 test('real PHP/MySQL: sessions, role isolation, multiple tournaments, atomicity and concurrency',{skip:!base},async()=>{
  const admin=new Client(),rep=new Client(),editor=new Client(),other=new Client();
  assert.equal((await admin.req('bootstrap')).status,401);
