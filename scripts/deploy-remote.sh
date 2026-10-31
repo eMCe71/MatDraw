@@ -78,6 +78,7 @@ dbcnf(){
 dbbackup(){
  local label=$1 rel=$2 bin= cnf dbn help out ok=0 flags=(--single-transaction --quick --skip-lock-tables --hex-blob --default-character-set=utf8mb4)
  backup_dirs; out="$base/backups/db-$(date +%Y%m%d%H%M%S)-$label.sql.gz"
+ find "$base/shared" -maxdepth 1 -name '.my.*' -mmin +60 -delete 2>/dev/null || true   # option files of a killed run
  accept(){ [[ -s $1 ]] && gzip -t "$1" 2>/dev/null && [[ $(stat -c %s "$1") -gt 1024 ]] && gzip -dc "$1" | tail -c 400 | grep -q 'Dump completed'; }
  [[ ${MATDRAW_DUMP:-} == php ]] || bin=$(command -v mysqldump || command -v mariadb-dump || true)
  if [[ -n $bin ]]; then
