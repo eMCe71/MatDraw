@@ -2223,6 +2223,16 @@ Wszystkie uwagi okazały się trafne. Żadnej nie odrzuciłem w całości, czter
 
 ---
 
+### 14.3 Ustalenia z realizacji fal 1–2 (orkiestrator, 2026-10-31)
+- **`me.access.block`** ma kolejność taką jak kontrole `chat-send` (§5.5, punkty 3–6): `payment` > `profile` > `password` > `muted` > `off`. Wymuszone przejście do `#profile?tab=security` zależy wyłącznie od `mustChangePassword:true`. `chat-backend` zostawia §5.5 bez zmian. CTA kompozytora `chat-frontend` i `account-frontend` budują z `block`, a przekierowanie z `mustChangePassword`.
+- **Zadania po odpowiedzi:** `chat-send` woła `Jobs::maybe` z `register_shutdown_function` (wzorzec sprawdza trasa testowa `zt-jobs`). Pracę, która nie może opóźnić odpowiedzi, opakowuje się w `Jobs::afterSent(fn,label)`; tak jest już opakowane `BillingSync::lazy` w `routes/core.php`.
+- **`Config::validate`** odrzuca kombinacje spoza macierzy §6.10: `signup_free_beta` przy `billing_enabled=true` oraz token zaproszeń przy `signup_enabled=false` bez `billing_enforce=true`. Konfiguracje testowe muszą mieścić się w macierzy, inaczej każde żądanie kończy się kodem 500.
+- **Lekkie konta:** `Accounts::current` i `Accounts::currentPeek` przyjmują `PDO|Closure`. Gość bez ciasteczka nie otwiera połączenia z bazą.
+- **Trasy tylko do testów:** zapisywane w `before()` do `$MATDRAW_TEST_RELEASE/backend/routes` i usuwane w `after()`. Prefiks `zt-` jest zarezerwowany dla testów `backend-api`.
+- **Harness HTTP:** `scripts/test-http.sh <port> <baza ≤44 znaki> [pliki]`. Atrapa Stripe startuje na `<port+1>`, gdy istnieje `tests/stubs/stripe-stub.mjs`.
+- **Rejestr frontendu:** strona rejestru, która rzuci wyjątek albo zwróci zwykły string, jest tylko logowana i zastępowana stroną wbudowaną. Testy modułów muszą więc sprawdzać, że `render()` zwraca `SafeHtml`. Błąd 401 na `#chat` rysuje publiczną stronę czatu, a moduły reagują na zdarzenie `logout` z `{expired:true}`.
+- **Zdarzenie `upcoming-painted`:** opis w §8.3.
+
 ## Załącznik A. Nowe klucze `config.php` (wszystkie opcjonalne; wartości domyślne w `Config::DEFAULTS`)
 
 | Klucz | Domyślnie | Opis |
