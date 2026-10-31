@@ -1,5 +1,6 @@
 name: Diagnostyka 403 (tymczasowa)
 
+# The repository is public: print only status codes and counts, never file contents or account details.
 on:
   push:
     branches: ['claude/admiring-gauss-torrum']
@@ -22,10 +23,13 @@ jobs:
           SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
           SSH_KNOWN_HOSTS: ${{ secrets.SSH_KNOWN_HOSTS }}
         run: bash scripts/deploy-ssh-setup.sh
-      - name: Plik .htaccess hostingu w katalogu domowym
-        run: ssh deploy 'stat -c "%a %U:%G, %s B, zmieniony %y" "$HOME/.htaccess"; ls -la --time-style=full-iso "$HOME/domains" | grep -v "^total"' || true
-      - name: Odpowiedzi domen na tym serwerze
+      - name: Liczniki w skryptach LOCK/UNLOCK (bez treści)
         run: |
-          for h in matbravo.com matdraw.mdcse.com test429.mdcse.com mdcse.com gogo.doclert.com; do
-            for s in http https; do printf '  %-40s %s\n' "$s://$h/" "$(curl -sk -o /dev/null --max-time 15 -w '%{http_code} %{size_download}B %{redirect_url}' "$s://$h/")"; done
-          done
+          ssh deploy 'cd "$HOME/domains" && for f in LOCK.sh UNLOCK.sh; do printf "  %-10s 429:%s  RewriteEngine:%s  .htaccess:%s  Require/Deny:%s\n" "$f" "$(grep -c 429 "$f")" "$(grep -ci rewriteengine "$f")" "$(grep -c htaccess "$f")" "$(grep -ciE "require|deny" "$f")"; done' || true
+      - name: Odpowiedzi widziane z serwera (127.0.0.1 i adres publiczny)
+        run: |
+          ssh deploy 'ip=$(getent ahostsv4 matbravo.com | awk "NR==1{print \$1}"); for h in matbravo.com mdcse.com; do for a in 127.0.0.1 "$ip"; do printf "  %-14s via %-15s https:%s http:%s\n" "$h" "${a:0:3}…" "$(curl -sk -o /dev/null --max-time 10 -w %{http_code} --resolve "$h:443:$a" "https://$h/" 2>&1)" "$(curl -s -o /dev/null --max-time 10 -w %{http_code} --resolve "$h:80:$a" "http://$h/" 2>&1)"; done; done' || true
+      - name: Odpowiedź mdcse.com z GitHub z nagłówkiem przeglądarki
+        run: |
+          ua='Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36'
+          for h in mdcse.com matbravo.com; do printf '  %-14s curl:%s  przeglądarka:%s\n' "$h" "$(curl -sk -o /dev/null --max-time 15 -w '%{http_code}' "https://$h/")" "$(curl -sk -o /dev/null --max-time 15 -A "$ua" -w '%{http_code}' "https://$h/")"; done
