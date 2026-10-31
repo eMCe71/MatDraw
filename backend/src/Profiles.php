@@ -98,9 +98,12 @@ final class Profiles {
   if(class_exists(\Normalizer::class)){$d=\Normalizer::normalize($s,\Normalizer::FORM_D);if(is_string($d))$s=(string)preg_replace('/\p{M}/u','',$d);}
   return (string)preg_replace('/[^a-z0-9]/','',$s);
  }
- /** Username candidates, best first (§7.2); the same list as suggestUsernames() in dist/profile-data.js. */
- public static function candidates(mixed $first,mixed $last,mixed $requested=''):array {
-  $f=self::slug($first);$l=self::slug($last);$r=self::normalizeUsername($requested)??'';
+ /**
+  * Username candidates, best first (§7.2); the same list as suggestUsernames() in dist/profile-data.js. $full=false uses only
+  * the surname's initial (marta.k, marta_k, marta.k2, …), never the surname or a cut of it.
+  */
+ public static function candidates(mixed $first,mixed $last,mixed $requested='',bool $full=true):array {
+  $f=self::slug($first);$l=self::slug($last);if(!$full)$l=substr($l,0,1);$r=self::normalizeUsername($requested)??'';
   if(!preg_match('/^[a-z]/',$f))return [];
   $fit=fn(string $base,string $suffix='')=>rtrim(substr($base,0,self::USERNAME_MAX-strlen($suffix)),'._').$suffix;
   $req=self::usernameStatus($r)==='valid'?$fit($r,'2'):'';
@@ -108,9 +111,13 @@ final class Profiles {
   $out=[];foreach($list as $c)if($c!==''&&$c!==$r&&!in_array($c,$out,true)&&self::usernameStatus($c)==='valid')$out[]=$c;
   return $out;
  }
- /** At most $max free candidates (one query). */
- public static function suggestions(PDO $pdo,mixed $first,mixed $last,mixed $requested='',int $max=3):array {
-  $list=self::candidates($first,$last,$requested);if(!$list)return [];
+ /**
+  * At most $max free candidates (one query). Unless the person shows the full name ($nameDisplay 'full'), only the
+  * initial-only candidates (plus the requested name + 2), never one with the full surname or a cut of it (a long name cuts
+  * katarzyna.szczepanskawis to 24 characters): the same allow-list as shownSuggestions() in dist/account-flow.js.
+  */
+ public static function suggestions(PDO $pdo,mixed $first,mixed $last,mixed $requested='',int $max=3,mixed $nameDisplay=null):array {
+  $list=self::candidates($first,$last,$requested,$nameDisplay==='full');if(!$list)return [];
   $q=$pdo->prepare('SELECT username FROM user_profiles WHERE username IN ('.implode(',',array_fill(0,count($list),'?')).')');$q->execute($list);
   $taken=$q->fetchAll(PDO::FETCH_COLUMN);
   return array_slice(array_values(array_diff($list,$taken)),0,$max);

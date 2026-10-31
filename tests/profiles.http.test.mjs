@@ -1,7 +1,7 @@
 // Accounts, profiles and photos over real PHP and MariaDB/MySQL (plan §11, accounts-profiles-backend). Run through
 // scripts/test-http.sh (signup on, billing enabled and enforced, uploads in the work directory). Scenarios: sign-up
 // (signup-begin, server-measured time, bot trap, invite token, disabled, duplicates, address limit); username-check
-// (POST only, 403 before sign-up, states, suggestions, limit); profile (validation, default initial, 30-day rule);
+// (POST only, 403 before sign-up, states, suggestions without the full surname unless it is shown, limit); profile (validation, default initial, 30-day rule);
 // photos (formats, dimensions, size, EXIF removed, access before 304, two people with the same picture); the Admin's
 // member panel (literal LIKE, filters, create/active/password/email/profile/delete, members only); member-email,
 // member-password, account-delete (confirmEnd); the abandoned-account cleanup; diagnostics.
@@ -118,12 +118,21 @@ test('username-check: POST only, after signup-begin or signed in; states and fre
  assert.equal((await get('username-check&u=marta')).status,405,'never in a URL');
  c=await begun(0);
  member('suggest',{profile:{username:'zofia.nowakowska'}});member('suggest',{profile:{username:'zofia.n2'}});
- const check=async u=>(await c.req('username-check',{u,firstName:'Zofia',lastName:'Nowakowska'})).data;
+ const check=async(u,extra={})=>(await c.req('username-check',{u,firstName:'Zofia',lastName:'Nowakowska',...extra})).data;
  assert.deepEqual(await check('ab'),{status:'invalid',suggestions:[]});
  assert.deepEqual(await check('Administrator'),{status:'reserved',suggestions:[]});
  assert.deepEqual(await check(uniq('free')),{status:'available',suggestions:[]});
- const taken=await check('Zofia.Nowakowska');
+ const taken=await check('Zofia.Nowakowska',{nameDisplay:'full'});
  assert.equal(taken.status,'taken');assert.deepEqual(taken.suggestions,['zofia_nowakowska','zofia.nowakowska2','zofianowakowska'],'free candidates only (zofia.n2 is taken), at most 3');
+ // Without the full name shown (nameDisplay 'initial' or not given): never the full surname, only the initial (plus the typed name + 2).
+ for(const extra of [{},{nameDisplay:'initial'},{nameDisplay:'bogus'}])
+  assert.deepEqual((await check('Zofia.Nowakowska',extra)).suggestions,['zofia.n','zofia_n','zofia.nowakowska2'],JSON.stringify(extra));
+ // A long name: the full-surname forms are cut to 24 characters (katarzyna.szczepanskawis), and those are left out too.
+ member('suggest',{profile:{username:'katarzyna.s'}});
+ const long=async extra=>(await c.req('username-check',{u:'katarzyna.s',firstName:'Katarzyna',lastName:'Szczepańska-Wiśniewska',...extra})).data;
+ assert.deepEqual((await long({nameDisplay:'full'})).suggestions,['katarzyna.szczepanskawis','katarzyna_szczepanskawis','katarzyna.s2']);
+ const hidden=await long({});assert.equal(hidden.status,'taken');assert.deepEqual(hidden.suggestions,['katarzyna_s','katarzyna.s2','katarzynas']);
+ for(const x of hidden.suggestions)assert.ok(!x.slice('katarzyna'.length).includes('sz'),x);
  const owner=member('own',{exempt:true});const s=await signIn(owner.email);const ownName=(await me(s)).profile.username;
  assert.equal((await s.req('username-check',{u:ownName})).data.status,'available','the own name');
 });
