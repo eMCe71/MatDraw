@@ -3,7 +3,7 @@
 // RateLimit and People run against an in-memory stand-in for PDO that understands exactly their statements.
 declare(strict_types=1);
 require dirname(__DIR__).'/backend/bootstrap.php';
-use MatDraw\{Access,Accounts,ClientIp,Config,Domain,Jobs,Paths,People,RateLimit,Routes,Text};
+use MatDraw\{Access,Accounts,Auth,ClientIp,Config,Domain,Jobs,Paths,People,RateLimit,RouteContext,Routes,Text};
 date_default_timezone_set('Europe/Warsaw');
 
 /** login_limits and users ⋈ user_profiles in memory; records every statement it is given. */
@@ -79,6 +79,22 @@ $out=match($in['job']){
   return ['pdo'=>Routes::describe($pdo),'other'=>Routes::describe(new RuntimeException(str_repeat('x',300))),'behind'=>Routes::schemaBehind($behind),'notBehind'=>Routes::schemaBehind($pdo)];
  })(),
  'api-base'=>array_map(fn($c)=>Config::apiBaseAllowed($c[0],$c[1]),$in['cases']),
+ // RouteContext::user() of peek and session routes with a database that cannot be opened: guests (no cookie, a malformed
+ // cookie, an unknown session id, an anonymous session) never touch it; a live session does (PDOException).
+ 'lazy-db'=>(function()use($in){
+  putenv('MATDRAW_CONFIG='.$in['dir'].'/config.php');$now=time();
+  $cfg=array_replace(Config::DEFAULTS,['app_url'=>'http://127.0.0.1','db'=>['dsn'=>'nodriver:matdraw','user'=>'','password'=>''],'session_dir'=>$in['dir']]);
+  file_put_contents($in['dir'].'/sess_'.$in['live'],'userId|s:1:"u";authVersion|i:1;created|i:'.$now.';last|i:'.$now.';csrf|s:1:"x";');
+  file_put_contents($in['dir'].'/sess_'.$in['anon'],'csrf|s:1:"x";');
+  $user=function(string $mode,?string $cookie)use($cfg){
+   $_COOKIE=$cookie===null?[]:[Auth::COOKIE=>$cookie];$ctx=new RouteContext('x',['auth'=>$mode,'user'=>'optional'],$cfg);
+   return attempt(function()use($ctx,$mode,$cfg){
+    if($mode==='session'){ini_set('session.use_cookies','0');ini_set('session.cache_limiter','');session_save_path($cfg['session_dir']);session_id($_COOKIE[Auth::COOKIE]??'');session_start(['read_and_close'=>true]);}
+    return $ctx->user();
+   });
+  };
+  return ['peek'=>array_map(fn($c)=>$user('peek',$c),$in['cookies']),'session'=>array_map(fn($c)=>$user('session',$c),[$in['anon'],$in['live']])];
+ })(),
  // Jobs::maybe releases an open session first, even when sampling then skips all work (fresh jobs-tick).
  'jobs-release'=>(function()use($in){
   putenv('MATDRAW_CONFIG='.$in['dir'].'/config.php');ini_set('session.use_cookies','0');ini_set('session.cache_limiter','');session_save_path($in['dir']);

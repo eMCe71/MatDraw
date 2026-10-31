@@ -17,7 +17,9 @@ final class RouteContext {
  public function __construct(public readonly string $name,public readonly array $route,public readonly array $config,public readonly array $body=[],private readonly ?string $raw=null){}
  public function pdo():PDO{return $this->pdo??=\matdraw_database($this->config);}
  public function user():?array {
-  if($this->user===false)$this->user=match($this->route['auth']){'peek'=>Accounts::currentPeek($this->pdo(),$this->config),'session','upload'=>Accounts::current($this->pdo(),false),default=>null};
+  // The connection opens only when the cookie or session names an account (a guest costs no database connection).
+  $pdo=fn():PDO=>$this->pdo();
+  if($this->user===false)$this->user=match($this->route['auth']){'peek'=>Accounts::currentPeek($pdo,$this->config),'session','upload'=>Accounts::current($pdo,false),default=>null};
   return $this->user;
  }
  /** Access::of() of the signed-in account (401 without one), computed once. */

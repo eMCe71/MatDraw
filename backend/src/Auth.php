@@ -43,7 +43,8 @@ final class Auth {
   self::configure($c);
   // With use_strict_mode an unknown id would create a file and send a new cookie: answer null before session_start.
   if(ini_get('session.save_handler')==='files'&&!is_file(self::file($id)))return null;
-  session_cache_limiter('');
+  // The id whose file was checked is the one read, even if a session id was set earlier in this process.
+  session_cache_limiter('');session_id($id);
   if(!session_start(['read_and_close'=>true])){header_remove('Set-Cookie');return null;}
   $s=$_SESSION;$_SESSION=[];header_remove('Set-Cookie');$now=time();
   if(!isset($s['userId'],$s['authVersion'])||self::expired($s,$c,$now))return null;

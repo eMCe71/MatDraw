@@ -26,20 +26,25 @@ final class Accounts {
  private static function one(PDO $pdo,string $sql,string $value):?array{$q=$pdo->prepare($sql);$q->execute([$value]);$r=$q->fetch(PDO::FETCH_ASSOC);$q->closeCursor();return $r?self::fromRow($r):null;}
  /**
   * The signed-in account of a started session (Auth::start). An unknown, blocked or outdated (auth_version) account
-  * clears the session; $required turns "nobody" into 401.
+  * clears the session; $required turns "nobody" into 401. $pdo may be a Closure that opens the connection: it is
+  * called only when the session names an account.
   */
- public static function current(PDO $pdo,bool $required=true):?array {
-  $id=$_SESSION['userId']??null;$u=is_string($id)?self::find($pdo,$id):null;
+ public static function current(PDO|\Closure $pdo,bool $required=true):?array {
+  $id=$_SESSION['userId']??null;$u=is_string($id)?self::find(self::db($pdo),$id):null;
   if($u&&$u['active']&&$u['authVersion']===($_SESSION['authVersion']??null))return $u;
   if(isset($_SESSION['userId']))Auth::clear();
   if($required)throw new AppError('Zaloguj się ponownie.',401);
   return null;
  }
- /** The signed-in account for a peek route (Auth::peek): read only, a stale session is ignored, never cleared. */
- public static function currentPeek(PDO $pdo,array $c):?array {
+ /**
+  * The signed-in account for a peek route (Auth::peek): read only, a stale session is ignored, never cleared. With a
+  * Closure as $pdo the database is opened only for a live session, so a guest's poll costs no connection (§3.5 step 1).
+  */
+ public static function currentPeek(PDO|\Closure $pdo,array $c):?array {
   $s=Auth::peek($c);if(!$s||!is_string($s['userId']))return null;
-  $u=self::find($pdo,$s['userId']);return $u&&$u['active']&&$u['authVersion']===$s['authVersion']?$u:null;
+  $u=self::find(self::db($pdo),$s['userId']);return $u&&$u['active']&&$u['authVersion']===$s['authVersion']?$u:null;
  }
+ private static function db(PDO|\Closure $pdo):PDO{return $pdo instanceof PDO?$pdo:$pdo();}
  public static function dummyHash():string {
   if(self::$dummy!==null)return self::$dummy;
   [$hash,$algo]=defined('PASSWORD_ARGON2ID')?[self::DUMMY_ARGON2ID,PASSWORD_ARGON2ID]:[self::DUMMY_BCRYPT,PASSWORD_DEFAULT];

@@ -1,7 +1,8 @@
 // backend-api units through tests/php-bridge-core.php (plan §11): Access::compute (every row of §6.5 with its time
 // boundaries), RateLimit (window logic on an in-memory stand-in), People (shape, initial by default), Paths (refusal of
 // the docroot), Text::clean, Config (defaults and refused switch combinations), Accounts::dummyHash (same algorithm and
-// parameters as Domain::password), ClientIp (IPv6 /64, trusted proxies), the route and job registries.
+// parameters as Domain::password), ClientIp (IPv6 /64, trusted proxies), the route and job registries, RouteContext (no
+// database connection for guests) and Jobs (session released, work after the response only once it was sent).
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
@@ -224,6 +225,13 @@ test('Route and job registries: modes, unique names, refused definitions; descri
   rmSync(path.join(dir,'b.php'));assert.deepEqual(bridge({job:'jobs',dir}).ok,{j:[60,false]});
   write('b.php',"['k'=>['every'=>0,'run'=>fn()=>'ok']]");assert.match(bridge({job:'jobs',dir}).error,/Invalid job definition: k/);
  }finally{rmSync(dir,{recursive:true,force:true});}
+ const dbDir=realpathSync(mkdtempSync(path.join(tmpdir(),'md-lazy-')));writeFileSync(path.join(dbDir,'config.php'),'<?php return [];');
+ try{
+  const live='live'+'a'.repeat(24),anon='anon'+'b'.repeat(24),r=bridge({job:'lazy-db',dir:dbDir,live,anon,cookies:[null,'../../etc/passwd','u'.repeat(26),anon,live]});
+  assert.deepEqual(r.peek.slice(0,4),[{ok:null},{ok:null},{ok:null},{ok:null}],'a guest poll (me) opens no database connection');
+  assert.match(r.peek[4].error,/^PDOException/,'a live session reads the account');
+  assert.deepEqual(r.session[0],{ok:null},'an anonymous session needs no database either');assert.match(r.session[1].error,/^PDOException/);
+ }finally{rmSync(dbDir,{recursive:true,force:true});}
  const jobsDir=mkdtempSync(path.join(tmpdir(),'md-jobs-'));writeFileSync(path.join(jobsDir,'config.php'),'<?php return [];');writeFileSync(path.join(jobsDir,'jobs-tick'),'');
  try{assert.deepEqual(bridge({job:'jobs-release',dir:jobsDir}),{before:true,after:false,written:true},'Jobs::maybe closes the session before anything else');}
  finally{rmSync(jobsDir,{recursive:true,force:true});}
