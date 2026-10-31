@@ -22,10 +22,13 @@ final class Migrator {
  /**
   * The driver message of a database error for the operator (migrate.php prints it; the deploy copies it into
   * ~/matdraw/logs and the CI log) without the row values MySQL/MariaDB quote in it: a duplicate key "Duplicate entry
-  * '<e-mail>' for key …" or a rejected "… value: '<text>' …" becomes '…', so no personal data reaches a log (§10).
+  * '<e-mail>' for key …", a rejected "… value: '<text>' …" (for column/function, or at the end) and the strings of
+  * "Invalid … character string: '…'" and "Cannot convert string '…' …" become '…', so no personal data reaches a log
+  * (§10). The value may itself contain quotes, so it ends only before a known suffix; when none follows, everything
+  * from the quote on is cut (fail closed: an unknown format loses its tail, never leaks the value).
   */
  public static function safeMessage(\PDOException $e):string {
-  return (string)preg_replace("/(Duplicate entry |value: )'.*?'(?= for (?:key|column) |\\s*$)/s","$1'…'",$e->getMessage());
+  return (string)preg_replace("/(Duplicate entry |value: |character string: |Cannot convert string )'(?:.*?'(?= for (?:key|column|function) |\\s*$)|.*)/s","$1'…'",$e->getMessage());
  }
  private ?array $list=null;private bool $dry=false;private $log=null;
  public function __construct(private PDO $pdo,private string $dir){}

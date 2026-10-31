@@ -66,6 +66,13 @@ test('migrate.php prints database errors without the row values MySQL quotes in 
   ["SQLSTATE[23000]: Integrity constraint violation: 1062 Duplicate entry 'jan.o'kowalski@example.pl' for key 'users.user_email'","SQLSTATE[23000]: Integrity constraint violation: 1062 Duplicate entry '…' for key 'users.user_email'"],
   ["SQLSTATE[HY000]: General error: 1366 Incorrect string value: '\\xF0\\x9F\\x98 Zofia' for column 'first_name' at row 1","SQLSTATE[HY000]: General error: 1366 Incorrect string value: '…' for column 'first_name' at row 1"],
   ["SQLSTATE[22007]: Invalid datetime format: 1292 Truncated incorrect DOUBLE value: 'Marta Nowak'","SQLSTATE[22007]: Invalid datetime format: 1292 Truncated incorrect DOUBLE value: '…'"],
+  // MariaDB names the column with backticks; ER_WRONG_VALUE_FOR_TYPE ends with "for function <name>".
+  ["SQLSTATE[22007]: Invalid datetime format: 1292 Incorrect date value: 'Ewa' for column `matdraw`.`users`.`birth` at row 2","SQLSTATE[22007]: Invalid datetime format: 1292 Incorrect date value: '…' for column `matdraw`.`users`.`birth` at row 2"],
+  ["SQLSTATE[HY000]: General error: 1411 Incorrect datetime value: 'Jan Kowalski' for function str_to_date","SQLSTATE[HY000]: General error: 1411 Incorrect datetime value: '…' for function str_to_date"],
+  // A format without a known suffix loses everything from the quote on instead of printing the value.
+  ["SQLSTATE[HY000]: General error: 1525 Incorrect DATE value: 'Jan Kowalski' in an unknown place, 'x'","SQLSTATE[HY000]: General error: 1525 Incorrect DATE value: '…'"],
+  ["SQLSTATE[HY000]: General error: 1300 Invalid utf8mb4 character string: 'Zofia\xF0'","SQLSTATE[HY000]: General error: 1300 Invalid utf8mb4 character string: '…'"],
+  ["SQLSTATE[HY000]: General error: 3854 Cannot convert string 'Zofia\xF0' from binary to utf8mb4","SQLSTATE[HY000]: General error: 3854 Cannot convert string '…'"],
   ["SQLSTATE[42S01]: Base table or view already exists: 1050 Table 'chat_mutes' already exists","SQLSTATE[42S01]: Base table or view already exists: 1050 Table 'chat_mutes' already exists"],
  ];
  const code="require 'backend/src/Migrator.php';echo json_encode(array_map(fn($m)=>MatDraw\\Migrator::safeMessage(new PDOException($m)),json_decode(stream_get_contents(STDIN),true)),JSON_UNESCAPED_UNICODE);";
