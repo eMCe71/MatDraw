@@ -1,1 +1,79 @@
-/* members.css: styles of the members feature (plan §8.7). Placeholder created by frontend-foundation; the feature slice owns it. */
+/* members.css: panel "Członkowie" (#members), plan badges and plan fields in the staff accounts panel (plan §8.7; prefix mem-).
+   Uses the existing buttons, badges, panels and form fields; nothing here changes an element selector globally. */
+.mem-page{display:grid;gap:18px}
+.mem-toolbar{display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.mem-search{flex:1 1 260px;min-width:0}
+.mem-search input{width:100%}
+.mem-filter select{min-height:40px;font-size:12px;background:#fff;width:auto}
+.mem-bulk{background:#fff;border:1px solid var(--line,#dfe6ee);border-radius:9px;padding:0 18px}
+.mem-bulk summary{cursor:pointer;padding:13px 0;font-size:12px;font-weight:600;color:#345675}
+.mem-bulk summary:focus-visible{outline:2px solid var(--mb-cyan,#00aeef);outline-offset:3px;border-radius:4px}
+.mem-bulk-form{display:grid;gap:10px;padding:0 0 18px;max-width:520px}
+.mem-bulk-form .btn{justify-self:start}
+.mem-results{display:grid;gap:12px}
+.mem-count{margin:0}
+.mem-list{list-style:none;margin:0;padding:0;display:grid;gap:10px}
+.mem-row{display:grid;grid-template-columns:minmax(0,2fr) minmax(0,1.3fr) minmax(0,1.2fr) auto;gap:6px 18px;align-items:center;background:#fff;border:1px solid var(--line,#dfe6ee);border-radius:9px;padding:14px 18px}
+.mem-row.is-off{background:#fafbfc}
+.mem-who{display:flex;flex-direction:column;gap:2px;min-width:0}
+.mem-who>*{overflow-wrap:anywhere}
+.mem-name{font-size:13px;color:#18334f}
+.mem-user{font-size:11px;color:var(--chat-meta,#5b6f89)}
+.mem-email{font-size:11px;color:#5c708a}
+.mem-plan{display:flex;flex-wrap:wrap;gap:5px;align-items:center}
+.mem-plan .badge{font-size:10px;padding:4px 8px}
+.mem-muted{text-decoration:none}
+.mem-muted:hover{text-decoration:underline}
+.mem-meta{font-size:11px;color:var(--chat-meta,#5b6f89);line-height:1.6}
+.mem-actions{display:flex;flex-wrap:wrap;gap:6px;justify-content:flex-end}
+.mem-state{padding:26px 8px;text-align:center}
+.mem-empty p{margin:0 0 6px}
+.mem-pager{display:flex;align-items:center;justify-content:center;gap:14px;padding-top:6px}
+.mem-demo h3{margin:0 0 8px}
+/* dialogs */
+.mem-checklist{list-style:none;margin:0 0 14px;padding:0;display:grid;gap:10px}
+.mem-checklist .checkbox-label{align-items:flex-start;font-size:12px;line-height:1.55;color:#34506f}
+.mem-checklist input{margin-top:3px}
+.mem-copyline{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;margin:0 0 12px}
+.mem-copyline code{flex:1 1 200px;min-width:0;padding:8px 10px;border:1px solid #d4e0eb;border-radius:6px;background:#f5f8fc;font-size:13px;overflow-wrap:anywhere;user-select:all}
+.mem-secret code{font-size:17px;letter-spacing:.04em;font-weight:700;color:#00448a}
+.mem-sports{border:1px solid #dadfe6;border-radius:6px;padding:10px 12px;margin:0;display:flex;flex-wrap:wrap;gap:6px 14px}
+.mem-sports legend{font-size:11px;color:#687e9b;padding:0 4px}
+.mem-chip{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:#34506f}
+.mem-chip input{width:15px;height:15px;min-height:0;accent-color:#0072bc;margin:0}
+.mem-conflict{margin-top:12px;padding:10px 12px;border:1px solid #eadfc9;border-radius:7px;background:#fffbf2}
+.mem-conflict[hidden]{display:none}
+.mem-warn{margin:0 0 14px}
+.mem-steps{margin:0 0 12px;padding-left:18px;display:grid;gap:6px;font-size:12px;color:#34506f}
+/* plan badge in the staff accounts panel */
+.acct-plan-badge{margin-left:6px}
+.acct-plan-badge .badge{vertical-align:middle}
+/* plan fields in the account form */
+.mem-bill{margin:18px 0 0;padding:14px 16px;border:1px solid #d4e0eb;border-radius:8px;background:#f9fbfd;display:grid;gap:10px}
+.mem-bill[hidden]{display:none}
+.mem-bill legend{padding:0 6px;font-size:11px;font-weight:600;color:#345675}
+.mem-note{margin:0}
+.mem-on[hidden],.mem-off[hidden],.mem-stop[hidden]{display:none}
+.mem-on,.mem-off{display:grid;gap:10px}
+.mem-facts{margin:0;display:grid;gap:6px}
+.mem-facts>div{display:grid;grid-template-columns:150px minmax(0,1fr);gap:10px;font-size:11px}
+.mem-facts dt{color:#687e9b}
+.mem-facts dd{margin:0;color:#34506f;overflow-wrap:anywhere}
+.mem-sync-error{color:var(--chat-danger,#b3424a)}
+.mem-bill-actions{display:flex;flex-wrap:wrap;gap:8px}
+.mem-bill-actions:empty{display:none}
+.mem-bill-actions a.btn{text-decoration:none}
+@media (max-width:1000px){
+ .mem-row{grid-template-columns:minmax(0,1fr) minmax(0,1fr);}
+ .mem-actions{grid-column:1/-1;justify-content:flex-start}
+}
+@media (max-width:650px){
+ .mem-row{grid-template-columns:minmax(0,1fr);padding:14px}
+ .mem-toolbar{display:grid;grid-template-columns:minmax(0,1fr)}
+ .mem-filter select{width:100%}
+ .mem-toolbar .btn{width:100%}
+ .mem-facts>div{grid-template-columns:minmax(0,1fr)}
+ .mem-facts dt{font-size:10px}
+ .mem-copyline code{flex-basis:100%}
+}
+@media print{.mem-page,.mem-bill{display:none}}
