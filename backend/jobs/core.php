@@ -6,7 +6,7 @@
 //   - staff (stored max ≤ session_max_seconds, or no max) older than session_max_seconds (12 h),
 //   - every file older than member_session_idle_seconds (14 days).
 // Age is the file's mtime (PHP writes or touches it on every locked session start; peek refreshes a member session once
-// per idle/4 and never a staff session).
+// per idle/4, a staff session only on a chat-feed poll of someone reading the chat).
 // At most 5000 directory entries or 2 seconds per run; the next run continues at the saved position (next=N).
 // Only files named sess_<id> are considered; with a serialize handler other than php/php_serialize only the 14-day
 // rule applies (the kind cannot be read safely).

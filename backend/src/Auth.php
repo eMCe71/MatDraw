@@ -10,8 +10,10 @@ use PDO;
  * off: the housekeeping job deletes files by kind (jobs/core.php). peek() reads a session without writing it, creating a
  * file or sending a cookie, for GET routes that poll (PHP's files handler still waits for the file lock while it reads,
  * so a poll can wait behind a long request of the same session; it never holds the lock itself beyond the read).
- * Only member sessions are kept alive by peek routes: background polls (chat heads every 30 s, the moderation badge)
- * would otherwise keep an unattended staff tab signed in until the 12 h maximum; staff activity is a session request.
+ * Peek routes keep member sessions alive; a staff session only when the route passes $active (chat-feed with a=1 and a
+ * chat on screen, sent by the client only after the person's own recent interaction; plan §3.5 step 6: a club
+ * representative who only reads the chat is not signed out). Background polls (chat heads every 30 s, the moderation
+ * badge) never pass it, so they cannot keep an unattended staff tab signed in until the 12 h maximum.
  */
 final class Auth {
  public const COOKIE='matdraw_session';
@@ -39,10 +41,11 @@ final class Auth {
   * Read-only session for GET routes (plan §3.5, in this order): returns {userId, authVersion} or null. Never creates a
   * session file, never sends Set-Cookie or PHP's cache headers, never clears or regenerates a session. Activity of a
   * member session is refreshed at most once per idle/4 with one short locked write under the same id; a staff session
-  * (admin, editor, club) is never refreshed here, so its 30-minute idle limit (D16) counts from its last session
-  * request (bootstrap, command, any POST), whatever the page keeps polling.
+  * (admin, editor, club) only when $active says the person is reading (the route decides, see the class comment), so
+  * otherwise its 30-minute idle limit (D16) counts from its last session request (bootstrap, command, any POST),
+  * whatever the page keeps polling.
   */
- public static function peek(array $c):?array {
+ public static function peek(array $c,bool $active=false):?array {
   $id=$_COOKIE[self::COOKIE]??null;
   if(!is_string($id)||!preg_match('/^[A-Za-z0-9,-]{22,256}$/D',$id))return null;
   self::configure($c);
@@ -54,7 +57,7 @@ final class Auth {
   $s=$_SESSION;$_SESSION=[];header_remove('Set-Cookie');$now=time();
   if(!isset($s['userId'],$s['authVersion'])||self::expired($s,$c,$now))return null;
   [$idle]=self::limits($s,$c);
-  if(self::member($s,$c)&&$now-(int)($s['last']??0)>intdiv($idle,4)){
+  if(($active||self::member($s,$c))&&$now-(int)($s['last']??0)>intdiv($idle,4)){
    session_id($id);
    if(session_start()){
     if(session_id()!==$id){$new=session_id();session_abort();if(ini_get('session.save_handler')==='files')@unlink(self::file($new));}

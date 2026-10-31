@@ -1,6 +1,7 @@
 // API core over real PHP and MariaDB/MySQL (plan §11, backend-api): lightweight session/login with unchanged shapes,
 // member isolation, me for every role, public-config, the payment gate for staff, read-only peek sessions (no file, no
-// cookie, activity refresh after idle/4), maintenance and schema-behind 503, client_outdated, the session lock during
+// cookie, activity refresh after idle/4 for members, for staff only on a chat-feed poll of someone reading the chat),
+// maintenance and schema-behind 503, client_outdated, the session lock during
 // background jobs, login timing and limits, and session housekeeping through bin/cron.php. Run through scripts/test-http.sh.
 // Routes::dispatch paths that no route of this slice uses yet (session POST, upload, webhook, chat-off, null → 204, user
 // rules, work after a session POST) run against test-only routes (TEST_ROUTES) written into the disposable release.
@@ -239,6 +240,22 @@ test('background polls (chat heads, moderation badge, me, chat-channels) never k
  assert.equal((await raw('me',{cookie:admin.cookie})).status,401);
  assert.equal((await admin.req('session')).data.user,null,'the staff session expired after its idle limit');
  assert.equal((await m.req('session')).data.user?.id,m.login.data.user.id);
+});
+
+test('a staff session reading the chat (chat-feed with a=1 and a channel on screen) stays signed in; a=1 anywhere else refreshes nothing',{skip},async()=>{
+ const reader=await signIn(...ADMIN),unattended=await signIn(...ADMIN);
+ const t=now();for(const c of [reader,unattended])fixture('session-edit',{sid:sid(c),set:{idle:6,last:t-4}});
+ // a=1 on a heads-only poll or on another peek route, and a chat on screen without a=1, are not someone reading.
+ for(const route of ['chat-feed&h=1:0:0,2:0:0&a=1','me&a=1','chat-channels&a=1','admin-chat-reports&a=1','chat-feed&ch=1:0','chat-feed&ch=1:0&a=yes'])
+  assert.ok([200,204].includes((await raw(route,{cookie:unattended.cookie})).status),route);
+ assert.equal(fixture('session-read',{sid:sid(unattended)}).data.last,t-4,'no refresh without a reading poll');
+ // Reading (plan §3.5 step 6): one refresh write after idle/4, same id, no cookie.
+ const r=await raw('chat-feed&ch=1:0&a=1',{cookie:reader.cookie});assert.equal(r.status,200);assert.equal(r.headers.get('set-cookie'),null);
+ assert.ok(fixture('session-read',{sid:sid(reader)}).data.last>=t,'reading the chat refreshes a staff session');
+ // Past the idle limit both sessions started with: the reader is still signed in, the unattended session expired.
+ while(now()<t+3)await sleep(100);
+ assert.equal((await reader.req('session')).data.user?.id,reader.login.data.user.id);
+ assert.equal((await unattended.req('session')).data.user,null);
 });
 
 test('maintenance file and schema behind code answer 503 with Retry-After; an outdated client gets 409',{skip},async()=>{

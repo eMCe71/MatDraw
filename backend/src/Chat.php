@@ -21,7 +21,8 @@ use PDO;
  *
  * Polling (§5.4): ch=<id>:<rev>,… (≤ 6 channels on screen; rev 0 = the last 50 messages, with before=<message id> the 30
  * before it), h=<id>:<lastReadId>:<knownLast>,… (≤ 30 background channels, unread counters only), cv=<settings version>,
- * e=<n>:<status> (hosting answers seen by the client since its last success). One SELECT reads every channel of ch and h,
+ * e=<n>:<status> (hosting answers seen by the client since its last success), a=1 (chat-feed only: someone is reading,
+ * so a staff session's activity is refreshed too, active()). One SELECT reads every channel of ch and h,
  * one the tournaments behind them, one the settings; nothing changed → 204 (also with h). Changes come by rev (LIMIT 101:
  * more=true after 100, the client reloads); unread counts are computed only for channels whose last_message_id differs
  * from knownLast. Answer {cv, cfg (only when cv is stale), ch:{id:{rev, st, more, older?, m}}, heads:{id:{last, n}},
@@ -109,13 +110,22 @@ final class Chat {
  }
  /**
   * Viewer of a peek route (chat-feed): Auth::peek, then one query; null for no, stale or blocked session. The database
-  * opens only when the cookie names a live session (a guest's poll costs no connection here).
+  * opens only when the cookie names a live session (a guest's poll costs no connection here). $active (active()) lets
+  * the poll refresh a staff session's activity too.
   */
- public static function peekViewer(array $c,\Closure $pdo,int $now):?array {
-  $s=Auth::peek($c);if(!$s||!is_string($s['userId']))return null;
+ public static function peekViewer(array $c,\Closure $pdo,int $now,bool $active=false):?array {
+  $s=Auth::peek($c,$active);if(!$s||!is_string($s['userId']))return null;
   $v=self::viewer($pdo(),$s['userId'],$c,$now);
   return $v&&$v['authVersion']===$s['authVersion']?$v:null;
  }
+
+ /**
+  * A poll by someone reading the chat (plan §3.5 step 6): a=1, which the client may add only while a chat is on screen
+  * and the person's own last interaction is within the last idle level (cfg.idle[3]), on a poll that carries ch= (a
+  * channel on screen). Background head polls (h= only) never count, whatever they carry, so they cannot keep an
+  * unattended staff tab signed in.
+  */
+ public static function active(array $get,array $q):bool{return ($get['a']??null)==='1'&&$q['ch']!==[];}
 
  // ——— Reading (§5.4) ———
 
