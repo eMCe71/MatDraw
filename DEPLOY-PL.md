@@ -369,8 +369,8 @@ Jeśli w dniu zawodów ludzie zgłaszają „Zbyt wiele prób…”, dopisz w `c
 
 Hosting (LiteSpeed/CloudLinux) może odrzucać żądania, zanim dotrą do PHP: **429** (za dużo żądań), **503** lub **508** (wyczerpane limity konta). Aplikacja tego nie widzi bezpośrednio, dlatego zgłaszają to przeglądarki.
 
-- **Gdzie to widać:** panel Admina → **Moderacja → Ustawienia czatu** → „Odpowiedzi hostingu w ostatniej godzinie”; DirectAdmin → **Resource Usage** (limity LVE: EP, NPROC, CPU). Liczby w panelu pochodzą z przeglądarek i może je zawyżyć każdy, kto wyśle spreparowane zapytanie; aplikacja liczy co najwyżej jedno zgłoszenie na godzinę i rodzaj odpowiedzi z jednego adresu IP gościa lub jednego konta. Zanim zgłosisz problem do AfterMarket, potwierdź go w Resource Usage.
-- **Kiedy przełączyć preset:** gdy w ciągu godziny jest ponad 50 zgłoszeń 429 (albo kilka 503/508), przełącz tempo czatu na „Oszczędne”; gdy to nie pomaga — „Awaryjne”. Po zawodach wróć do „Normalne”. Preset nie zmienia się sam.
+- **Gdzie to widać:** panel Admina → **Moderacja → Ustawienia czatu** → „Odpowiedzi hostingu w ostatniej godzinie”; DirectAdmin → **Resource Usage** (limity LVE: EP, NPROC, CPU). Liczby w panelu pochodzą z przeglądarek i może je zawyżyć każdy, kto wyśle spreparowane zapytanie; aplikacja liczy co najwyżej jedno zgłoszenie na minutę i rodzaj odpowiedzi z jednego adresu IP gościa lub jednego konta, a w nim najwyżej 10 odpowiedzi (jeden adres dodaje więc najwyżej 600 na godzinę). Goście w hali za jednym adresem IP liczą się razem, jak jedna osoba. Zanim zgłosisz problem do AfterMarket, potwierdź go w Resource Usage.
+- **Kiedy przełączyć preset:** gdy w ciągu godziny jest ponad 50 odpowiedzi 429 (co najmniej sześć zgłoszeń z różnych minut albo od różnych osób; albo kilka 503/508), przełącz tempo czatu na „Oszczędne”; gdy to nie pomaga — „Awaryjne”. Po zawodach wróć do „Normalne”. Preset nie zmienia się sam.
 - **Test obciążenia z zewnątrz** (po pierwszym wdrożeniu i przed startem). Najpierw z dowolnego komputera:
 
   ```bash
