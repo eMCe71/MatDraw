@@ -11,8 +11,8 @@ use PDO;
  * (cv), without a deploy. The Admin panel changes the switch, the pace preset and the notice (a free text shown as text,
  * never translated); other values are changed in the database only.
  * Hosting health (§5.10): clients report 429/503/508 answers and non-JSON/network failures (status 0) with the next
- * successful poll (parameter e); report() adds them to chat_health(hour, status) with one upsert, health() sums the last
- * hour for the panel and diagnostics. No address and no account is ever stored there.
+ * successful poll (parameter e); report() adds them to chat_health(hour, status) with one upsert, health() estimates the
+ * last 60 minutes for the panel and diagnostics. No address and no account is ever stored there.
  */
 final class ChatSettings {
  public const DEFAULTS=['on'=>true,'t'=>'poll','ms'=>[2500,5000,10000,30000,60000],'idle'=>[60,180,600,1800],'bg'=>30000,'boost'=>300,'safety'=>60000,'notice'=>null,
@@ -92,13 +92,22 @@ final class ChatSettings {
   $pdo->prepare('INSERT INTO chat_health (hour_at,status,n) VALUES (?,?,?) ON DUPLICATE KEY UPDATE n=LEAST(n+VALUES(n),'.self::HEALTH_CAP.')')->execute([intdiv($now,3600)*3600,$status,min($n,50)]);
  }
  /**
-  * Reported answers of the last hour: {"429":n,"503":n,"508":n,"0":n}, summed over the hour buckets that overlap the
-  * 60 minutes before $now (so the counter does not drop to zero at the top of every hour).
+  * Reported answers of the last 60 minutes: {"429":n,"503":n,"508":n,"0":n} (what the panel shows as "the last hour"
+  * and DEPLOY-PL.md compares with its threshold), from the two hour buckets that overlap them (window()).
   */
  public static function health(PDO $pdo,?int $now=null):array {
-  $now??=time();$out=array_fill_keys(self::HEALTH_STATUSES,0);
-  $q=$pdo->prepare('SELECT status,SUM(n) AS n FROM chat_health WHERE hour_at>? GROUP BY status');$q->execute([$now-7200]);
-  foreach($q->fetchAll(PDO::FETCH_ASSOC) as $r)if(isset($out[(int)$r['status']]))$out[(int)$r['status']]=(int)$r['n'];
-  return $out;
+  $now??=time();$hour=intdiv($now,3600)*3600;
+  $q=$pdo->prepare('SELECT hour_at,status,n FROM chat_health WHERE hour_at IN (?,?)');$q->execute([$hour-3600,$hour]);
+  return self::window($q->fetchAll(PDO::FETCH_ASSOC),$now);
+ }
+ /**
+  * Sliding-window estimate of the 60 minutes before $now from hour buckets {hour_at, status, n} (pure): the current
+  * hour in full plus the previous one weighted by the part of it still inside the window (at 10:15 three quarters of
+  * the 9:00 bucket), rounded. It neither drops to zero at the top of every hour nor covers up to two hours.
+  */
+ public static function window(array $rows,int $now):array {
+  $hour=intdiv($now,3600)*3600;$w=($hour+3600-$now)/3600;$sum=array_fill_keys(self::HEALTH_STATUSES,0.0);
+  foreach($rows as $r){$s=(int)$r['status'];$at=(int)$r['hour_at'];if(isset($sum[$s])&&($at===$hour||$at===$hour-3600))$sum[$s]+=(int)$r['n']*($at===$hour?1:$w);}
+  return array_map(fn(float $v):int=>(int)round($v),$sum);
  }
 }

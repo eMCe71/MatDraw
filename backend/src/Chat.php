@@ -300,7 +300,9 @@ final class Chat {
   * chat-send {ch | t, cid, b} (§5.5), checks in this order: 1 chat on (503), 2 signed in (401), 3 full access (402),
   * 4 complete profile (403), 5 no temporary password (403), 6 not muted (403 with until), 7 channel visible to this
   * person (404), 8 channel open (409), 9 text and cid (422/400), 10 limits (429). A repeated cid returns the stored
-  * message (also when the first answer was lost). {m: member projection, rev, people: {own public_id: entry}}.
+  * message (also when the first answer was lost), but only to the channel it was sent to: a cid is single-use, so the
+  * same cid sent to another channel is a client error (400), never a confirmation of a message that is somewhere else.
+  * {m: member projection, rev, people: {own public_id: entry}}.
   */
  public static function send(PDO $pdo,array $c,?array $viewer,array $settings,array $in,?int $nowMs=null):array {
   $d=$settings['data'];
@@ -317,7 +319,8 @@ final class Chat {
   if($state!=='open')throw new AppError('Ten czat jest tylko do odczytu.',409);
   $body=self::body($in['b']??null);
   $cid=$in['cid']??null;if(!is_string($cid)||!preg_match('/^[A-Za-z0-9_-]{22}$/D',$cid))throw new AppError('Niepoprawny formularz.',400);
-  if($old=self::byClientId($pdo,$viewer['id'],$cid))return self::sent($pdo,$old,$viewer['id']);
+  $again=function(array $old)use($pdo,$viewer,$channel):array{if((int)$old['channel_id']!==(int)$channel['id'])throw new AppError('Niepoprawny formularz.',400);return self::sent($pdo,$old,$viewer['id']);};
+  if($old=self::byClientId($pdo,$viewer['id'],$cid))return $again($old);
   self::limit($pdo,$viewer['id'],$d['send'],$nowMs??self::nowMs());
   $organizer=$t!==null&&($t['created_by']??null)===$viewer['id'];
   $id=(int)$channel['id'];
@@ -334,7 +337,7 @@ final class Chat {
   }catch(\Throwable $e){
    if($pdo->inTransaction())$pdo->rollBack();
    // The same cid sent twice at once: the second insert hits chat_messages_idem; answer with the stored message.
-   if($e instanceof \PDOException&&(int)($e->errorInfo[1]??0)===1062&&($old=self::byClientId($pdo,$viewer['id'],$cid)))return self::sent($pdo,$old,$viewer['id']);
+   if($e instanceof \PDOException&&(int)($e->errorInfo[1]??0)===1062&&($old=self::byClientId($pdo,$viewer['id'],$cid)))return $again($old);
    throw $e;
   }
   ChatBus::published($id,$rev);
@@ -367,12 +370,16 @@ final class Chat {
   * Message $id with its channel and tournament, when the channel is visible to $viewer; one 404 'Wiadomość nie istnieje.'
   * for hidden channels and missing messages alike (§5.5, §5.6). {message (with the channel's kind, slug, scope,
   * tournament_id, status, channel_rev), tournament, state}; 400 for an id that is not a positive integer.
+  * $panel (actions of the Admin's moderation panel, role admin only): the message only has to exist. The report queue
+  * lists every channel, also one of a tournament set back to a draft, so its actions must reach those messages (state
+  * is then null); chat-delete and chat-report in the chat keep the participant's rule.
   */
- public static function locate(PDO $pdo,mixed $id,?array $viewer,int $graceDays):array {
+ public static function locate(PDO $pdo,mixed $id,?array $viewer,int $graceDays,bool $panel=false):array {
   if(!is_int($id)||$id<1)throw new AppError('Niepoprawny formularz.',400);
   $r=self::rows($pdo,'SELECT m.id,m.rev,m.user_id,m.body,m.cont,m.state,m.created_ms,m.channel_id,c.kind,c.slug,c.scope,c.tournament_id,c.status,c.rev AS channel_rev FROM chat_messages m JOIN chat_channels c ON c.id=m.channel_id WHERE m.id=?',[$id])[0]??null;
   $t=$r&&$r['tournament_id']!==null?self::tournamentRow($pdo,$r['tournament_id']):null;
-  if(!$r||($st=self::visibleFor($r,$t,$viewer,self::today(),$graceDays))===null)throw new AppError('Wiadomość nie istnieje.',404);
+  $st=$r?self::visibleFor($r,$t,$viewer,self::today(),$graceDays):null;
+  if(!$r||$st===null&&!($panel&&($viewer['role']??null)==='admin'))throw new AppError('Wiadomość nie istnieje.',404);
   return ['message'=>$r,'tournament'=>$t,'state'=>$st];
  }
  /**
@@ -402,10 +409,11 @@ final class Chat {
   * chat-delete {id, note?} and the Admin's delete (§5.5): the author deletes their own visible message (deleted_author),
   * the Admin any message (deleted_mod; from the moderation panel always, in the chat when it is not their own). The text
   * is copied to chat_mod_log only for a moderator's deletion or when the message has open reports; an ordinary deletion
-  * of one's own message leaves no copy. A message already deleted answers {ok:true} again.
+  * of one's own message leaves no copy. A message already deleted answers {ok:true} again. From the panel the message
+  * only has to exist (locate $panel), in the chat its channel must be visible to the person.
   */
  public static function delete(PDO $pdo,array $viewer,mixed $id,mixed $note,int $graceDays,bool $panel=false,?int $nowMs=null):array {
-  $m=self::locate($pdo,$id,$viewer,$graceDays)['message'];$id=(int)$m['id'];
+  $m=self::locate($pdo,$id,$viewer,$graceDays,$panel)['message'];$id=(int)$m['id'];
   $admin=$viewer['role']==='admin';$author=$m['user_id']===$viewer['id'];
   if(!$admin&&!$author)throw new AppError('Brak uprawnień.',403);
   if(str_starts_with($m['state'],'deleted'))return ['ok'=>true];
@@ -426,8 +434,9 @@ final class Chat {
  /**
   * Account deletion (§3.8, called by Members through class_exists, usually inside its transaction): every message of the
   * person that is still visible or hidden becomes an author's tombstone (body '', state deleted_author), each with its
-  * own new rev, channel by channel in ascending id order (the lock order of every chat writer), msg_count corrected.
-  * No copy of the text is logged. Returns the number of messages changed.
+  * own new rev, channel by channel in ascending id order (the lock order of every chat writer), msg_count corrected
+  * (read under the channel lock and written as a number: GREATEST(msg_count,?) with a bound value compares as strings
+  * in MySQL 8.0). No copy of the text is logged. Returns the number of messages changed.
   */
  public static function tombstoneUser(PDO $pdo,string $userId,?int $nowMs=null):int {
   $nowMs??=self::nowMs();
@@ -436,12 +445,12 @@ final class Chat {
   $own=!$pdo->inTransaction();if($own)$pdo->beginTransaction();$done=[];$n=0;
   try{
    foreach($channels as $ch){
-    $l=$pdo->prepare('SELECT rev FROM chat_channels WHERE id=? FOR UPDATE');$l->execute([$ch]);$rev=(int)$l->fetchColumn();$l->closeCursor();
+    $l=$pdo->prepare('SELECT rev,msg_count FROM chat_channels WHERE id=? FOR UPDATE');$l->execute([$ch]);$lock=$l->fetch(PDO::FETCH_ASSOC);$l->closeCursor();$rev=(int)$lock['rev'];
     $rows=self::rows($pdo,"SELECT id,state FROM chat_messages WHERE user_id=? AND channel_id=? AND state IN ('visible','hidden_review') ORDER BY id FOR UPDATE",[$userId,$ch]);
     if(!$rows)continue;$visible=0;
     $u=$pdo->prepare("UPDATE chat_messages SET state='deleted_author',body='',rev=?,changed_ms=? WHERE id=?");
     foreach($rows as $r){$u->execute([++$rev,$nowMs,(int)$r['id']]);$visible+=$r['state']==='visible'?1:0;}
-    $pdo->prepare('UPDATE chat_channels SET rev=?,msg_count=GREATEST(msg_count,?)-? WHERE id=?')->execute([$rev,$visible,$visible,$ch]);
+    $pdo->prepare('UPDATE chat_channels SET rev=?,msg_count=? WHERE id=?')->execute([$rev,max(0,(int)$lock['msg_count']-$visible),$ch]);
     $done[$ch]=$rev;$n+=count($rows);
    }
    if($own)$pdo->commit();

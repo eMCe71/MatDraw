@@ -41,7 +41,9 @@ final class ChatModeration {
   * chat-report {id, reason, comment?}: visibility first (one 404 for hidden and missing), then full access (402), not
   * one's own message (403); deleted messages cannot be reported (404). Repeating a report is idempotent. When open
   * reports of autoHide distinct people are reached, the message becomes hidden_review with a new rev (auto_hide logged
-  * with the text). Limit 20/h per person in the route.
+  * with the text). A message hidden for review is already waiting for the moderator and people see only its tombstone:
+  * a report of it is accepted without a row (no report_count, nothing in the queue). The state is read again under the
+  * channel lock, the lock every state change holds. Limit 20/h per person in the route.
   */
  public static function report(PDO $pdo,array $viewer,array $in,array $settings,?int $nowMs=null):array {
   $loc=Chat::locate($pdo,$in['id']??null,$viewer,$settings['data']['graceDays']);$m=$loc['message'];$id=(int)$m['id'];
@@ -55,8 +57,11 @@ final class ChatModeration {
   try{
    // The channel row first, as every chat writer: an automatic hiding below changes the channel's rev.
    $l=$pdo->prepare('SELECT rev FROM chat_channels WHERE id=? FOR UPDATE');$l->execute([(int)$m['channel_id']]);$l->fetchAll();
-   $ins=$pdo->prepare("INSERT IGNORE INTO chat_reports (message_id,reporter_id,reason,comment,status,created_at) VALUES (?,?,?,?,'open',?)");$ins->execute([$id,$viewer['id'],$reason,$comment,$now]);
-   if($ins->rowCount()===1){
+   $s=$pdo->prepare('SELECT state FROM chat_messages WHERE id=?');$s->execute([$id]);$state=(string)$s->fetchColumn();$s->closeCursor();
+   if($state===''||str_starts_with($state,'deleted'))throw new AppError('Wiadomość nie istnieje.',404);
+   $added=false;
+   if($state==='visible'){$ins=$pdo->prepare("INSERT IGNORE INTO chat_reports (message_id,reporter_id,reason,comment,status,created_at) VALUES (?,?,?,?,'open',?)");$ins->execute([$id,$viewer['id'],$reason,$comment,$now]);$added=$ins->rowCount()===1;}
+   if($added){
     $pdo->prepare('UPDATE chat_messages SET report_count=LEAST(report_count+1,65535) WHERE id=?')->execute([$id]);
     $q=$pdo->prepare("SELECT COUNT(*) FROM chat_reports WHERE message_id=? AND status='open'");$q->execute([$id]);$open=(int)$q->fetchColumn();$q->closeCursor();
     if($open>=$settings['data']['autoHide'])$hidden=Chat::setState($pdo,$id,'hidden_review',$nowMs,fn($x)=>$x['state']==='visible',
@@ -170,10 +175,12 @@ final class ChatModeration {
   *   mute {userId, duration: 1h|24h|7d|perm, reason?}   upsert in chat_mutes (an Admin cannot be muted)
   *   unmute {userId}
   *   channel {channelId, status: open|readonly|closed}  the channel's rev moves, so pollers learn the new state
+  * delete, restore and dismiss only need the message to exist (Chat::locate $panel): the queue lists reports of every
+  * channel, also of a tournament set back to a draft, and the Admin must be able to settle them.
   */
  public static function adminAction(PDO $pdo,array $admin,array $in,array $settings,?int $nowMs=null):array {
   $nowMs??=Chat::nowMs();$now=intdiv($nowMs,1000);$action=$in['action']??null;
-  $msg=function()use($pdo,$in,$admin,$settings):int{$id=$in['messageId']??null;Chat::locate($pdo,$id,$admin,$settings['data']['graceDays']);return $id;};
+  $msg=function()use($pdo,$in,$admin,$settings):int{$id=$in['messageId']??null;Chat::locate($pdo,$id,$admin,$settings['data']['graceDays'],true);return $id;};
   $user=function()use($pdo,$in):array{$id=$in['userId']??null;if(!is_string($id)||$id===''||strlen($id)>40)throw new AppError('Niepoprawny formularz.',400);
    $q=$pdo->prepare('SELECT id,role FROM users WHERE id=?');$q->execute([$id]);$r=$q->fetch(PDO::FETCH_ASSOC);$q->closeCursor();if(!$r)throw new AppError('Konto nie istnieje.',404);return $r;};
   switch($action){

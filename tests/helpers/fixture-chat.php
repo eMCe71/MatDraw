@@ -12,6 +12,7 @@
 //   chat-retention {}                                  runs the chat-retention job now (its result string)
 //   chat-tombstone {userId}                            Chat::tombstoneUser (account deletion, §3.8)
 //   chat-table {table, hide}                           renames chat_channels away and back (switch before the database)
+//   chat-tournament-status {tournamentId, status}     sets a tournament's status directly (e.g. back to a draft)
 declare(strict_types=1);
 use MatDraw\{Chat,ChatSettings,Jobs};
 /** One row of $sql or null. */
@@ -65,6 +66,10 @@ return [
  'chat-report-age'=>function(PDO $pdo,array $p):int{$q=$pdo->prepare("UPDATE chat_reports SET status=IF(status='open','dismissed',status),resolved_at=? WHERE message_id=?");$q->execute([(int)$p['resolvedAt'],(int)$p['messageId']]);return $q->rowCount();},
  'chat-retention'=>fn(PDO $pdo,array $p,array $c):string=>(Jobs::all()['chat-retention']['run'])($pdo,$c,time()),
  'chat-tombstone'=>fn(PDO $pdo,array $p):int=>Chat::tombstoneUser($pdo,(string)($p['userId']??'')),
+ 'chat-tournament-status'=>function(PDO $pdo,array $p):int{
+  $status=(string)($p['status']??'');if(!in_array($status,['draft','open','closed','finished'],true))throw new RuntimeException('chat-tournament-status: status');
+  $q=$pdo->prepare('UPDATE tournaments SET status=? WHERE id=?');$q->execute([$status,(string)($p['tournamentId']??'')]);$pdo->exec('UPDATE app_meta SET revision=revision+1 WHERE id=1');return $q->rowCount();
+ },
  'chat-table'=>function(PDO $pdo,array $p):bool{
   if(($p['table']??'')!=='chat_channels')throw new RuntimeException('chat-table');
   $hidden=(bool)$pdo->query("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='chat_channels__hidden'")->fetchColumn();

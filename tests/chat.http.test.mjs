@@ -5,7 +5,8 @@
 // version, e reports into chat_health, history), sending (idempotent cid, limits with Retry-After, profile, temporary
 // password, mute, payment, archive, the settings switch, the chat-off file before the database), the tournament
 // lifecycle (draft 404 for everybody, grace day for signed-in people only, archive read only), reports with automatic
-// hiding, deletion with and without a copy of the text, Admin actions and settings, retention and account tombstones.
+// hiding, deletion with and without a copy of the text, Admin actions and settings (health: the last 60 minutes), panel
+// actions on messages of a tournament set back to a draft, retention and account tombstones (two-digit msg_count).
 import test,{after,before} from 'node:test';
 import assert from 'node:assert/strict';
 import {randomBytes} from 'node:crypto';
@@ -169,6 +170,9 @@ test('sending: repeated cid, limits with Retry-After, profile, temporary passwor
  const before=Number(fixture('chat-channel',{slug:'general'}).msg_count),key=cid();
  const a=await C.m1.req('chat-send',{ch:general.id,cid:key,b:'Raz'}),b=await C.m1.req('chat-send',{ch:general.id,cid:key,b:'Raz'});
  assert.equal(a.status,200);assert.equal(b.status,200);assert.deepEqual(b.data,a.data,'the stored message again');
+ const k0=Number(fixture('chat-channel',{slug:'karate'}).msg_count);
+ error(await C.m1.req('chat-send',{ch:karate.id,cid:key,b:'Raz'}),400,'Niepoprawny formularz.');// a cid is single-use: never a confirmation from another channel
+ assert.equal(Number(fixture('chat-channel',{slug:'karate'}).msg_count),k0);
  assert.equal(Number(fixture('chat-channel',{slug:'general'}).msg_count),before+1);
  fixture('chat-settings',{set:{send:{gap:2}}});
  assert.equal((await send(C.m4,general.id,'pierwsza')).status,200);
@@ -262,6 +266,8 @@ test('reports: idempotent per person, own and deleted refused, three different p
  assert.deepEqual(feed,{id:msg.id,r:Number(hidden.rev),t:msg.t,a:U.m1.publicId,x:'review'});
  const guest=(await get('public-chat',{ch:`${general.id}:0`})).data.ch[general.id].m.find(x=>x.id===msg.id);assert.deepEqual(Object.keys(guest),TOMB);assert.equal(guest.x,'review');
  assert.deepEqual(fixture('chat-log',{messageId:msg.id}).map(x=>[x.actor_id,x.action,x.original_body,x.target_user_id]),[['system','auto_hide','Kupię tanio, pisz na priv',U.m1.id]]);
+ assert.deepEqual((await C.m5.req('chat-report',{id:msg.id,reason:'spam'})).data,{ok:true},'hidden for review: already waiting for the moderator');
+ assert.equal(fixture('chat-reports',{messageId:msg.id}).length,3);assert.equal(fixture('chat-message',{id:msg.id}).report_count,3,'no row and no count from a tombstone');
  const gone=(await send(C.m1,general.id,'Zaraz zniknie')).data.m;await C.m1.req('chat-delete',{id:gone.id});
  error(await C.m2.req('chat-report',{id:gone.id,reason:'spam'}),404,'Wiadomość nie istnieje.');
  error(await C.m2.req('chat-report',{id:'7',reason:'spam'}),400);
@@ -332,9 +338,12 @@ test('Admin: report queue with context and mutes, restore, dismiss, mute/unmute,
  assert.ok(!(await get('public-chat-channels')).data.tournaments.some(t=>t.tournamentId===T.future));
  assert.equal((await get('chat-feed',{ch:`${future.id}:0`},C.m2.cookie)).data.ch[future.id].st,'closed','signed-in people still read it');
  await admin.req('admin-chat-action',{action:'channel',channelId:Number(future.id),status:'open'});
- const s=(await get('admin-chat-settings',{},admin.cookie)).data;
+ const hour=Math.floor(now()/3600)*3600;fixture('chat-health-add',{hourAt:hour-3600,status:508,n:3600});fixture('chat-health-add',{hourAt:hour-7200,status:508,n:500});
+ const t0=now(),s=(await get('admin-chat-settings',{},admin.cookie)).data,t1=now();
  assert.deepEqual(Object.keys(s),['version','on','preset','ms','notice','presets','send','autoHide','updatedAt','health']);
  assert.deepEqual(Object.keys(s.health),['0','429','503','508']);assert.ok(s.health['429']>=3&&s.health['0']>=2,'client reports of the polling test');
+ if(Math.floor(t1/3600)*3600===hour)assert.ok(s.health['508']>=3600-(t1-hour)&&s.health['508']<=3600-(t0-hour),`the last 60 minutes: the previous hour weighted, two hours back never (${s.health['508']})`);
+ for(const at of [hour-3600,hour-7200])fixture('chat-health-add',{hourAt:at,status:508,n:0});
  r=await admin.req('admin-chat-settings-save',{preset:'saver',notice:'  Przerwa‮ o 18:00  ',version:s.version});
  assert.equal(r.status,200,JSON.stringify(r.data));assert.deepEqual([r.data.version,r.data.preset,r.data.ms,r.data.notice,r.data.on],[s.version+1,'saver',[5000,10000,30000,60000,120000],'Przerwa o 18:00',true]);
  error(await admin.req('admin-chat-settings-save',{on:false,version:s.version}),409,'Ustawienia czatu zmienił w międzyczasie ktoś inny. Odśwież stronę.');
@@ -345,15 +354,42 @@ test('Admin: report queue with context and mutes, restore, dismiss, mute/unmute,
  r=await admin.req('admin-chat-settings-save',{preset:'normal',notice:null});assert.deepEqual([r.data.preset,r.data.notice],['normal',null]);
 });
 
+test('the moderation panel reaches messages of a tournament set back to a draft; the chat routes still answer 404',{skip},async()=>{
+ const t=fixture('tournament',{name:'Cofnięty do szkicu',date:'2031-09-01'}).id,ch=fixture('chat-channel',{tournamentId:t}),m=[];
+ for(const text of ['Do odrzucenia','Do usunięcia','Do przywrócenia'])m.push((await send(C.m1,ch.id,text)).data.m);
+ for(const x of m)assert.equal((await C.m2.req('chat-report',{id:x.id,reason:'spam'})).status,200);
+ for(const who of [C.m3,C.m4])assert.equal((await who.req('chat-report',{id:m[2].id,reason:'abuse'})).status,200);
+ assert.equal(fixture('chat-message',{id:m[2].id}).state,'hidden_review');
+ assert.equal(fixture('chat-tournament-status',{tournamentId:t,status:'draft'}),1);
+ for(const who of [admin,C.m1])error(await who.req('chat-delete',{id:m[1].id}),404,'Wiadomość nie istnieje.');// in the chat the draft does not exist for anybody
+ error(await C.m3.req('chat-report',{id:m[0].id,reason:'spam'}),404,'Wiadomość nie istnieje.');
+ const queue=(await get('admin-chat-reports',{},admin.cookie)).data.items.map(i=>i.message.id);assert.ok(m.every(x=>queue.includes(x.id)),'still in the open queue');
+ assert.deepEqual((await admin.req('admin-chat-action',{action:'dismiss',messageId:m[0].id,note:'Bez zastrzeżeń'})).data,{ok:true});
+ assert.deepEqual(fixture('chat-reports',{messageId:m[0].id}).map(x=>x.status),['dismissed']);
+ assert.deepEqual((await admin.req('admin-chat-action',{action:'delete',messageId:m[1].id,note:'Spam'})).data,{ok:true});
+ const del=fixture('chat-message',{id:m[1].id});assert.deepEqual([del.state,del.body],['deleted_mod','']);assert.deepEqual(fixture('chat-reports',{messageId:m[1].id}).map(x=>x.status),['actioned']);
+ assert.deepEqual((await admin.req('admin-chat-action',{action:'restore',messageId:m[2].id})).data,{ok:true});assert.equal(fixture('chat-message',{id:m[2].id}).state,'visible');
+ error(await admin.req('admin-chat-action',{action:'restore',messageId:m[0].id}),409,'Tej wiadomości nie można przywrócić.');
+ error(await admin.req('admin-chat-action',{action:'dismiss',messageId:987654321}),404,'Wiadomość nie istnieje.');
+ const open=(await get('admin-chat-reports',{},admin.cookie)).data.items.map(i=>i.message.id);assert.ok(!m.slice(0,2).some(x=>open.includes(x.id)),'dismissed and deleted leave the open queue');
+ fixture('chat-tournament-status',{tournamentId:t,status:'open'});
+ const back=(await get('chat-feed',{ch:`${ch.id}:0`},C.m2.cookie)).data.ch[ch.id].m;
+ assert.deepEqual(back.map(x=>[x.id,x.b??x.x]),[[m[0].id,'Do odrzucenia'],[m[1].id,'mod'],[m[2].id,'Do przywrócenia']],'reopened: the deleted message stays deleted');
+});
+
 test('retention removes old messages, old copies, expired mutes, old reports and health rows; account deletion makes tombstones',{skip},async()=>{
  const t=Date.now(),before=Number(fixture('chat-channel',{slug:'karate'}).msg_count);
  const old=fixture('chat-messages',{channelId:karate.id,userId:U.m3.id,n:2,createdMs:t-366*DAY});
+ // Two-digit counts: msg_count 13 − 3 must give 10 (GREATEST(msg_count,'3') compares as strings in MySQL 8.0 and gave 0).
+ const rt=fixture('tournament',{name:'Retencja 2031',date:'2031-10-01'}).id,R=fixture('chat-channel',{tournamentId:rt}),count=()=>Number(fixture('chat-channel',{tournamentId:rt}).msg_count);
+ fixture('chat-messages',{channelId:R.id,userId:U.m3.id,n:3,createdMs:t-367*DAY});fixture('chat-messages',{channelId:R.id,userId:U.m3.id,n:10});assert.equal(count(),13);
  const reported=(await send(C.m3,karate.id,'Stare zgłoszenie')).data.m;await C.m2.req('chat-report',{id:reported.id,reason:'other'});
  fixture('chat-report-age',{messageId:reported.id,resolvedAt:now()-181*86400});
  fixture('chat-log-age',{messageId:T.hidden,createdAt:now()-31*86400});
  fixture('chat-mute',{userId:U.m5.id,untilAt:now()-60});fixture('chat-mute',{userId:U.m3.id,untilAt:now()+600});
  const oldHour=Math.floor(now()/3600)*3600-15*86400;fixture('chat-health-add',{hourAt:oldHour,status:503,n:4});
- const result=fixture('chat-retention');assert.match(result,/^messages=2 originals=\d+ mutes=\d+ reports=\d+ health=\d+$/,result);
+ const result=fixture('chat-retention');assert.match(result,/^messages=5 originals=\d+ mutes=\d+ reports=\d+ health=\d+$/,result);
+ assert.equal(count(),10,'three old messages out of thirteen');
  for(const x of old.messages)assert.equal(fixture('chat-message',{id:x.id}),null);
  assert.equal(Number(fixture('chat-channel',{slug:'karate'}).msg_count),before+1,'two old messages removed, the new one counted');
  assert.ok(fixture('chat-log',{messageId:T.hidden}).every(x=>x.original_body===null),'copies older than 30 days cleared');
@@ -364,10 +400,12 @@ test('retention removes old messages, old copies, expired mutes, old reports and
  const g0=fixture('chat-channel',{slug:'general'}),k0=fixture('chat-channel',{slug:'karate'});
  const g=fixture('chat-messages',{channelId:general.id,userId:U.m5.id,n:2}),k=fixture('chat-messages',{channelId:karate.id,userId:U.m5.id,n:1});
  const h=fixture('chat-messages',{channelId:karate.id,userId:U.m5.id,n:1,state:'hidden_review',body:'ukryta'});
- assert.equal(fixture('chat-tombstone',{userId:U.m5.id}),4);assert.equal(fixture('chat-tombstone',{userId:U.m5.id}),0,'nothing left to change');
+ const r5=fixture('chat-messages',{channelId:R.id,userId:U.m5.id,n:3});assert.equal(count(),13);
+ assert.equal(fixture('chat-tombstone',{userId:U.m5.id}),7);assert.equal(fixture('chat-tombstone',{userId:U.m5.id}),0,'nothing left to change');
  const g1=fixture('chat-channel',{slug:'general'}),k1=fixture('chat-channel',{slug:'karate'});
  assert.deepEqual([Number(g1.msg_count)-Number(g0.msg_count),Number(k1.msg_count)-Number(k0.msg_count)],[0,0],'visible ones counted out again (hidden ones were not counted)');
- for(const x of [...g.messages,...k.messages,...h.messages]){const row=fixture('chat-message',{id:x.id});assert.deepEqual([row.state,row.body],['deleted_author','']);assert.ok(Number(row.rev)>x.rev);}
+ assert.equal(count(),10,'13 − 3 with two-digit counts');
+ for(const x of [...g.messages,...k.messages,...h.messages,...r5.messages]){const row=fixture('chat-message',{id:x.id});assert.deepEqual([row.state,row.body],['deleted_author','']);assert.ok(Number(row.rev)>x.rev);}
  const feed=(await get('chat-feed',{ch:`${general.id}:${g.rev}`},C.m2.cookie)).data.ch[general.id].m;
  assert.deepEqual(feed.map(x=>[x.id,x.x,x.a]),g.messages.map(x=>[x.id,'author',U.m5.publicId]));
 });

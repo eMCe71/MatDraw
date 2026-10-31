@@ -23,6 +23,7 @@ $out=match($in['job']){
  'normalize'=>array_map(fn($d)=>ChatSettings::normalize($d),$in['cases']),
  'client'=>ChatSettings::client(ChatSettings::DEFAULTS),
  'preset'=>array_map(fn($ms)=>ChatSettings::preset($ms),$in['cases']),
+ 'window'=>array_map(fn($c)=>ChatSettings::window($c['rows'],$c['now']),$in['cases']),
  'text'=>array_map(fn($c)=>attempt(fn()=>ChatModeration::text($c['s'],$c['kind'])),$in['cases']),
  'public-keys'=>array_map(fn()=>Chat::publicKey(),range(1,$in['n'])),
 };

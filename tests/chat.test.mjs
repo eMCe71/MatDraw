@@ -2,7 +2,8 @@
 // channel and different between days and channels: the documented, not hidden, grouping), the member projection,
 // tournamentState/visibleFor (draft, open, grace day for signed-in people only, archive, Admin status), the message text
 // (Text::clean, 1–1000 characters), cont, send limits, the polling parser (ch, h, cv, e, before), the 204/COUNT decision,
-// settings normalisation and the migration seed (lobby and default settings equal to the code).
+// settings normalisation, the hosting-health window (the last 60 minutes from hour buckets) and the migration seed
+// (lobby and default settings equal to the code).
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
@@ -122,6 +123,14 @@ test('settings: invalid stored values fall back to the defaults; client fields; 
  assert.deepEqual(good,{...k.defaults,on:false,ms:[5000,10000,30000,60000,120000],notice:'Przerwa techniczna',send:{...k.defaults.send,gap:0},autoHide:5,graceDays:2});
  assert.deepEqual(bridge({job:'preset',cases:[k.presets.normal,k.presets.saver,k.presets.emergency,[1000,2000,3000,4000,5000]]}),['normal','saver','emergency','custom']);
  assert.deepEqual(k.presets,{normal:[2500,5000,10000,30000,60000],saver:[5000,10000,30000,60000,120000],emergency:[15000,30000,60000,120000,300000]});
+});
+
+test('hosting health: the current hour in full plus the overlapping part of the previous one, never two whole hours',{skip},()=>{
+ const H=1_800_000_000,rows=[{hour_at:H-7200,status:429,n:1000},{hour_at:H-3600,status:429,n:100},{hour_at:H,status:429,n:10},{hour_at:String(H-3600),status:'0',n:'36'},{hour_at:H,status:404,n:7}];
+ const out=bridge({job:'window',cases:[H,H+900,H+1800,H+3599,H+3600,H+7200].map(now=>({rows,now}))});
+ assert.deepEqual(out[0],{429:110,503:0,508:0,0:36},'at the top of the hour the previous hour is the whole window');
+ assert.deepEqual(out.map(o=>o[429]),[110,85,60,10,10,0],'10:15 counts three quarters of the 9:00 bucket; two hours back never count');
+ assert.deepEqual(out.map(o=>o[0]),[36,27,18,0,0,0],'rows as strings from the database; statuses outside the list ignored');
 });
 
 test('migration 0003 seeds the four channels of Chat::LOBBY in order and the default settings of ChatSettings',{skip},()=>{

@@ -2,7 +2,8 @@
 // Chat retention (plan §5.8, §10), hourly, run by MatDraw\Jobs after responses or by bin/cron.php. Batches of 500 rows
 // and about 2 seconds of work per run; whatever is left waits for the next run.
 //   - messages older than retentionDays (365) are deleted with their reports (ON DELETE CASCADE); msg_count of their
-//     channels drops by the number of visible ones removed, under the channel row lock (the lock order of every chat writer);
+//     channels drops by the number of visible ones removed, under the channel row lock (the lock order of every chat writer),
+//     computed in PHP from the locked row (GREATEST(msg_count,?) with a bound value would compare as strings in MySQL 8.0);
 //   - chat_mod_log.original_body older than modKeepDays (30) becomes NULL;
 //   - expired mutes, resolved reports older than 180 days and chat_health rows older than 14 days are deleted.
 // Tournament channels whose history became empty stay (cheap). The log rows themselves stay (no personal text left).
@@ -19,11 +20,11 @@ return [
    foreach($byChannel as $ch=>$ids){
     $pdo->beginTransaction();
     try{
-     $l=$pdo->prepare('SELECT rev FROM chat_channels WHERE id=? FOR UPDATE');$l->execute([$ch]);$l->fetchAll();
+     $l=$pdo->prepare('SELECT msg_count FROM chat_channels WHERE id=? FOR UPDATE');$l->execute([$ch]);$count=(int)$l->fetchColumn();$l->closeCursor();
      $in=implode(',',array_fill(0,count($ids),'?'));
      $v=$pdo->prepare("SELECT COUNT(*) FROM chat_messages WHERE id IN ($in) AND created_ms<? AND state='visible' FOR UPDATE");$v->execute([...$ids,$cut]);$visible=(int)$v->fetchColumn();$v->closeCursor();
      $del=$pdo->prepare("DELETE FROM chat_messages WHERE id IN ($in) AND created_ms<?");$del->execute([...$ids,$cut]);$messages+=$del->rowCount();
-     if($visible)$pdo->prepare('UPDATE chat_channels SET msg_count=GREATEST(msg_count,?)-? WHERE id=?')->execute([$visible,$visible,$ch]);
+     if($visible)$pdo->prepare('UPDATE chat_channels SET msg_count=? WHERE id=?')->execute([max(0,$count-$visible),$ch]);
      $pdo->commit();
     }catch(Throwable $e){if($pdo->inTransaction())$pdo->rollBack();throw $e;}
    }
