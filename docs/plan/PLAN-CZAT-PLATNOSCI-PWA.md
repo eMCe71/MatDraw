@@ -1568,6 +1568,7 @@ Alias `#czat…` jest normalizowany przez `replaceState`. Parametry `?billing=su
   - jeśli nie ma niezapisanych formularzy (`form[data-dirty]`; szkic czatu i tak leży w `sessionStorage`) i nie trwa płatność ani rejestracja, `pwa.js` wysyła `SKIP_WAITING` do czekającego workera i przeładowuje kartę po `controllerchange` (bez workera: zwykłe przeładowanie);
   - w przeciwnym razie pokazuje pasek blokujący „Wymagana aktualizacja MatBravo. [Odśwież teraz]”, który nie znika;
   - **`#screen` (ekran hali) przeładowuje się w tym przypadku od razu:** nie ma tam pól do wypełnienia, a ze starym kodem i tak przestałby dostawać dane (`bootstrap` odpowiada 409). To jedyny wyjątek od zasady „`#screen` nigdy nie jest przeładowywany”; podnoszenie `min_client_api` w dniu zawodów i tak odradzamy (§9.11).
+- **Znacznik trwającej rejestracji lub płatności (kontrakt `pwa.js` ↔ `account-frontend`).** `account-frontend` ustawia `sessionStorage['matdraw.flow.active']=String(Date.now())` od początku rejestracji i od powrotu ze Stripe (`?billing=`) aż do końca `confirm`, a usuwa go po zakończeniu lub anulowaniu. Dopóki znacznik jest młodszy niż 30 minut, `pwa.js` nie pokazuje karty instalacji ani nie robi automatycznej wymaganej aktualizacji (pokazuje pasek blokujący). Bez znacznika `pwa.js` opiera się tylko na trasach `#signup` i `#billing`, na parametrze `?billing=` oraz na kluczach `matdraw.signup.*` i `matdraw.billing.*` w `sessionStorage` (liczą się 10 minut od chwili, gdy zakładka przeglądarki je zobaczyła). Po `replaceState`, który usuwa `?billing=`, tylko znacznik chroni przed kartą i przeładowaniem na ekranie powrotu po upływie tych 10 minut.
 - **Bez liczników instalacji wysyłanych na serwer** w v1 (pytanie P12) i bez Web Push.
 
 ### 9.5 `.htaccess` (deploy-infra; 04 §2.c)
@@ -1861,7 +1862,8 @@ Każdy punkt ma przypisany test albo kontrolę; `integration-qa` odhacza całoś
    - wdrożenie podczas otwartej aplikacji → pasek → „Odśwież” przeładowuje tylko tę kartę;
    - podniesione `min_client_api` → automatyczna aktualizacja bez niezapisanych danych, pasek blokujący z nimi;
    - tryb samolotowy → `offline.html`;
-   - `#screen` nie jest przeładowywany przy zwykłej aktualizacji.
+   - `#screen` nie jest przeładowywany przy zwykłej aktualizacji;
+   - znacznik `matdraw.flow.active` (DevTools → Application → Session Storage): jest w trakcie rejestracji i na ekranie powrotu ze Stripe po usunięciu `?billing=`, znika po „Gotowe!” i po anulowaniu; w tym czasie brak karty instalacji i brak automatycznego przeładowania.
 7. Dostępność:
    - klawiatura (karty kanałów strzałkami, `feed` PageUp/PageDown);
    - czytnik ekranu ogłasza najwyżej co 15 s;
@@ -2024,7 +2026,7 @@ Pełne opisy, listy plików i kryteria akceptacji każdego plasterka są poniże
 ### 12.9 `pwa-frontend`: PWA w interfejsie: rejestracja workera, pasek aktualizacji, wymagana aktualizacja, karta instalacji, arkusz iOS, baner przeglądarek wbudowanych
 
 - **Fala:** 3 · **Model / wysiłek:** sonnet / medium · **Zależy od:** `frontend-foundation`, `pwa-core`
-- **Pliki własne:** `dist/pwa.js`, `dist/pwa.css`, `dist/i18n/pwa-en.js`, `dist/lang-boot.js`, `tests/pwa-ui.test.mjs`
+- **Pliki własne:** `dist/pwa.js`, `dist/pwa.css`, `dist/i18n/pwa-en.js`, `dist/lang-boot.js`, `tests/pwa-ui.test.mjs`, `tests/pwa-browser.test.mjs` (opcjonalny test w Chromium, tylko z `MATDRAW_BROWSER_TESTS=1`)
 - **Pliki współdzielone:** brak
 - **Opis:** Plan: §9.1 (zamiana manifestu), §9.2, §9.4; raport 04 §1.4.3, §1.5 i 05 §13, §19.11. (1) pwa.js (statyczny, przechwytuje beforeinstallprompt od razu przy imporcie): rejestracja ./sw.js tylko w trybie API po ok. 2 s od pierwszego render (zdarzenie ready), updateViaCache:'none', reg.update() przy powrocie do karty najwyżej co godzinę; pasek aktualizacji w #pwa-root (role=status, Odśwież → SKIP_WAITING i przeładowanie tylko tej karty po controllerchange; inne karty pasywny komunikat; nigdy na #screen ani w podglądzie wydruku); obsługa zdarzenia client-outdated wg §9.4 (automatyczne SKIP_WAITING i przeładowanie bez niezapisanych formularzy, pasek blokujący z nimi, natychmiastowe przeładowanie #screen); wykrywanie standalone (html[data-standalone], appinstalled); karta instalacji z regułami i wykluczeniami §9.4 (sygnały z rejestru: login, chat:sent, chat:active; dzień turnieju z workspace), pamięć w localStorage matdraw.pwa z try/catch (30 dni, po 3 odmowach na zawsze); arkusz iOS (3 kroki, dopisek ⋯, maskotka guide dozwolona, pułapka fokusu, Esc); baner przeglądarek wbudowanych z Kopiuj link; registry.provide('pwa',{canInstall,install}); setManifestLanguage(lang) i nasłuch zdarzenia language. Szablony przez h/setHtml (§5.9). (2) lang-boot.js: strzeżona podmiana href manifestu na ./manifest.en.webmanifest dla en, bez łamania testu parytetu w vm. (3) pwa.css (prefiks pwa-, z-index 90/95, safe-area, reduced motion, print). (4) Teksty EN w dist/i18n/pwa-en.js. (5) tests/pwa-ui.test.mjs (§11).
 - **Kryteria akceptacji:**
@@ -2064,6 +2066,7 @@ Pełne opisy, listy plików i kryteria akceptacji każdego plasterka są poniże
 - **Kryteria akceptacji:**
   - tests/account-ui.test.mjs, uogólniony test i18n (promo, wszystkie T()) i tests/xss-scan.test.mjs zielone.
   - Ręczna QA §11 pkt 1 (zmiana języka na #signup w kroku 2), 3, 4 i 5 (hasło tymczasowe, baner personelu) na buildzie PHP z atrapą Stripe oraz w demo.
+  - Znacznik `sessionStorage['matdraw.flow.active']` (§9.4) jest ustawiany w całej rejestracji i od powrotu ze Stripe do końca `confirm`, a usuwany po zakończeniu i po anulowaniu; test w `tests/account-ui.test.mjs`.
   - Przegląd: nawigacja do Stripe tylko po sprawdzeniu origin; brak blob: i URL.createObjectURL; żadne kwoty, waluty ani id cen nie są wysyłane przez klienta; nazwa i nazwisko do propozycji tylko w ciele POST.
 
 ### 12.13 `members-frontend`: Panel Admina „Członkowie” i plakietki planów w kontach personelu

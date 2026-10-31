@@ -10,4 +10,7 @@
   lang=/^pl(?:[-_]|$)/i.test(first)?'pl':'en';
  }
  document.documentElement.lang=lang;
+ /* English visitors get the English web app manifest (plan §9.1); pwa.js repeats this when the language is switched.
+  * Guarded: pages without the link (offline.html) and the vm test have no querySelector. */
+ if(lang==='en'&&document.querySelector){var m=document.querySelector('link[rel="manifest"]');if(m)m.setAttribute('href','./manifest.en.webmanifest');}
 })();

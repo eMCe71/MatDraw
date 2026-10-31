@@ -1,1 +1,57 @@
-/* pwa.css: styles of the pwa feature (plan §8.7). Placeholder created by frontend-foundation; the feature slice owns it. */
+/* pwa.css: update bars, install card/chip, iOS sheet and in-app browser banner (plan §8.7, §9.4). Prefix pwa-; layers 90 (bars) and 95 (sheet),
+   below modals (100) and the toast (200). The root #pwa-root is filled by pwa.js and stays empty in the demo and on #screen. */
+#pwa-root .pwa-region[hidden]{display:none!important}
+/* Bars and the card stack at the bottom right (the left edge is the shell's menu with the account entries) and full width on phones; a chat page can lift them above its composer or bottom nav with --pwa-offset. */
+.pwa-stack{position:fixed;z-index:var(--z-pwa-bar,90);right:16px;bottom:calc(16px + var(--pwa-offset,0px) + env(safe-area-inset-bottom,0px));width:min(440px,calc(100vw - 32px));display:flex;flex-direction:column;pointer-events:none}
+.pwa-stack>.pwa-region{pointer-events:auto}
+/* The status/alert regions stay in the tree (empty) so that screen readers announce what is inserted; spacing only for filled regions. */
+.pwa-stack>.pwa-region:not(:empty){margin-top:8px}
+.pwa-bar,.pwa-card,.pwa-chip,.pwa-inapp{background:#fff;color:var(--ink,#19324f);border:1px solid #cfdcea;border-radius:12px;box-shadow:0 8px 28px #13253c2e}
+.pwa-bar{display:flex;align-items:center;gap:12px;padding:10px 10px 10px 16px;border-left:4px solid var(--mb-cyan,#00aeef)}
+.pwa-bar-text{flex:1;margin:0;font-size:13px;font-weight:600;line-height:1.4;color:var(--ink,#19324f)}
+.pwa-bar-block .pwa-bar-text{color:#fff}
+.pwa-bar-block{background:var(--mb-navy,#00448a);color:#fff;border-color:var(--mb-navy,#00448a);border-left-color:#4ac1ed}
+.pwa-bar-block .btn.primary{background:#fff;color:var(--mb-navy,#00448a);border-color:#fff}
+.pwa-btn{flex:none;font-size:12px;min-height:36px;padding:8px 14px}
+.pwa-card{display:grid;grid-template-columns:44px 1fr;gap:4px 12px;align-items:center;padding:14px}
+.pwa-icon{width:44px;height:44px;border-radius:10px;grid-row:span 2}
+.pwa-copy strong{display:block;font-size:14px;font-weight:800;color:var(--navy,#102447)}
+.pwa-copy p{margin:2px 0 0;font-size:12px;line-height:1.45;color:var(--muted,#617188)}
+.pwa-actions{grid-column:2;display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:6px}
+.pwa-chip{display:inline-flex;align-items:center;gap:4px;padding:4px 4px 4px 10px;border-radius:999px;align-self:flex-end}
+.pwa-chip-icon{border-radius:6px}
+.pwa-chip-main{padding:6px 8px;font-size:12px;font-weight:700;color:var(--mb-blue,#0072bc);background:transparent;border:0;border-radius:999px}
+.pwa-x{display:inline-grid;place-items:center;width:32px;height:32px;padding:0;background:transparent;border:0;border-radius:999px;color:var(--muted,#617188)}
+.pwa-x:hover{background:var(--soft,#eaf5fc)}
+.pwa-x .icon,.pwa-x svg{width:16px;height:16px}
+/* In-app browser banner at the top (the cookie of the host app may be lost: the person should continue in the real browser). */
+.pwa-top{position:fixed;z-index:var(--z-pwa-bar,90);top:calc(8px + env(safe-area-inset-top,0px));left:8px;right:8px;display:flex;justify-content:center;pointer-events:none}
+.pwa-top>.pwa-region{pointer-events:auto;width:min(560px,100%)}
+.pwa-inapp{display:flex;align-items:flex-start;gap:12px;padding:12px 8px 12px 14px;background:var(--soft,#eaf5fc);border-color:#b5d6ec}
+.pwa-inapp-copy{flex:1;min-width:0}
+.pwa-inapp-copy strong{display:block;font-size:13px;line-height:1.35;color:var(--navy,#102447)}
+.pwa-inapp-copy p{margin:4px 0 0;font-size:12px;color:var(--muted,#617188)}
+.pwa-inapp .pwa-actions{grid-column:auto;margin:0;flex:none;flex-wrap:nowrap}
+.pwa-url{width:100%;margin-top:8px;padding:8px 10px;font:inherit;font-size:12px;border:1px solid #8296b0;border-radius:6px;background:#fff}
+/* iOS sheet: bottom sheet on phones, centred dialog elsewhere. */
+.pwa-sheet-backdrop{position:fixed;inset:0;z-index:var(--z-pwa-sheet,95);display:flex;align-items:flex-end;justify-content:center;background:#111e2e65}
+.pwa-sheet{width:100%;max-width:480px;max-height:92dvh;overflow:auto;background:#fff;border-radius:18px 18px 0 0;padding:20px 20px calc(20px + env(safe-area-inset-bottom,0px));box-shadow:0 -10px 40px #13253c40;animation:pwa-rise .22s ease-out}
+.pwa-sheet:focus{outline:0}
+.pwa-sheet-head{display:flex;align-items:flex-end;gap:14px;margin-bottom:14px}
+.pwa-sheet-head h2{margin:0 0 4px;font-size:17px;line-height:1.3;color:var(--navy,#102447)}
+.pwa-sheet-head p{margin:0;font-size:12px;line-height:1.45;color:var(--muted,#617188)}
+.pwa-mascot{flex:none;width:auto;height:84px}
+.pwa-steps{list-style:none;margin:0 0 12px;padding:0;display:grid;gap:8px}
+.pwa-steps li{display:flex;align-items:center;gap:12px;padding:10px 12px;background:var(--bg,#f5f8fc);border:1px solid var(--line,#dfe7f0);border-radius:10px;font-size:13px;font-weight:600}
+.pwa-step-n{flex:none;display:inline-grid;place-items:center;width:24px;height:24px;border-radius:50%;background:var(--mb-navy,#00448a);color:#fff;font-size:12px;font-weight:800}
+.pwa-step-ico{flex:none;display:inline-grid;place-items:center;color:var(--mb-blue,#0072bc)}
+.pwa-step-ico svg{width:22px;height:22px}
+.pwa-note{margin:0 0 8px;font-size:12px;line-height:1.5;color:var(--muted,#617188)}
+.pwa-sheet-actions{display:flex;justify-content:flex-end;margin-top:14px}
+@keyframes pwa-rise{from{transform:translateY(24px);opacity:0}to{transform:none;opacity:1}}
+@media(min-width:651px){.pwa-sheet-backdrop{align-items:center}.pwa-sheet{border-radius:18px}}
+@media(max-width:650px){.pwa-stack{left:12px;right:12px;width:auto;bottom:calc(12px + var(--pwa-offset,0px) + env(safe-area-inset-bottom,0px))}.pwa-bar{padding-left:14px}.pwa-inapp{flex-wrap:wrap}.pwa-inapp .pwa-actions{width:100%;justify-content:space-between}}
+@media(prefers-reduced-motion:reduce){.pwa-sheet{animation:none}}
+/* Never in print, in the print preview or on the hall screen; installed apps do not offer to install. */
+@media print{#pwa-root{display:none!important}}
+body.print-preview #pwa-root,body.projection #pwa-root,html[data-standalone] .pwa-install-only{display:none!important}
