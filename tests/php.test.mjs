@@ -68,3 +68,30 @@ test('PHP sample athletes fill 21 categories with no blocked or underfilled ones
   assert.ok(clubs.every(c=>c.endsWith(' (demo)')));
  }
 });
+
+// Community tournaments in the public projection (PLAN-REJESTRACJA-ROLE §5.6): sparse community/trusted fields, the home list
+// without unconfirmed organizers, bracket clubs from the current club (verified name, null when unverified, '' unaffiliated).
+import {guestTournaments} from '../dist/workspace.js';
+test('PHP public projection equals the demo for community tournaments, unverified, merged and unaffiliated clubs',{skip:!php},()=>{
+ const db=drawn(),today='2026-10-31',now=Math.floor(Date.now()/1000);
+ db.users.push({id:'org-u',role:'member',organizer:true,organizerTrustedAt:null,organizerBlockedAt:null},{id:'org-t',role:'member',organizer:true,organizerTrustedAt:now,organizerBlockedAt:null});
+ db.clubs.push({id:'c-new',name:'Klub Niezweryfikowany',verified:false},{id:'c-old',name:'Klub Dawny',verified:true,mergedInto:'club-3'});
+ const t=db.tournaments[0],[bracketKey]=Object.keys(t.draws),inBracket=new Set(t.draws[bracketKey].slots.filter(Boolean));
+ const moved=t.entries.filter(e=>inBracket.has(e.id)).slice(0,3);moved[0].clubId='c-new';moved[1].clubId='unaffiliated';moved[2].clubId='c-old';
+ db.tournaments.push({id:'t-community-u',name:'Społeczny',city:'Opole',date:'2026-11-20',mat:'Mata 1',status:'open',createdBy:'org-u',entries:structuredClone(t.entries.slice(0,5)),draws:{},activity:[]},
+  {id:'t-community-t',name:'Społeczny potwierdzony',city:'Opole',date:'2026-11-21',mat:'Mata 1',status:'closed',createdBy:'org-t',entries:[],draws:{},activity:[]});
+ const list=guestTournaments(db),ids=[t.id,'t-community-u','t-community-t','t-spring-2027'];
+ const out=bridge({job:'guest',tournaments:list,today,ids,limit:20});
+ assert.deepEqual(out.upcoming,guestUpcoming(list,today,20));assert.deepEqual(out.tournaments,ids.map(id=>guestTournament(list,id,today)));
+ assert.ok(!out.upcoming.tournaments.some(x=>x.id==='t-community-u'),'unconfirmed: not on the home list');
+ assert.deepEqual(out.upcoming.tournaments.find(x=>x.id==='t-community-t'),{id:'t-community-t',name:'Społeczny potwierdzony',date:'2026-11-21',city:'Opole',status:'closed',community:true,trusted:true});
+ const [staff,community]=out.tournaments;
+ assert.deepEqual(Object.keys(staff.tournament).sort(),['city','date','id','name','status'],'staff tournaments keep five fields');
+ assert.deepEqual([community.tournament.community,community.tournament.trusted],[true,false],'public under its own address');
+ const slots=staff.categories.flatMap(c=>c.bracket?.slots||[]).filter(Boolean),clubs=new Set(slots.map(s=>s.club));
+ assert.ok(clubs.has(null)&&clubs.has('')&&!clubs.has('Klub Niezweryfikowany')&&!clubs.has('Klub Dawny'),JSON.stringify([...clubs]));
+ for(const s of slots)assert.deepEqual(Object.keys(s).sort(),['club','initials']);
+ assert.equal(staff.summary.clubs,new Set(t.entries.map(e=>e.clubId==='c-old'?'club-3':e.clubId).filter(c=>c!=='unaffiliated')).size,'unaffiliated is not a club; a merged club counts as its target');
+ // Without currentClub (callers before this plan) the snapshot club is shown, '' for unaffiliated.
+ const plain=bridge({job:'guest',tournaments:db.tournaments,today,ids:[t.id]});assert.deepEqual(plain.tournaments,[guestTournament(db.tournaments,t.id,today)]);
+});
