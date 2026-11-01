@@ -5,14 +5,14 @@
 //   settings-set {data, version?}           writes the row directly (no checks, no audit), as a saved panel would
 //   settings-reset {}                       deletes the row (config.php decides again)
 //   settings-table {drop: bool}             drops app_settings (code ahead of migration 0008) or creates it again with 0008
-//   settings-config {set:{key:value|null}}  rewrites MATDRAW_CONFIG atomically (allow-listed switch keys, the Stripe key and
-//                                           amounts of the fingerprint, the invite token); returns the old values
+//   settings-config {set:{key:value|null}}  rewrites MATDRAW_CONFIG atomically (allow-listed switch keys, the Stripe mode, key
+//                                           and amounts of the fingerprint, the invite token); returns the old values
 //   settings-free-set {}                    Billing::freePeriodSet with the effective configuration (groups A and B, scheduled)
 //   settings-audit {after?}                 account_audit rows of settings.* with an id above `after`, oldest first
 //   settings-audit-add {actor, action, note?} one account_audit row (an actor of the history: a club account, an erased id)
 declare(strict_types=1);
 use MatDraw\{Billing,Members,Migrator,Settings};
-const FIXTURE_SETTINGS_CONFIG_KEYS=['signup_enabled','billing_enabled','billing_enforce','signup_force_off','signup_free_beta','support_email','stripe_secret_key','billing_amounts','signup_invite_token'];
+const FIXTURE_SETTINGS_CONFIG_KEYS=['signup_enabled','billing_enabled','billing_enforce','signup_force_off','signup_free_beta','support_email','billing_mode','stripe_secret_key','billing_amounts','signup_invite_token'];
 return [
  'settings-row'=>function(PDO $pdo):?array{
   $r=$pdo->query('SELECT version,data,updated_at,updated_by FROM app_settings WHERE id=1')->fetch(PDO::FETCH_ASSOC);if(!$r)return null;

@@ -11,10 +11,12 @@ use PDO;
  *             'on'|'paused' (config organizers, default 'on'), trustRequired bool (config organizers_trust_required,
  *             default false: full automation, §17), supportEmail (config support_email ?: hello@matbravo.com, D4),
  *             stripeCheck null|{at, ok, mode, prices:{pln,usd}, error: null|code, fp} (codes only, never Stripe's text),
- *             armed null|{fp, mode, at}: the Stripe configuration payments were last confirmed for (R1.2), written only by
- *             the save gate of admin-settings-save (fresh check, test-mode confirmation, free-period decision); a check never
- *             arms. {fp:null, mode:null}: none is confirmed (a check, while payments are 'paid' and nothing is armed, of
- *             another configuration than the stored check's one): only the save gate resumes payments.
+ *             armed null|{fp, mode, at}: the Stripe configuration payments were last confirmed for (R1.2), written by the
+ *             save gate of admin-settings-save (fresh check, test-mode confirmation, free-period decision) and by a passing
+ *             check of another configuration in the armed Stripe mode (a rotated key, new prices or amounts: nobody loses
+ *             access, the mode was confirmed, R2.4). {fp:null, mode:null}: none is confirmed (a check, while payments are
+ *             'paid' and nothing is armed, of a configuration in another Stripe mode than the stored check's one): only the
+ *             save gate resumes payments.
  *             normalize() replaces every invalid value by its default; unknown keys of a later release stay in the JSON.
  *  effective(PDO|null, config): the configuration every route reads (§3.2, computed in one place: Routes::dispatch for
  *             session, upload and peek-with-cookie routes and routes flagged 'settings'; index.php; the jobs). One query
@@ -26,10 +28,10 @@ use PDO;
  *                     A stored Stripe check that failed or was made against another Stripe configuration (fingerprint():
  *                     billing_mode, the key's hash, price keys, advertised amounts) does the same with settings_degraded
  *                     'stripe-check' (final review B4), and so does a configuration other than the armed one (R1.2): a
- *                     passing manual check alone resumes payments only for the armed configuration; another one (test →
- *                     live keys) waits for the save gate, with its test-mode confirmation and free-period decision.
- *                     Without any stored check or armed configuration the payments switch works as before (config.php
- *                     alone, the release a67ad42)
+ *                     passing manual check resumes payments for the armed configuration and for another one in the same
+ *                     Stripe mode (R2.4); after a change of mode (test ↔ live keys) or with nothing confirmed they wait
+ *                     for the save gate, with its test-mode confirmation and free-period decision. Without any stored
+ *                     check or armed configuration the payments switch works as before (config.php alone, a67ad42)
  *   settings_degraded 'billing-missing' | 'stripe-check' | 'force-off' (signup 'on', or an invite token for the paid test
  *                     window, under signup_force_off)
  *   signup_invite_token null under signup_force_off: the emergency ceiling closes the invite path too (B6)
@@ -43,12 +45,13 @@ use PDO;
  *             effective() pauses them, 'stripe-check', R1.2) only with billing_enabled, a fresh Stripe check outside any
  *             transaction (resolvePrice of every currency, amounts compared with billing_amounts), in Stripe test mode the
  *             explicit confirmation (allowTestMode or confirmTestMode; 409 code test_mode, confirmTestMode:true, B5) and,
- *             while payments are not effectively enforced yet or no configuration was ever armed (config.php alone), the
- *             decision about accounts of the free period (Billing::freePeriodSet, groups A and B); then one transaction with
- *             the free-period action, the row (version+1, armed) and account_audit (settings.save, settings.support old -> new).
+ *             when somebody may lose access he really had (payments start, were never confirmed in the panel, or change
+ *             Stripe mode: test subscribers on live keys, R2.3), the decision about accounts of the free period
+ *             (Billing::freePeriodSet, groups A and B); then one transaction with the free-period action, the row
+ *             (version+1, armed) and account_audit (settings.save, settings.support old -> new).
  *  view()     admin-settings (§8.2), with stripeCheck {ok, stale, checkedAt, mode, rearm} of the last check (stale: the
  *             Stripe configuration of config.php changed since; rearm: the check passed but payments stay paused until the
- *             paid mode is saved again, R1.2).
+ *             paid mode is saved again: a change of Stripe mode or nothing confirmed, R1.2, R2.4).
  */
 final class Settings {
  public const SUPPORT_DEFAULT='hello@matbravo.com';
@@ -109,8 +112,10 @@ final class Settings {
   * (a67ad42); a stored check must have passed against it (B4) and an armed configuration must be this one (R1.2).
   */
  private static function running(array $s,array $c):bool{return ($s['stripeCheck']===null||self::verified($s['stripeCheck'],$c))&&($s['armed']===null||$s['armed']['fp']===self::fingerprint($c));}
+ /** 'test' | 'live': the Stripe mode of config $c. */
+ private static function stripeMode(array $c):string{return ($c['billing_mode']??'test')==='live'?'live':'test';}
  /** {fp, mode, at} of the Stripe configuration of $c, as data.armed stores it. */
- private static function arm(array $c,int $now):array{return ['fp'=>self::fingerprint($c),'mode'=>($c['billing_mode']??'test')==='live'?'live':'test','at'=>$now];}
+ private static function arm(array $c,int $now):array{return ['fp'=>self::fingerprint($c),'mode'=>self::stripeMode($c),'at'=>$now];}
  /** Members may gain roles (the organizer role switched on, a new athlete profile) only while sign-up is open (B10). */
  public static function rolesOpen(array $eff):bool{return in_array($eff['signup_mode']??null,['free','paid'],true);}
 
@@ -200,14 +205,16 @@ final class Settings {
   * returned without the fingerprint; a definitive failure (auth, price_missing, amount_mismatch) replaces a passed one, so
   * effective() stops the paid mode (B4). A failure that says nothing about the configuration (Stripe unavailable, another
   * error) is not stored over a check that passed against the current configuration, nor where none is stored: it never
-  * stops payments that run (R1.2). A check never arms a configuration: while payments are 'paid' and nothing is armed
-  * (config.php alone), a check of another configuration than the stored check's one stores armed {fp:null}, so a passing
-  * manual check after a change of keys never resumes payments without the save gate (R1.2). A missing price or another
+  * stops payments that run (R1.2). A passing check arms the configuration only when payments are 'paid' and a
+  * configuration of the same Stripe mode is armed (a rotated key, new price keys or amounts: nobody loses access, the mode
+  * was confirmed, R2.4), so contract (b) "paused until a fresh check passes" holds for it. A change of Stripe mode (test →
+  * live keys) never resumes payments without the save gate: while payments are 'paid' and nothing is armed (config.php
+  * alone), a check in another mode than the stored check's one stores armed {fp:null} (R1.2). A missing price or another
   * amount: 409 stripe_not_ready; any other Stripe failure is rethrown (the route answers 503 through Billing::guard).
   */
  public static function stripeCheck(PDO $pdo,array $file,int $now):array {
   if(!Billing::enabled($file))self::notReady();
-  $prices=['pln'=>false,'usd'=>false];$fail=null;$missing=false;$amount=false;$mode=($file['billing_mode']??'test')==='live'?'live':'test';
+  $prices=['pln'=>false,'usd'=>false];$fail=null;$missing=false;$amount=false;$mode=self::stripeMode($file);
   try{
    $client=StripeClient::interactive($file);
    foreach(array_keys((array)$file['stripe_prices']) as $cur){
@@ -220,13 +227,15 @@ final class Settings {
   }catch(StripeError $e){$fail=$e;}
   $code=$fail?($fail->unavailable()?'unavailable':(in_array($fail->status,[401,403],true)?'auth':'error')):($missing?'price_missing':($amount?'amount_mismatch':null));
   $check=['at'=>$now,'ok'=>$code===null,'mode'=>$mode,'prices'=>$prices,'error'=>$code];
-  self::write($pdo,function(array $raw,int $v)use($file,$check,$code,$now):array{
-   $s=self::normalize($raw,$file);
+  self::write($pdo,function(array $raw,int $v)use($file,$check,$code,$mode,$now):array{
+   $s=self::normalize($raw,$file);$fp=self::fingerprint($file);$a=$s['armed'];
    if(in_array($code,['unavailable','error'],true)&&($s['stripeCheck']===null||self::verified($s['stripeCheck'],$file)))return [$v,$raw,false];
-   $set=['stripeCheck'=>$check+['fp'=>self::fingerprint($file)]];
-   // Nothing armed yet (config.php alone): a check of another configuration than the stored check's one (test → live keys
+   $set=['stripeCheck'=>$check+['fp'=>$fp]];
+   // Nothing armed yet (config.php alone): a check in another Stripe mode than the stored check's one (test → live keys
    // after a check) records that none is confirmed, so only the save gate resumes payments (R1.2).
-   if($s['payments']==='paid'&&$s['armed']===null&&$s['stripeCheck']!==null&&$s['stripeCheck']['fp']!==self::fingerprint($file))$set['armed']=['fp'=>null,'mode'=>null,'at'=>$now];
+   if($s['payments']==='paid'&&$a===null&&$s['stripeCheck']!==null&&$s['stripeCheck']['fp']!==$fp&&$s['stripeCheck']['mode']!==$mode)$set['armed']=['fp'=>null,'mode'=>null,'at'=>$now];
+   // R2.4: another configuration in the armed mode passed: armed for it, payments resume (the gate would ask nothing more).
+   if($code===null&&$s['payments']==='paid'&&$a!==null&&$a['fp']!==null&&$a['fp']!==$fp&&$a['mode']===$mode)$set['armed']=self::arm($file,$now);
    return [$v,$set+$raw,false];
   },$now,null);
   if($fail)throw $fail;
@@ -262,10 +271,12 @@ final class Settings {
   * Starting payments (free → paid), opening the paid sign-up (mode → 'paid', also off → on while payments are already
   * 'paid', B5) and resuming payments that effective() paused ('stripe-check': a failed or outdated check, another Stripe
   * configuration than the armed one) by saving without changes (R1.2) are the transitions with conditions (the gate): a
-  * fresh Stripe check, the test-mode confirmation and, while payments are not effectively enforced (also when effective()
-  * lifted them, B4) or were never armed (config.php alone), the free-period decision; the gate arms the configuration
-  * (data.armed). 'paid' → 'free' is always allowed; saving other fields while Stripe is missing or not verified keeps the
-  * degraded state of effective().
+  * fresh Stripe check, the test-mode confirmation and the free-period decision when somebody may lose access he really
+  * had: payments start (free → paid), were never confirmed in the panel (config.php alone) or change Stripe mode (test
+  * subscribers on live keys). A resume in the armed mode asks neither: everybody without a subscription was behind the
+  * paywall before the pause (R2.3), and the gate confirmed that mode before (R2.4). The gate arms the configuration
+  * (data.armed). 'paid' → 'free' is always allowed; saving other fields while Stripe is missing or not verified keeps
+  * the degraded state of effective().
   */
  public static function save(PDO $pdo,array $file,array $admin,array $in,int $now):array {
   $bad=fn()=>throw new AppError('Niepoprawny formularz.',400);
@@ -288,17 +299,22 @@ final class Settings {
   if($same&&!$resume)return self::view($pdo,$file,$now);
   // Payments start (free → paid) or the paid sign-up opens to everybody (B5: also off → on while payments are 'paid').
   $toPaid=$resume||$next['payments']==='paid'&&($cur['data']['payments']!=='paid'||self::mode($next)==='paid'&&self::mode($cur['data'])!=='paid');$test=false;
-  // The free-period decision whenever enforcement is not effective yet (free, or lifted by effective() after a failed or
-  // outdated Stripe check: test subscribers would lose access on the switch to live keys, B4) or no configuration was ever
-  // armed (payments from config.php alone, the test window of variant A: R1.2); its set is the one of the current state,
-  // where payments are not required yet (group B: who would lose access).
-  $decide=$toPaid&&(empty($eff['billing_enforce'])||$cur['data']['armed']===null);
+  // The free-period decision only when somebody may lose access he really had (R2.3): payments start (free → paid), no
+  // configuration was confirmed in the panel (payments from config.php alone, the test window of variant A, R1.2) or the
+  // Stripe mode changes against the armed one (test subscribers on live keys, B4). Resuming in the armed mode (a rotated
+  // key, new prices, a failed check) asks nothing: who has no subscription was behind the paywall until the pause, and
+  // the decision would hand him free access. Its set is the one of the current state, where payments are not required yet
+  // (group B: who would lose access).
+  $armed=$cur['data']['armed'];$confirmed=$armed!==null&&$armed['fp']!==null&&$armed['mode']===self::stripeMode($file);
+  $decide=$toPaid&&($cur['data']['payments']!=='paid'||!$confirmed);
   $free=['billing_enforce'=>false]+$file;
   if($toPaid){
    if(!Billing::enabled($file))self::notReady();
    self::stripeCheck($pdo,$file,$now);
-   $test=($file['billing_mode']??'test')!=='live';
-   if($test&&($in['allowTestMode']??false)!==true&&($in['confirmTestMode']??false)!==true)throw new ApiError('Stripe działa w trybie testowym: nikt nie zapłaci prawdziwymi pieniędzmi. Potwierdź, jeśli to zamierzone.',409,['code'=>'test_mode','confirmTestMode'=>true]);
+   $test=self::stripeMode($file)!=='live';
+   // A resume in the armed mode restores what the gate confirmed for that mode; the fresh check above already armed the
+   // configuration (stripeCheck, R2.4), so there is nothing left to confirm. Every other transition in test mode asks (B5).
+   if($test&&!($resume&&$confirmed)&&($in['allowTestMode']??false)!==true&&($in['confirmTestMode']??false)!==true)throw new ApiError('Stripe działa w trybie testowym: nikt nie zapłaci prawdziwymi pieniędzmi. Potwierdź, jeśli to zamierzone.',409,['code'=>'test_mode','confirmTestMode'=>true]);
    if($decide){$set=Billing::freePeriodSet($pdo,$free,$now);if(($set['a']||$set['b'])&&$decision===null)self::decide($set);}
   }
   $pdo->beginTransaction();

@@ -4,7 +4,9 @@
 // 0007, B4/B5/B16 the Stripe check against the current configuration and the test-mode confirmation, B6 signup_force_off and
 // the invite token, B14 the organizer places of a network under parallel sign-ups; round 1 of the review: R1.1 erasures keep
 // saved draws, R1.2 payments resume only through the save gate, R1.6 tournaments of deactivated or blocked organizers take no
-// new entries. Every test puts back what it changed.
+// new entries; round 2: R2.1 withdrawals and corrections there still work, R2.2 kept entries of upcoming tournaments as
+// initials, R2.3 no free-period decision on a resume in the confirmed Stripe mode, R2.4 a passing check resumes that mode.
+// Every test puts back what it changed.
 import test,{before,beforeEach,after} from 'node:test';
 import assert from 'node:assert/strict';
 import {Client,base,fixture} from './helpers/http-client.mjs';
@@ -44,6 +46,8 @@ const CLOSED='Rejestracja jest chwilowo wyłączona.',BUSY='Serwer jest teraz mo
 const original={};
 /** Rewrites keys of config.php (settings-config) and remembers the first old value of each for after(). */
 function setConfig(set){const old=fixture('settings-config',{set});for(const k of Object.keys(old))if(!(k in original))original[k]=old[k];}
+/** Puts the Stripe mode and key back in one write (a live mode with a test key is an invalid config.php). */
+function restoreStripe(){const set=Object.fromEntries(['billing_mode','stripe_secret_key'].filter(k=>k in original).map(k=>[k,original[k]]));if(Object.keys(set).length)fixture('settings-config',{set});}
 
 before(async()=>{if(skip)return;fixture('reset-limits');fixture('settings-reset');await stub({op:'clear-faults'});});
 beforeEach(()=>fixture('reset-limits'));
@@ -204,16 +208,31 @@ test('B4, B5, B16: paid mode runs only against the Stripe configuration a check 
   }finally{fixture('billing-config-set',{set:amounts});}
   assert.deepEqual(await state(),['off','stripe-check',false,true,'off',false],'back to the old amounts: the failed check still counts');
   r=await check();assert.deepEqual([r.stripeCheck.ok,r.stripeCheck.error],[true,null]);assert.deepEqual(await state(),['paid',null,true,false,'paid',true],'a fresh check opens it again');
-  // R1.2: a rotated key (the same as test → live keys): paused, and a passing manual check does not resume payments for a
-  // configuration the save gate never confirmed (rearm); an unchanged save runs the gate: test-mode confirmation, decision.
+  // R2.4: a rotated key in the armed Stripe mode (new price keys or amounts work the same way): paused until a check passes,
+  // and the passing check resumes payments (contract (b)); nobody loses access he had, so nothing more is asked.
   setConfig({stripe_secret_key:'rk_'+'test_'+'rotated'});
-  assert.deepEqual(await state(),['off','stripe-check',true,true,'off',false]);
-  r=await check();assert.deepEqual(await state(),['off','stripe-check',true,false,'off',false],'checked, still paused');
-  v=await view();assert.equal(v.stripeCheck.rearm,true,'the panel can say that saving resumes them');assert.equal(await access(),true,'nobody loses access before the decision');
-  r=await save({version:v.version},409);assert.deepEqual([r.code,r.confirmTestMode],['test_mode',true],'the test-mode confirmation again');
-  r=await save({version:v.version,allowTestMode:true},409);assert.equal(r.code,'free_period_decision');assert.ok(r.counts.b>=1,'the unpaid account is in group B');
-  v=await save({version:v.version,allowTestMode:true,freePeriod:{action:'requireFrom',date:day(20)}});
-  assert.deepEqual(await state(),['paid',null,true,false,'paid',true]);assert.equal(v.stripeCheck.rearm,false);assert.match(v.history[0].note,/ resume /);
+  assert.deepEqual(await state(),['off','stripe-check',true,true,'off',false]);assert.equal(await access(),true,'access fails open');
+  r=await check();assert.deepEqual(await state(),['paid',null,true,false,'paid',true],'the passing check resumes');assert.equal((await view()).stripeCheck.rearm,false);
+  assert.equal(await access(),false,'the unpaid account is behind the paywall again');
+  // R2.3: the same pause resumed by the unchanged save (the gate) instead: a fresh check, but no free-period decision (the
+  // unpaid account was behind the paywall until the pause, and the decision would hand him free access) and no test-mode
+  // question (the gate confirmed this mode before).
+  setConfig({stripe_secret_key:'rk_'+'test_'+'rotatedtwice'});
+  v=await view();assert.deepEqual([v.effective.degraded,v.stripeCheck.stale,v.stripeCheck.rearm],['stripe-check',true,false]);
+  v=await save({version:v.version});assert.deepEqual(await state(),['paid',null,true,false,'paid',true]);
+  assert.match(v.history[0].note,/ resume /);assert.doesNotMatch(v.history[0].note,/ keep| requireFrom| a=/,'no decision');
+  assert.equal(await access(),false,'still without access: no free period was handed out');
+  // R1.2: test → live keys: a passing check does not resume payments (rearm), test subscribers would lose access; the gate
+  // (here the unchanged save) asks for the decision. Back to the test keys, a passing check resumes the armed configuration.
+  setConfig({billing_mode:'live',stripe_secret_key:'rk_'+'live_'+'stub'});
+  try{
+   assert.deepEqual(await state(),['off','stripe-check',true,true,'off',false]);
+   r=await check();assert.deepEqual(await state(),['off','stripe-check',true,false,'off',false],'checked, still paused');
+   v=await view();assert.deepEqual([v.stripeCheck.rearm,v.stripeCheck.mode],[true,'live'],'the panel can say that saving resumes them');assert.equal(await access(),true,'nobody loses access before the decision');
+   r=await save({version:v.version},409);assert.equal(r.code,'free_period_decision','live keys: no test-mode question, the decision');assert.ok(r.counts.b>=1,'the unpaid account is in group B');
+  }finally{setConfig({billing_mode:'test',stripe_secret_key:'rk_'+'test_'+'rotatedtwice'});}
+  r=await check();assert.deepEqual(await state(),['paid',null,true,false,'paid',true],'the armed test configuration again');assert.equal(await access(),false);
+  fixture('reset-limits');// at most 6 Stripe checks an hour
   // A failed manual check (Stripe refuses the key) takes the passed one back; a passing check of the armed configuration resumes.
   await stub({op:'fault',method:'GET',path:'^/v1/prices',status:401,type:'invalid_request_error',times:4});
   r=await check(503);assert.equal(r.code,'stripe_unavailable');
@@ -229,27 +248,31 @@ test('B4, B5, B16: paid mode runs only against the Stripe configuration a check 
   v=await view();assert.deepEqual([v.signup,v.effective.mode,v.effective.degraded,v.stripeCheck.ok,(await guest('public-config')).data.billing],['off','off',null,true,true],'sign-up stays closed, payments stay required');
   await stub({op:'clear-faults'});
   v=await save({version:v.version,signup:'on',allowTestMode:true});assert.deepEqual(await state(),['paid',null,true,false,'paid',true]);
- }finally{await stub({op:'clear-faults'});fixture('settings-reset');if('stripe_secret_key' in original)fixture('settings-config',{set:{stripe_secret_key:original.stripe_secret_key}});}
+ }finally{await stub({op:'clear-faults'});fixture('settings-reset');restoreStripe();}
 });
 
 // R1.2, variant A: payments from config.php alone (no row), a check stored once; then the Stripe configuration changes.
-test('R1.2: payments from config.php alone: a passing check of a changed configuration does not resume them; the unchanged save runs the gate',{skip},async()=>{
+test('R1.2: payments from config.php alone: a passing check resumes them in the same Stripe mode, not after test → live keys; the unchanged save runs the gate',{skip},async()=>{
  const c=await admin(),view=async()=>ok(await c.req('admin-settings')),check=async()=>ok(await c.req('admin-stripe-check',{}));
  const state=async()=>{const v=await view();return [v.effective.mode,v.effective.degraded,v.stripeCheck.ok,v.stripeCheck.stale,v.stripeCheck.rearm,(await guest('public-config')).data.billing];};
  fixture('settings-reset');
  try{
   assert.deepEqual(await state(),['paid',null,false,false,false,true],'config.php alone, never checked');
   await check();assert.deepEqual(await state(),['paid',null,true,false,false,true]);assert.equal(fixture('settings-row').data.armed,undefined,'a check never arms');
+  // R2.4: a rotated key in the same Stripe mode: paused until a check passes, which resumes them (as in a67ad42).
   setConfig({stripe_secret_key:'rk_'+'test_'+'variantA'});
+  assert.deepEqual(await state(),['off','stripe-check',true,true,false,false]);
+  await check();assert.deepEqual(await state(),['paid',null,true,false,false,true],'the same mode: resumed');assert.equal(fixture('settings-row').data.armed,undefined,'still nothing armed');
+  // Test → live keys: the check does not resume them.
+  setConfig({billing_mode:'live',stripe_secret_key:'rk_'+'live_'+'variantA'});
   assert.deepEqual(await state(),['off','stripe-check',true,true,false,false]);
   await check();assert.deepEqual(await state(),['off','stripe-check',true,false,true,false],'checked, still paused: rearm');
   assert.deepEqual(fixture('settings-row').data.armed.fp,null,'nothing is confirmed');
-  let v=await view(),r=await c.req('admin-settings-save',{version:v.version});assert.equal(r.status,409);assert.deepEqual([r.data.code,r.data.confirmTestMode],['test_mode',true]);
-  r=await c.req('admin-settings-save',{version:v.version,allowTestMode:true});
-  if(r.status===409){assert.equal(r.data.code,'free_period_decision');r=await c.req('admin-settings-save',{version:v.version,allowTestMode:true,freePeriod:{action:'requireFrom',date:day(20)}});}
+  let v=await view(),r=await c.req('admin-settings-save',{version:v.version});
+  if(r.status===409){assert.equal(r.data.code,'free_period_decision','live keys: no test-mode question');r=await c.req('admin-settings-save',{version:v.version,freePeriod:{action:'requireFrom',date:day(20)}});}
   ok(r);assert.deepEqual(await state(),['paid',null,true,false,false,true],'the gate resumed them');
-  const armed=fixture('settings-row').data.armed;assert.deepEqual([typeof armed.fp,armed.mode],['string','test']);
- }finally{fixture('settings-reset');if('stripe_secret_key' in original)fixture('settings-config',{set:{stripe_secret_key:original.stripe_secret_key}});}
+  const armed=fixture('settings-row').data.armed;assert.deepEqual([typeof armed.fp,armed.mode],['string','live']);
+ }finally{fixture('settings-reset');restoreStripe();}
 });
 test('B6: signup_force_off closes the invite path of the paid test window too',{skip},async()=>{
  const token='tok'+'0123456789abcdefghijklmnop';

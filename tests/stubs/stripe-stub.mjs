@@ -1,6 +1,7 @@
 // Local stand-in for the Stripe API (plan §6.11, §12.8; replaces report 03 §14.2): node tests/stubs/stripe-stub.mjs <port> [--empty]
 // scripts/test-http.sh starts it on <port+1>. State lives in memory; nothing leaves 127.0.0.1.
-// Strict about the client contract: every /v1 request needs "Authorization: Bearer (sk|rk)_test_…" and a Stripe-Version
+// Strict about the client contract: every /v1 request needs "Authorization: Bearer (sk|rk)_test_…" (or _live_…: the switch to live
+// keys in tests/final-review.http.test.mjs; the objects stay livemode:false) and a Stripe-Version
 // header, every POST an Idempotency-Key (same key + same parameters → the stored answer, other parameters → 400
 // idempotency_error, like Stripe); Checkout refuses payment_method_types (removed in 'endive'). Objects have the 'basil'+
 // shapes: subscription periods on the items, invoice → parent.subscription_details.subscription.
@@ -214,7 +215,7 @@ const server=http.createServer((req,res)=>{
    const f=take(S.faults,req.method,url.pathname);
    if(f){rec.fault=f.kind==='drop'?'drop':f.status;if(f.kind==='drop'){req.socket.destroy();return;}
     throw new StripeErr(f.status,f.type,f.message,f.code,f.param,f.shouldRetry===undefined?{}:{'Stripe-Should-Retry':String(f.shouldRetry)});}
-   if(!/^Bearer (sk|rk)_test_[A-Za-z0-9_]+$/.test(auth))throw new StripeErr(401,'invalid_request_error','Invalid API Key provided.');
+   if(!/^Bearer (sk|rk)_(test|live)_[A-Za-z0-9_]+$/.test(auth))throw new StripeErr(401,'invalid_request_error','Invalid API Key provided.');
    if(!rec.version)throw invalid('Stub: a Stripe-Version header is required.');
    if(req.method==='POST'){
     if(!rec.idempotencyKey)throw invalid('Stub: an Idempotency-Key header is required on POST.');
