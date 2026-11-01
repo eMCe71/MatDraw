@@ -42,10 +42,12 @@ final class Rules {
  public static function signature(array $a):string{$s=array_map(fn($x)=>$x['id'].':'.$x['club'].':'.(!empty($x['champion'])?'true':'false'),$a);sort($s,SORT_STRING);return implode(',',$s);}
  public static function slotOrder(int $size):array{$edge=[0,7,1,6,2,5,3,4];$order=match($size){8=>[0],16=>[0,1],32=>[0,3,1,2],64=>[0,7,3,4,1,6,2,5],default=>throw new AppError('Niepoprawny rozmiar drabinki.')};$r=[];foreach($edge as $p)foreach($order as $s)$r[]=$s*8+($s%2===0?$p:7-$p);return $r;}
  private static function pairs(array $slots,array &$pairs):array{if(count($slots)===1)return array_values(array_filter($slots));$n=intdiv(count($slots),2);$a=self::pairs(array_slice($slots,0,$n),$pairs);$b=self::pairs(array_slice($slots,$n),$pairs);if(count($a)===1&&count($b)===1)$pairs[]=[$a[0],$b[0]];return [...$a,...$b];}
+ /** Same club for the draw (§6.3): equal club names, but 'unaffiliated' athletes are never separated (JS sameClub in engine.js). */
+ public static function sameClub(array $a,array $b):bool{return ($a['club']??null)===($b['club']??null)&&($a['clubId']??null)!=='unaffiliated'&&($b['clubId']??null)!=='unaffiliated';}
  public static function makeDraw(array $a):array{
   $n=count($a);if($n<3||$n>64)throw new AppError('Drabinka wymaga od 3 do 64 zawodników.');$size=$n<=8?8:2**(int)ceil(log($n,2));$order=array_slice(self::slotOrder($size),0,$n);$map=array_column($a,null,'id');
   for($i=$n-1;$i>0;$i--){$j=random_int(0,$i);[$a[$i],$a[$j]]=[$a[$j],$a[$i]];}$slots=array_fill(0,$size,null);foreach($a as $i=>$p)$slots[$order[$i]]=$p['id'];
-  $cost=static function($s)use($map){$pairs=[];self::pairs($s,$pairs);$c=0;foreach($pairs as [$a,$b])if($map[$a]['club']===$map[$b]['club'])$c+=10000;foreach($s as $i=>$id)if($id&&!empty($map[$id]['champion'])&&$s[$i^1])$c+=100;return $c;};$score=$cost($slots);
+  $cost=static function($s)use($map){$pairs=[];self::pairs($s,$pairs);$c=0;foreach($pairs as [$a,$b])if(self::sameClub($map[$a],$map[$b]))$c+=10000;foreach($s as $i=>$id)if($id&&!empty($map[$id]['champion'])&&$s[$i^1])$c+=100;return $c;};$score=$cost($slots);
   for($k=0;$k<2500&&$score>0;$k++){$i=$order[random_int(0,$n-1)];$j=$order[random_int(0,$n-1)];[$slots[$i],$slots[$j]]=[$slots[$j],$slots[$i]];$next=$cost($slots);if($next>$score)[$slots[$i],$slots[$j]]=[$slots[$j],$slots[$i]];else $score=$next;}
   return ['size'=>$size,'slots'=>$slots,'seed'=>null,'results'=>[],'revision'=>1,'signature'=>self::signature($a),'createdAt'=>gmdate('c')];
  }
