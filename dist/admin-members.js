@@ -260,7 +260,7 @@ export const stripeDashboardUrl=u=>typeof u==='string'&&/^https:\/\/dashboard\.s
 export const cancelable=d=>!!d&&ONGOING.includes(d.subStatus)&&!d.cancelAtPeriodEnd&&!!d.subscriptionId;
 
 // ---- Page ----
-const st={q:'',filter:'all',page:1,ownerOf:null,selected:new Set(),data:null,at:0,error:'',seq:0,staff:null,staffAt:0,staffPending:null};
+const st={q:'',filter:'all',page:1,ownerOf:null,selected:new Set(),data:null,at:0,error:'',seq:0,staff:null,staffAt:0,staffPending:null,focusFrom:null};
 export const state=st;
 /** Forgets the member list, search phrase and staff plans (after sign-out or an expired session: no e-mails stay in memory, plan §8.3 point 8). */
 export function forget(){st.seq++;Object.assign(st,{q:'',filter:'all',page:1,ownerOf:null,selected:new Set(),data:null,at:0,error:'',staff:null,staffAt:0,staffPending:null});}
@@ -301,7 +301,16 @@ async function paintBulk(){
  const users=await staffPlans();const el=document.querySelector('[data-mem-bulk-count]');
  if(el)el.textContent=users?T('Konta personelu objęte zmianą: {n}',{n:grandfathered(users)}):'';
 }
-function paintResults(){const box=root()?.querySelector('[data-mem-results]');if(box)setHtml(box,resultsView(st));}
+// The repaint keeps the keyboard focus on the same control of the same row (registry.keepFocus); when that control is gone because
+// the action turned it into its opposite (confirm -> withdraw the confirmation, take the role -> give it back) the opposite takes it,
+// otherwise the row's first action.
+const OPPOSITE={'org-trust':'org-untrust','org-untrust':'org-trust','org-block':'org-unblock','org-unblock':'org-block'};
+function paintResults(){
+ const box=root()?.querySelector('[data-mem-results]');if(!box)return;
+ const from=st.focusFrom;st.focusFrom=null;
+ const active=globalThis.document?.activeElement,act=(box.contains?.(active)?active:from)?.dataset?.memAct;
+ registry.keepFocus(box,()=>setHtml(box,resultsView(st)),{from,fallback:row=>row&&row!==box?[...row.querySelectorAll('[data-mem-act]')].find(b=>b.dataset.memAct===OPPOSITE[act])||row.querySelector('[data-mem-act]'):null});
+}
 async function load(force=false){
  if(!force&&st.data&&Date.now()-st.at<FRESH_MS){paintResults();return;}
  const seq=++st.seq;st.error='';if(!st.data)paintResults();
@@ -393,8 +402,11 @@ function profileDialog(m){
 /** "Hide also the person's upcoming tournaments" with the reason the organizer sees (§5.5); only for an account that created tournaments.
  * m.tournaments counts every tournament of the person (past and hidden ones too) while Members::hideTournaments hides only the upcoming
  * ones not hidden yet, so the number is labelled as the total and the result toast gives the hidden count. */
-export const hideFields=(m,checked=true)=>Number(m.tournaments)>0?h`<label class="checkbox-label"><input type="checkbox" data-mem-hide${checked?' checked':''}> ${T('Ukryj też jego nadchodzące turnieje (wszystkie jego turnieje: {n})',{n:Number(m.tournaments)})}</label>
-  <label class="field-label mem-reason">${T('Powód ukrycia (widzi go organizator)')}<textarea data-mem-reason maxlength="200" rows="2"></textarea></label><p class="muted small">${T('Ukryte zostaną nadchodzące turnieje tej osoby razem ze zgłoszeniami samych zawodników.')}</p>`:'';
+/** With the sparse m.upcomingTournaments (upcoming tournaments not hidden yet: exactly the ones that would be hidden) the label gives
+ * that number and the option is left out at 0; without it the total m.tournaments is named as such. */
+export const hideCount=m=>Number.isInteger(m?.upcomingTournaments)&&m.upcomingTournaments>=0?{exact:true,n:m.upcomingTournaments}:{exact:false,n:Number(m?.tournaments)>0?Number(m.tournaments):0};
+export const hideFields=(m,checked=true)=>{const c=hideCount(m);return c.n>0?h`<label class="checkbox-label"><input type="checkbox" data-mem-hide${checked?' checked':''}> ${c.exact?T('Ukryj też jego nadchodzące turnieje ({n})',{n:c.n}):T('Ukryj też jego nadchodzące turnieje (wszystkie jego turnieje: {n})',{n:c.n})}</label>
+  <label class="field-label mem-reason">${T('Powód ukrycia (widzi go organizator)')}<textarea data-mem-reason maxlength="200" rows="2"></textarea></label><p class="muted small">${T('Ukryte zostaną nadchodzące turnieje tej osoby razem ze zgłoszeniami samych zawodników.')}</p>`:'';};
 function activeDialog(m){
  const live=hasLiveSubscription(m.billing);
  openModal(T('Zablokuj konto'),h`<p class="modal-lead">${T('Konto: {email}',{email:m.email})}</p><p>${T('Zablokowana osoba zostanie wylogowana i nie wejdzie do czatu, dopóki jej nie odblokujesz.')}</p>
@@ -426,7 +438,7 @@ function deleteDialog(m,confirmEnd=''){
 const busy=(el,on)=>{if(el)el.disabled=on;};
 /** The submit button of a dialog form (it stands in the modal footer, outside the form, tied by the form attribute). */
 const submitOf=form=>document.querySelector('button[type=submit][form="'+form.id+'"]')||form.querySelector('button[type=submit]');
-async function run(el,fn){busy(el,true);try{await fn();}catch(error){say(el,translateMessage(error.message));}finally{busy(el,false);}}
+async function run(el,fn){if(el?.closest?.('[data-mem-results]'))st.focusFrom=el;busy(el,true);try{await fn();}catch(error){say(el,translateMessage(error.message));}finally{busy(el,false);}}
 async function stopSubscription(userId){try{await send(billingCall({action:'cancelAtPeriodEnd',userId}));staffPlans(true);}catch(error){fail(error);}}
 async function copyText(text){
  try{await navigator.clipboard.writeText(text);return true;}catch{}

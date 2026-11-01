@@ -56,6 +56,22 @@ test('tournamentForm defaults per role (R11, UX-4): an organizer opens entries w
  assert.match(app,/selfEntry:f\.has\('selfEntry'\)/);
 });
 
+test('integration QA: the PHP bootstrap user (caps only, no organizer field) manages its own tournaments and profiles in the browser',async()=>{
+ const W=await import('../dist/workspace.js');
+ // workspace.user from the PHP bootstrap carries caps {organizer, organizerBlocked} and no organizer/organizerBlockedAt fields.
+ const php={id:'u1',role:'member',clubId:null,caps:{organizer:true,organizerBlocked:false,organizerTrusted:false,athlete:false}};
+ const own={id:'t1',createdBy:'u1',status:'open',community:true,trusted:true,selfEntry:true},other={...own,id:'t2',createdBy:'u2'};
+ assert.equal(W.organizer(php),true,'caps.organizer counts without the DB fields');
+ assert.equal(W.managesTournament(php,own),true,'the own tournament: copy link, settings, check-in');assert.equal(W.managesTournament(php,other),false);
+ assert.equal(W.organizer({...php,caps:{organizer:false,organizerBlocked:true}}),false,'a blocked organizer');
+ assert.equal(W.organizer({...php,caps:{organizer:true,organizerBlocked:true}}),false);
+ assert.equal(W.organizer({id:'u1',role:'member',caps:{athlete:true}}),false);assert.equal(W.organizer({...php,role:'club'}),false);
+ // Domain-shaped users (demo db.users, the actors of execute) keep their fields as the source, also against stale caps.
+ assert.equal(W.organizer({role:'member',organizer:true,organizerBlockedAt:null}),true);
+ assert.equal(W.organizer({role:'member',organizer:true,organizerBlockedAt:5,caps:{organizer:true}}),false);
+ assert.equal(W.organizer({role:'member',organizer:false,organizerBlockedAt:null,caps:{organizer:true}}),false);
+});
+
 test('club picker: list, filter by key, "did you mean", result shapes {id}/{name}/{none:true}',()=>{
  const clubs=[{id:'c2',name:'UKS Smok Kraków'},{id:'unaffiliated',name:'Niezrzeszony'},{id:'c1',name:'TKD Warszawa'},{id:'c3',name:'Stary klub',mergedInto:'c1'},{id:'c4',name:'Klub Nowy',verified:false},{id:'c5',name:'Krakowska Akademia'}];
  const list=picker.listClubs(clubs);

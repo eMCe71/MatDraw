@@ -51,7 +51,9 @@ export function ageAt(birthDate,date){if(!dateValid(birthDate)||!dateValid(date)
 
 // Roles and visibility (§5.7). Without db, profile and tournament rules read the view fields staff, community and trusted,
 // so app.js keeps calling managesProfile(user,a) and canEnter(user,t) with workspace objects.
-export const organizer=u=>!!u&&u.role==='member'&&!!u.organizer&&!u.organizerBlockedAt;
+// The PHP bootstrap's user carries only caps {organizer, organizerBlocked} (no organizer/organizerBlockedAt fields), the demo
+// users and the domain actors carry the fields: without them the caps decide, so the browser workspace sees its own tournaments.
+export const organizer=u=>!!u&&u.role==='member'&&(typeof u.organizer==='boolean'||'organizerBlockedAt' in u?!!u.organizer&&!u.organizerBlockedAt:!!u.caps?.organizer&&!u.caps.organizerBlocked);
 export function staffIds(db){const s=Object.create(null);for(const u of db.users)if(STAFF.includes(u.role))s[u.id]=true;return s;}
 export const staffProfile=(db,a)=>db?a.ownerId==null&&!!staffIds(db)[a.createdBy]:a?.staff===true;
 export const community=(db,t)=>db?!staffIds(db)[t.createdBy]:!!t?.community;

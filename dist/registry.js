@@ -167,4 +167,29 @@ export function trapTab(event,root){
  event.preventDefault();target.focus();return true;
 }
 
-export const registry={SafeHtml,h,setHtml,trustedHtml,escapeHtml,tabbables,trapTab,registerPage,registerPublicPage,registerAction,page,publicPage,allows,navItems,title,handle,defaultPage,communityOnly,organizerUser,copyText,setBadge,badge,badgeText,on,emit,provide,use,parseRoute,routeHash};
+// ---- Focus across a repaint (WCAG 2.4.3) ----
+const SIG_ATTR=/^(id|name|value|type|for|href|data-(?!on$)[\w-]+)$/;
+const SCOPE_ATTR=/^data-[\w-]+-(id|form)$/;
+/** Identifying attributes of el (id, name, value, type, data-*; not class, state or aria) as a sorted string. */
+const signature=el=>el.tagName+'|'+[...el.attributes].filter(a=>SIG_ATTR.test(a.name)&&!/^data-[\w-]*(busy|ticket|mounted)$/.test(a.name)).map(a=>a.name+'='+a.value).sort().join('&');
+/** The nearest ancestor below box that names a row or a form (an attribute data-…-id or data-…-form). */
+const scopeOf=(el,box)=>{for(let p=el.parentElement;p&&p!==box;p=p.parentElement)if([...p.attributes].some(a=>SCOPE_ATTR.test(a.name)))return p;return null;};
+/** Runs paint(), which rewrites box, and puts the keyboard focus back on the twin of the element that had it inside box (same
+ * identifying attributes in the same row or form). from: the element that started the action, used when the focus already fell to
+ * <body> (a focused button that gets disabled while its request runs loses the focus). Without a twin, fallback(scopeTwin) may name
+ * another element (e.g. the row's first action after its button changed). Rewriting innerHTML otherwise drops the focus to <body>
+ * after every save. Returns the focused twin. */
+export function keepFocus(box,paint,{from=null,fallback=null}={}){
+ const doc=box?.ownerDocument;let a=doc?.activeElement;
+ if((!a||a===doc?.body)&&from?.isConnected)a=from;
+ if(!a||a===box||!box.contains?.(a)||!a.tagName){paint();return null;}
+ const sig=signature(a),scope=scopeOf(a,box),scopeSig=scope?signature(scope):null;
+ paint();
+ let place=box;if(scopeSig){place=[...box.querySelectorAll(scope.tagName)].find(x=>signature(x)===scopeSig)||null;}
+ let twin=place?[...place.querySelectorAll(a.tagName)].find(x=>signature(x)===sig&&!x.disabled):null;
+ if(!twin&&typeof fallback==='function')twin=fallback(place)||null;
+ if(twin&&twin!==doc.activeElement)twin.focus();
+ return twin;
+}
+
+export const registry={SafeHtml,h,setHtml,trustedHtml,escapeHtml,tabbables,trapTab,keepFocus,registerPage,registerPublicPage,registerAction,page,publicPage,allows,navItems,title,handle,defaultPage,communityOnly,organizerUser,copyText,setBadge,badge,badgeText,on,emit,provide,use,parseRoute,routeHash};

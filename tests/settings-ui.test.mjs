@@ -157,6 +157,10 @@ test('tournament card tools: hide (community), restore, show and confirm the org
  assert.deepEqual(C.toolsFor({id:'t',community:true,trusted:true,createdBy:'m'},admin),['hide','owner'],'trustRequired off: every organizer counts as confirmed');
  assert.deepEqual(C.toolsFor({id:'t',community:true,trusted:false,createdBy:'m'},admin),['hide','owner','trust']);
  assert.deepEqual(C.toolsFor({id:'t',community:true,trusted:false,hidden:true,createdBy:'m'},admin),['restore','owner','trust']);
+ // Integration QA (F3): a blocked organizer (sparse organizerBlocked:true) cannot be confirmed from the card; absent means unknown.
+ assert.deepEqual(C.toolsFor({id:'t',community:true,trusted:false,createdBy:'m',organizerBlocked:true},admin),['hide','owner']);
+ assert.deepEqual(C.toolsFor({id:'t',community:true,trusted:false,hidden:true,createdBy:'m',organizerBlocked:true},admin),['restore','owner']);
+ assert.deepEqual(C.toolsFor({id:'t',community:true,trusted:false,createdBy:'m',organizerBlocked:false},admin),['hide','owner','trust']);
  assert.deepEqual(C.toolsFor({id:'t',community:false},admin),[]);assert.deepEqual(C.toolsFor({id:'t',community:false,hidden:true},admin),['restore']);
  assert.deepEqual(C.toolsFor({id:'t',community:true},{role:'editor'}),[]);
  assert.deepEqual(C.hideBody('t1',{reason:'  Fałszywy   turniej ',withdrawSelf:true}),{ok:true,payload:{tournamentId:'t1',hidden:true,reason:'Fałszywy turniej',withdrawSelf:true}});
