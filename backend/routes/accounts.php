@@ -4,10 +4,14 @@
 // Limits (RateLimit buckets are HMACs): signup-begin 60/h per address; signup §3.6; username-check 30/10 min per
 // session and 300/10 min per address; profile 30/h; member-password 10/h, member-email and account-delete 5/h, each
 // plus the login limits on the own e-mail; avatar-upload 10/h (≤ 512 KB); avatar-delete 30/h; diagnostics?probe=stripe 6/h.
+// Roles (PLAN-REJESTRACJA-ROLE §4.5, §4.6, §8.1): roles {organizer} switches the member's own organizer role (10/h, on: 3
+// per day per network, 403 while the Administrator blocks it; off: 409 while tournaments have open or closed
+// registration); organizer-unlock {password} opens the organizer tools again after 30 minutes without them or 12 hours
+// after the password (the login limits on the own e-mail, new session id and CSRF token).
 // Calls into slices of the same wave (class_exists): ChatSettings::health(PDO) and StripeClient::probe($config) for
 // diagnostics; the others are listed in Members.
 declare(strict_types=1);
-use MatDraw\{Accounts,AppError,Avatars,Capabilities,Chat,ChatSettings,Members,Migrator,Paths,Profiles,RouteContext,Routes,StripeClient};
+use MatDraw\{Accounts,AppError,Auth,Avatars,Capabilities,Chat,ChatSettings,Members,Migrator,Paths,Profiles,RouteContext,Routes,StripeClient};
 
 /** Number of session files in the app's own directory (at most 100000 entries and about one second), or null. */
 $sessionFiles=static function(array $c):?int{
@@ -31,6 +35,10 @@ return [
  }],
  'member-password'=>['method'=>'POST','auth'=>'session','user'=>'member','handler'=>fn(RouteContext $ctx):array=>Members::password($ctx->pdo(),$ctx->config,$ctx->user(),$ctx->body)],
  'member-email'=>['method'=>'POST','auth'=>'session','user'=>'member','handler'=>fn(RouteContext $ctx):array=>Members::changeEmail($ctx,$ctx->user(),$ctx->body)],
+ 'roles'=>['method'=>'POST','auth'=>'session','user'=>'member','max'=>1024,'handler'=>fn(RouteContext $ctx):array=>Members::roles($ctx->pdo(),$ctx->config,$ctx->user(),$ctx->body)],
+ 'organizer-unlock'=>['method'=>'POST','auth'=>'session','user'=>'member','max'=>1024,'handler'=>function(RouteContext $ctx):array{
+  Auth::unlock($ctx->pdo(),$ctx->config,$ctx->user(),$ctx->input('password'));return ['ok'=>true,'csrf'=>$ctx->csrf()];
+ }],
  'account-delete'=>['method'=>'POST','auth'=>'session','user'=>'member','handler'=>fn(RouteContext $ctx):array=>Members::deleteOwn($ctx,$ctx->user(),$ctx->body)],
  'avatar-upload'=>['method'=>'POST','auth'=>'upload','types'=>['image/webp','image/jpeg','image/png'],'max'=>Avatars::MAX_BYTES,
   'reject'=>static fn(int $status)=>Avatars::reject(matdraw_config(),$status),

@@ -6,8 +6,14 @@
 //   Chat (class present = chat installed); chat_settings.data.on (§2.4) switches posting off from the Admin panel
 //   Billing::currencyFor(PDO,$config,$row,$country,$userId): plan currency incl. the Admin override (billing-backend)
 //   BillingSync::lazy(PDO,$config,$userId) after the response (only once it was sent), when next_sync_at is due (billing-backend)
+// Roles (PLAN-REJESTRACJA-ROLE §4.4, §8.1), sparse so accounts without a role keep the exact shape above: user.caps
+// (Actors::of, only when one cap is true), athletes [{profileId,name,relation,archived}] (only when the account has
+// athlete profiles) and, for the Administrator, features.pendingOrganizers (only when organizers wait for the
+// confirmation and the confirmation is required, Settings::flags). The sign-up mode is features.signup with
+// billing.enabled && billing.enforce (off | free | paid), exactly signup_mode of Settings::effective.
+// public-config is flagged 'settings' (the central overlay of Routes::dispatch computes the effective config for it).
 declare(strict_types=1);
-use MatDraw\{Access,Accounts,Billing,BillingSync,Capabilities,Chat,ChatModeration,Jobs,RouteContext,Routes};
+use MatDraw\{Access,Accounts,Actors,Billing,BillingSync,Capabilities,Chat,ChatModeration,Jobs,Members,RouteContext,Routes,Settings};
 
 /** Avatar mode of this server: 'off' while avatars are disabled or the avatar code is not installed. */
 $avatarMode=static function(array $c):string{
@@ -39,22 +45,23 @@ return [
   // After the response: jobs and a due payment sync, both releasing the session first (§3.7, §6.3). The sync runs only
   // once the response has been sent (Jobs::afterSent), never before it: Jobs::maybe does not flush when sampling skips it.
   $syncDue=!empty($c['billing_enabled'])&&$row!==null&&$row['stripe_customer_id']!==null&&$row['next_sync_at']!==null&&(int)$row['next_sync_at']<=$now;
-  $userId=$u['id'];
+  $userId=$u['id'];$actor=$u['role']==='member'?Actors::of($pdo,$u):null;$athletes=$actor&&$actor['athletes']?Accounts::athletes($pdo,$u['id']):[];
+  $pending=$u['role']==='admin'&&Settings::flags($c)['trustRequired']?Members::pendingOrganizers($pdo):0;
   register_shutdown_function(static function()use($pdo,$c,$syncDue,$userId){
    Jobs::maybe($pdo,$c);
    if($syncDue&&class_exists(BillingSync::class)&&method_exists(BillingSync::class,'lazy'))Jobs::afterSent(static fn()=>BillingSync::lazy($pdo,$c,$userId),'MatDraw billing lazy');
   });
-  return ['user'=>Accounts::safe($u),
+  return ['user'=>Accounts::withCaps($u,$actor),
    'profile'=>['publicId'=>$p['public_id'],'username'=>$p['username'],'firstName'=>$p['first_name'],'lastName'=>$p['last_name'],'country'=>$p['country'],
     'sports'=>array_values(array_filter(explode(',',(string)$p['sports']),'strlen')),'clubText'=>$p['club_text'],'showClub'=>(bool)$p['show_club'],'nameDisplay'=>$p['name_display'],
     'avatar'=>is_string($p['avatar'])&&$p['avatar']!==''?substr($p['avatar'],0,12):null,'complete'=>$complete,'usernameChangeAt'=>$changeAt,'mustChangePassword'=>$mustChange],
    'access'=>$access+['canPost'=>$block===null,'block'=>$block,'mutedUntil'=>$mutedUntil],
    'billing'=>$billing,
-   'features'=>['signup'=>!empty($c['signup_enabled']),'avatars'=>$avatarMode($c),'chat'=>$chat]];
+   'features'=>['signup'=>!empty($c['signup_enabled']),'avatars'=>$avatarMode($c),'chat'=>$chat]+($pending>0?['pendingOrganizers'=>$pending]:[])]+($athletes?['athletes'=>$athletes]:[]);
  }],
  // Switches for the guest pages (§4.3, §6.10): signup is false in invite-only mode; billing means a price is shown
  // (payments enabled and enforced). No secrets and no Stripe mode.
- 'public-config'=>['method'=>'GET','auth'=>'public','handler'=>function(RouteContext $ctx)use($avatarMode):array{
+ 'public-config'=>['method'=>'GET','auth'=>'public','settings'=>true,'handler'=>function(RouteContext $ctx)use($avatarMode):array{
   $c=$ctx->config;header('Cache-Control: public, max-age=60');
   return ['signup'=>!empty($c['signup_enabled']),'billing'=>!empty($c['billing_enabled'])&&!empty($c['billing_enforce']),'amounts'=>$c['billing_amounts'],
    'avatars'=>$avatarMode($c)!=='off','support'=>is_string($c['support_email'])&&$c['support_email']!==''?$c['support_email']:null];

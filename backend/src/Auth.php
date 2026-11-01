@@ -15,6 +15,11 @@ use PDO;
  * adds a=1 only while the person's own last interaction is within cfg.idle[3] (30 min), so a staff tab left untouched
  * expires after its idle limit. Background polls (chat heads every 30 s, the moderation badge) never pass it, so they
  * cannot keep an unattended staff tab signed in until the 12 h maximum.
+ * Step-up for organizer tools (PLAN-REJESTRACJA-ROLE §4.6, R17): the session holds ws {at, last}: at = the last time the
+ * password was given (enter(): sign-in, sign-up, password change; unlock(): organizer-unlock), last = the last request of
+ * the tools. stepUp() lets bootstrap and command of a member organizer through only while now − at ≤ session_max_seconds
+ * (12 h) and now − last ≤ session_idle_seconds (30 min), the staff limits, and refreshes last; otherwise 401
+ * {code:'reauth'} without touching the session, so the chat, the own profile and the athlete routes stay signed in.
  */
 final class Auth {
  public const COOKIE='matdraw_session';
@@ -94,8 +99,27 @@ final class Auth {
  public static function enter(array $u,array $c):void {
   session_regenerate_id(true);$now=time();$member=($u['role']??'')==='member';
   $idle=(int)$c[$member?'member_session_idle_seconds':'session_idle_seconds'];$max=(int)$c[$member?'member_session_max_seconds':'session_max_seconds'];
-  $_SESSION=['userId'=>$u['id'],'authVersion'=>$u['authVersion'],'created'=>$now,'last'=>$now,'csrf'=>bin2hex(random_bytes(32)),'idle'=>$idle,'max'=>$max,'kind'=>$member?'member':'staff'];
-  if($member&&!headers_sent()){header_remove('Set-Cookie');setcookie(session_name(),session_id(),['expires'=>$now+$max,'path'=>'/','secure'=>self::secure($c),'httponly'=>true,'samesite'=>'Strict']);}
+  $_SESSION=['userId'=>$u['id'],'authVersion'=>$u['authVersion'],'created'=>$now,'last'=>$now,'csrf'=>bin2hex(random_bytes(32)),'idle'=>$idle,'max'=>$max,'kind'=>$member?'member':'staff','ws'=>['at'=>$now,'last'=>$now]];
+  if($member)self::memberCookie($c,$now+$max);
+ }
+ /** The cookie of a member session expires with the session (created + max); session_regenerate_id would send a browser-session cookie. */
+ private static function memberCookie(array $c,int $expires):void{if(!headers_sent()){header_remove('Set-Cookie');setcookie(session_name(),session_id(),['expires'=>$expires,'path'=>'/','secure'=>self::secure($c),'httponly'=>true,'samesite'=>'Strict']);}}
+ /** Organizer tools (bootstrap, command of a member organizer): 401 reauth after 30 min without them or 12 h after the password; refreshes ws.last. */
+ public static function stepUp(array $c,?int $now=null):void {
+  $now??=time();$ws=$_SESSION['ws']??null;
+  if(!is_array($ws)||$now-(int)($ws['at']??0)>(int)$c['session_max_seconds']||$now-(int)($ws['last']??0)>(int)$c['session_idle_seconds'])throw new ApiError('Potwierdź hasło, aby otworzyć narzędzia organizatora.',401,['code'=>'reauth']);
+  $_SESSION['ws']['last']=$now;
+ }
+ /**
+  * organizer-unlock {password} (§4.6): the login limits on the account's own e-mail, the password, then ws.at = ws.last =
+  * now under a new session id and CSRF token (the member cookie keeps its expiry). 422 for a wrong password, never 401:
+  * the client must not take it for an ended session.
+  */
+ public static function unlock(PDO $pdo,array $c,array $u,mixed $password):void {
+  self::reserveLogin($pdo,$c,$u['email']);
+  if(!is_string($password)||strlen($password)>72||!password_verify($password,$u['passwordHash']))throw new AppError('Nieprawidłowe hasło.');
+  $now=time();session_regenerate_id(true);$_SESSION['ws']=['at'=>$now,'last'=>$now];$_SESSION['csrf']=bin2hex(random_bytes(32));
+  if(self::member($_SESSION,$c))self::memberCookie($c,(int)($_SESSION['created']??$now)+(int)($_SESSION['max']??$c['member_session_max_seconds']));
  }
  /** Login limits (plan §3.3): login_limit_ip per address bucket (IPv6 /64) and 8 per bucket and e-mail, 15 minutes each. */
  public static function reserveLogin(PDO $pdo,array $c,string $email):void {
