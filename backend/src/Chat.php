@@ -273,7 +273,11 @@ final class Chat {
  public static function lists(PDO $pdo,?array $viewer,int $now,?array $c=null):array {
   $settings=ChatSettings::get($pdo);$today=self::today();$grace=$settings['data']['graceDays'];
   $lobby=[];
-  foreach(self::rows($pdo,"SELECT ".self::CHANNEL.",sort FROM chat_channels WHERE kind='lobby' ORDER BY sort,id",[]) as $r)if(isset(self::LOBBY[$r['slug']]))
+  // Order of Chat::LOBBY (owner's order, 2026-11-01), not chat_channels.sort: migrations never change existing rows (CI
+  // back-compat job), so the seeded sort values of 0003 stay and only the code decides the order.
+  $rows=array_values(array_filter(self::rows($pdo,"SELECT ".self::CHANNEL." FROM chat_channels WHERE kind='lobby' ORDER BY id",[]),fn($r)=>isset(self::LOBBY[$r['slug']])));
+  usort($rows,fn($a,$b)=>self::LOBBY[$a['slug']]['sort']<=>self::LOBBY[$b['slug']]['sort']?:(int)$a['id']<=>(int)$b['id']);
+  foreach($rows as $r)
    $lobby[]=['id'=>(int)$r['id'],'slug'=>$r['slug'],'scope'=>$r['scope'],'last'=>(int)$r['last_message_id'],'count'=>(int)$r['msg_count'],'st'=>self::visibleFor($r,null,$viewer,$today,$grace)];
   $cols='t.id,t.name,t.city,t.event_date,t.status,t.created_by,c.id AS cid,c.last_message_id,c.msg_count,c.status AS cstatus';
   // Staff tournaments and trusted community ones (the same rule as Domain::trusted and GuestView), plus the viewer's own,

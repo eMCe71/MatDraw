@@ -8,7 +8,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
 import {createHmac} from 'node:crypto';
-import {readFileSync} from 'node:fs';
+import {existsSync,readFileSync} from 'node:fs';
 const php=process.env.PHP_BIN;
 function bridge(input){const r=spawnSync(php,['tests/php-bridge-chat.php'],{input:JSON.stringify(input),encoding:'utf8',maxBuffer:10_000_000});assert.equal(r.status,0,r.stderr||r.stdout);return JSON.parse(r.stdout);}
 const skip=!php;
@@ -138,14 +138,15 @@ test('hosting health: the current hour in full plus the overlapping part of the 
  assert.deepEqual(out.map(o=>o[0]),[36,27,18,0,0,0],'rows as strings from the database; statuses outside the list ignored');
 });
 
-test('migrations 0003 and 0009 give the four channels of Chat::LOBBY in order, and 0003 the default settings of ChatSettings',{skip},()=>{
- const k=bridge({job:'constants'}),src=readFileSync('backend/migrations/0003_chat.php','utf8'),order=readFileSync('backend/migrations/0009_lobby_order.php','utf8');
+test('migration 0003 seeds the four channels of Chat::LOBBY, Chat::LOBBY carries the owner\'s order, and 0003 the default settings of ChatSettings',{skip},()=>{
+ const k=bridge({job:'constants'}),src=readFileSync('backend/migrations/0003_chat.php','utf8');
  const seeded=[...src.match(/\$lobby=\[(.*?)\];/)[1].matchAll(/\['([a-z-]+)','(world|pl)',(\d+)\]/g)].map(m=>[m[1],m[2],Number(m[3])]);
- // 0003 seeds the channels and scopes; 0009 sets the owner's order (Taekwondo Polska first), which Chat::LOBBY carries.
- const sorts=Object.fromEntries([...order.matchAll(/\['([a-z-]+)',(\d+)\]/g)].map(m=>[m[1],Number(m[2])]));
- const after=seeded.map(([slug,scope,sort])=>[slug,scope,sorts[slug]??sort]).sort((x,y)=>x[2]-y[2]);
- assert.deepEqual(after,Object.entries(k.lobby).map(([slug,l])=>[slug,l.scope,l.sort]));
+ // 0003 seeds the channels and scopes. The order (Taekwondo Polska first, owner 2026-11-01) lives only in Chat::LOBBY and is
+ // applied by Chat::lists: no migration rewrites chat_channels.sort, because migrations never change existing rows.
+ assert.deepEqual(seeded.map(([slug,scope])=>[slug,scope]).sort(),Object.entries(k.lobby).map(([slug,l])=>[slug,l.scope]).sort());
  assert.deepEqual(Object.keys(k.lobby),['taekwondo-pl','taekwondo','karate','general']);
+ assert.deepEqual(Object.values(k.lobby).map(l=>l.sort),[10,20,30,40]);
+ assert.equal(existsSync('backend/migrations/0009_lobby_order.php'),false,'the order is code, not a data migration');
  const json=[...src.match(/\$defaults=('.*?');/s)[1].matchAll(/'([^']*)'/g)].map(m=>m[1]).join('');
  assert.deepEqual(JSON.parse(json),k.defaults);
 });

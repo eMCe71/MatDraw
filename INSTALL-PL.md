@@ -68,13 +68,12 @@ Przy wdrożeniu przez GitHub Actions wszystko dzieje się samo: kopia bazy, migr
 
 Gdy kod jest nowszy od bazy (zapomniana migracja), aplikacja odpowiada „Trwa przerwa techniczna” zamiast błędu 500, a `migrate.php` to naprawia.
 
-**Migracje 0007–0009 (wydanie z rolami organizatora i zawodnika).** Wszystkie tylko dodają, a deploy robi przed nimi kopię bazy:
+**Migracje 0007–0008 (wydanie z rolami organizatora i zawodnika).** Wszystkie tylko dodają, a deploy robi przed nimi kopię bazy:
 
 | Migracja | Co robi | Powrót do starego kodu |
 |---|---|---|
 | `0007_roles` | kolumny ról i zaufania w `users` (`organizer`, `organizer_blocked_at`, `organizer_trusted_at/_by`), właściciel i znacznik rewizji w `profiles`, weryfikacja i scalanie klubów (`verified`, `created_by`, `created_at`, `merged_into`; **istniejące kluby dostają `verified=1`**), w `tournaments` daty utworzenia, ukrycia i pole `self_entry` (**istniejące turnieje: wyłączone**), `app_meta.staff_rev` i `app_meta.rev_floor` (rewizja z chwili migracji: zapis z karty otwartej przed wdrożeniem dostaje „Dane zmieniły się w innej sesji”), tabela `entry_withdrawals`. Klub „Niezrzeszony” powstaje przy pierwszym zapisie, nie w migracji | ma „floor”: gdy w bazie są dane społeczności (profile kont zawodników, turnieje albo kluby członków, ukryte turnieje, scalone kluby), powrót do kodu sprzed 0007 jest zablokowany, bo stary kod pokazałby je personelowi |
 | `0008_settings` | tabela `app_settings` **bez wiersza**: dopóki Administrator nie zapisze „Ustawień”, obowiązuje `config.php`, czyli na produkcji rejestracja wyłączona i brak płatności | bez „floor” (stary kod ignoruje tabelę) |
-| `0009_lobby_order` | tylko kolejność kanałów czatu: Taekwondo Polska pierwszy | bez „floor” |
 
 Po tej aktualizacji nic nie zmienia się dla użytkowników, dopóki Administrator nie otworzy rejestracji (`HANDOFF.md`). W `config.php` nie trzeba nic zmieniać.
 

@@ -1081,7 +1081,7 @@ Przegląd końcowy (bezpieczeństwo, ustawienia i płatności, domena, wdrożeni
 | B5 | Płatną rejestrację w trybie testowym Stripe można było otworzyć bez potwierdzenia | Bramka zapisu obejmuje też otwarcie płatnej rejestracji (`off` → `on` przy „płatnych”); 409 `test_mode` z `confirmTestMode:true`, potwierdzenie `allowTestMode` (albo `confirmTestMode`); decyzja o kontach, gdy płatności nie są w tej chwili wymagane |
 | B6 | `signup_force_off` nie zamykał tokenu zaproszeń | §3.3: sufit nad każdą samodzielną rejestracją; baner także w oknie testów |
 | B3 | Usunięcie konta zostawia pełne imię w wynikach | Bez zmian: decyzja właściciela O7; ostrzeżenie i ścieżka do inicjałów w oknie usunięcia konta (frontend) |
-| B11, B12 | Rada „cofnij wydanie” i komunikat strażnika „floor” | Komunikat podaje powód progu (2: konta członków, 7: dane społeczności) i ostrzega przed cofnięciem całego wydania; `DEPLOY-PL.md` opisuje poprawkę z zachowaniem migracji 0007–0009 |
+| B11, B12 | Rada „cofnij wydanie” i komunikat strażnika „floor” | Komunikat podaje powód progu (2: konta członków, 7: dane społeczności) i ostrzega przed cofnięciem całego wydania; `DEPLOY-PL.md` opisuje poprawkę z zachowaniem migracji 0007–0008 |
 | B14 | Limit organizatorów na sieć omijany równoległymi rejestracjami | Rezerwacja atomowa (`RateLimit::hit`) i zwrot (`RateLimit::refund`) przy nieudanej rejestracji lub zmianie roli; powyżej limitu duplikatów e-maili odpowiedź 429 zamiast 409 |
 | B18 | Kluby tworzone przez edytora były niezweryfikowane | Klub nowy tworzony przez personel jest zweryfikowany (jak w a67ad42); przez członka nie |
 | B19 | Usunięcie konta organizatora ukrywało turniej zakończony tego dnia | `forgetMember` pomija turnieje `finished` |

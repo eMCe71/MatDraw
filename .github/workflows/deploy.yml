@@ -100,6 +100,9 @@ jobs:
     name: Zgodność wstecz, stary kod na nowym schemacie (${{ matrix.db }})
     if: ${{ !inputs.rollback && !inputs.server_check }}
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      actions: read
     strategy:
       fail-fast: false
       matrix:
@@ -127,18 +130,27 @@ jobs:
           coverage: none
       - name: Klient MySQL
         run: command -v mysql || { sudo apt-get update -q && sudo apt-get install -yq mysql-client; }
-      - name: Wersja bazowa (poprzedni commit)
+      - name: Wersja bazowa (wydanie na produkcji)
         id: base
-        # push: the commit before this push (the release in .previous usually comes from it); a new branch (zeros) or
-        # a commit missing after a force push: merge-base with origin/main; pull_request: the PR base. Skipped only
-        # when no earlier commit exists (or it is this very commit).
+        # The release running in production: the head of the newest successful push run of this workflow on main (a
+        # successful push run on main means its deploy job succeeded; a failed informational browser job only makes an
+        # older release the base). Every push and pull request is compared with
+        # it, so a feature branch meets the same old code as the deploy will (a migration that rewrites existing rows
+        # is caught before main), and a push to main after a failed deploy is not compared with a commit that never
+        # went live. Fallbacks when the API gives nothing usable: the PR base, the commit before the push, the
+        # merge-base with origin/main. Skipped only when no earlier commit exists (or it is this very commit).
         env:
           EVENT: ${{ github.event_name }}
           BEFORE: ${{ github.event.before }}
           PR_BASE: ${{ github.event.pull_request.base.sha }}
+          GH_TOKEN: ${{ github.token }}
+          API: ${{ github.api_url }}
+          REPO: ${{ github.repository }}
         run: |
           base=
-          if [[ $EVENT == pull_request ]]; then base=$PR_BASE
+          live=$(curl -fsS --max-time 20 -H "Authorization: Bearer $GH_TOKEN" -H 'Accept: application/vnd.github+json' "$API/repos/$REPO/actions/workflows/deploy.yml/runs?branch=main&event=push&status=success&per_page=1" | jq -r '.workflow_runs[0].head_sha // empty' 2>/dev/null || true)
+          if [[ $live =~ ^[0-9a-f]{40}$ ]] && git cat-file -e "$live^{commit}" 2>/dev/null; then base=$live; echo "Wydanie na produkcji (ostatni udany deploy): $live"
+          elif [[ $EVENT == pull_request ]]; then base=$PR_BASE
           elif [[ $EVENT == push && $BEFORE =~ ^[0-9a-f]{40}$ && ! $BEFORE =~ ^0+$ ]]; then base=$BEFORE; fi
           if [[ -z $base ]] || ! git cat-file -e "$base^{commit}" 2>/dev/null; then base=$(git merge-base origin/main HEAD 2>/dev/null || true); fi
           if [[ -z $base ]] || ! git cat-file -e "$base^{commit}" 2>/dev/null; then echo "Brak poprzedniego commita: zadanie pominięte."; base=
