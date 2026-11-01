@@ -229,6 +229,23 @@ test('one athlete profile per account (§17): a second profile, self or guardian
  assert.deepEqual(STATUS(js.results),want);assert.deepEqual(STATUS(ph.results),want);
  want.forEach((st,i)=>{if(st===409){assert.equal(js.results[i].error,ONE,'JS #'+i);assert.equal(ph.results[i].error,ONE,'PHP #'+i);}});
  for(const r of [js,ph])assert.deepEqual(['u-ath','u-par','u-par2','u-mem'].map(id=>r.db.profiles.filter(p=>p.ownerId===id).length),[1,1,1,1]);
+ // Data written before the limit (§17): u-ath also owns a 'guardian' profile. The one-'self' rule still guards edits of it, and
+ // a new profile on that account gets the one-athlete message; editing it as 'guardian' still works.
+ const legacy=()=>{const db=rich(),kidP=db.profiles.find(p=>p.id==='p-kid');db.profiles.push({...structuredClone(kidP),id:'p-legacy',ownerId:'u-ath',createdBy:'u-ath',name:'Stare Dziecko Testowe'});return db;};
+ const old=[
+  {actor:'u-ath',type:'athlete.save',payload:{...A,id:'p-legacy',relation:'self',name:'Stare Dziecko Testowe',club:{none:true}}}, // second 'self'
+  {actor:'u-ath',type:'athlete.save',payload:{...kid,name:'Trzecie Dziecko'}},                                                   // a new one
+  {actor:'u-ath',type:'athlete.save',payload:{...A,relation:'self',name:'Nowy Ja',club:{none:true}}},                             // a new 'self'
+  {actor:'u-ath',type:'athlete.save',payload:{...kid,id:'p-legacy',name:'Stare Dziecko Poprawione'}},                             // edit, still 'guardian'
+ ];
+ const jl=runJs(legacy(),old),pl=bridge({job:'execute',db:legacy(),commands:old});compare(jl,pl,old);
+ const wantL=[409,409,409,200];assert.deepEqual(STATUS(jl.results),wantL);assert.deepEqual(STATUS(pl.results),wantL);
+ const OWN='Na koncie jest już Twój własny profil zawodnika.';
+ for(const r of [jl,pl]){
+  assert.deepEqual(r.results.slice(0,3).map(x=>x.error),[OWN,ONE,ONE]);
+  const mine=r.db.profiles.filter(p=>p.ownerId==='u-ath').map(p=>[p.id,p.relation,p.name]).sort();
+  assert.deepEqual(mine,[['p-legacy','guardian','Stare Dziecko Poprawione'],['p-self','self','Zawodnik SELF Testowy']]);
+ }
 });
 test('commands with trustRequired=false and paused publishing: every organizer not blocked works as confirmed (§17)',{skip},()=>{
  const db=rich(),flags={organizers:'paused',trustRequired:false},T={city:'Łódź',mat:'Mata 1'};
