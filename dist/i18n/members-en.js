@@ -68,7 +68,7 @@ export default {
  'Nie udało się skopiować. Zaznacz tekst ręcznie.':'Could not copy. Select the text by hand.',
  'Konto: {email}':'Account: {email}',
  'Usuń dane zawodnika: {name}':'Delete athlete data: {name}',
- 'Konto ma profil zawodnika ({names}). Wyniki z zakończonych turniejów i kategorii po losowaniu zostaną z imieniem i nazwiskiem, widocznym dla organizatora i Administratora.':'The account has an athlete profile ({names}). Results from finished tournaments and from categories already drawn keep the full name, visible to the organizer and the Administrator.',
+ 'Konto ma profil zawodnika ({names}). Zgłoszenia do nadchodzących turniejów zostaną wycofane, a gdy losowanie kategorii jest już zapisane, zostaną w nich tylko inicjały. Wyniki z turniejów, które już się odbyły, zostaną z imieniem i nazwiskiem, widocznym tylko dla organizatora turnieju i MatBravo (goście widzą inicjały).':'The account has an athlete profile ({names}). Entries to upcoming tournaments will be withdrawn; where the category draw is already saved, only initials stay in them. Results from tournaments that have already taken place keep the full name, visible only to the tournament organizer and MatBravo (guests see initials).',
  'Imię':'First name',
  'Nazwisko':'Last name',
  'Nazwa użytkownika':'Username',

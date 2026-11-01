@@ -416,7 +416,7 @@ test('final review F1, F2: the athlete profile of a member row can be erased; th
  assert.match(row,/<button type="button" class="btn small-btn danger-text" data-action="forget-profile" data-id="p1" aria-label="Usuń dane zawodnika: Zosia &lt;b&gt;K&lt;\/b&gt;">Usuń dane zawodnika<\/button>/);
  assert.ok(!/forget-profile/.test(memberRow({id:'u2',email:'b@b.pl',active:true,billing:null}).html),'no erase button without a profile');
  const note=members.deleteAthleteNote(members.ownedProfiles('u1',ws)).html;
- assert.match(note,/Konto ma profil zawodnika \(Zosia &lt;b&gt;K&lt;\/b&gt;\)\. Wyniki z zakończonych turniejów i kategorii po losowaniu zostaną z imieniem i nazwiskiem/);
+ assert.match(note,/Konto ma profil zawodnika \(Zosia &lt;b&gt;K&lt;\/b&gt;\)\. Zgłoszenia do nadchodzących turniejów zostaną wycofane, a gdy losowanie kategorii jest już zapisane, zostaną w nich tylko inicjały\. Wyniki z turniejów, które już się odbyły, zostaną z imieniem i nazwiskiem, widocznym tylko dla organizatora turnieju i MatBravo \(goście widzą inicjały\)\./);
  assert.match(note,/<input type="checkbox" data-mem-initials checked> Zostaw w zachowanych wynikach tylko inicjały zawodnika/,'ticked by default');
  assert.equal(String(members.deleteAthleteNote([]).html??members.deleteAthleteNote([])),'','nothing without a profile');
  assert.match(members.deleteAthleteNote([{id:'p1',name:'Z'}],{forgotten:true}).html,/Dane zawodnika są już usunięte/);

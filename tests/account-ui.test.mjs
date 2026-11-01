@@ -464,13 +464,16 @@ test('final review F4: every problem of the athlete form at once, in the order o
 test('final review F2: the account deletion warns about the kept athlete name and offers the initials (ticked) only with an athlete profile',()=>{
  assert.equal(String(flow.deleteAthleteView([])),'','no athlete profile: nothing');
  const html=String(flow.deleteAthleteView([ZOSIA]));
- assert.match(html,/zostaną z imieniem i nazwiskiem, widocznym dla organizatora i Administratora\./);
+ assert.match(html,/Zgłoszenia zawodnika do nadchodzących turniejów zostaną wycofane, a gdy losowanie kategorii jest już zapisane, zostaną w nich tylko inicjały\. Wyniki z turniejów, które już się odbyły, zostaną z imieniem i nazwiskiem, widocznym tylko dla organizatora turnieju i MatBravo \(goście widzą inicjały\)\./);
  assert.match(html,/<input type="checkbox" name="athleteInitials" checked> <span>Zostaw w zachowanych wynikach tylko inicjały zawodnika<\/span>/);
  assert.match(String(flow.deleteAthleteView([ZOSIA],{forgotten:true})),/Dane zawodnika są już usunięte, w zachowanych wynikach zostały inicjały\./);
  assert.doesNotMatch(String(flow.deleteAthleteView([ZOSIA],{forgotten:true})),/athleteInitials/);
  const src=source('account-flow.js');
  assert.ok(src.indexOf("athleteApi('athlete-forget',{profileId:a.profileId,password})")<src.indexOf("Client.request('account-delete'"),'the athlete data first, with the same password');
  inLanguage('en',()=>assert.match(String(flow.deleteAthleteView([ZOSIA])),/Leave only the athlete’s initials in kept results/));
+ // I4: the current behaviour (R2.2): initials in upcoming tournaments, the full name only in results of tournaments that took place.
+ inLanguage('en',()=>assert.match(String(flow.deleteAthleteView([ZOSIA])),/entries to upcoming tournaments will be withdrawn; where the category draw is already saved, only initials stay in them\. Results from tournaments that have already taken place keep the full name/));
+ assert.doesNotMatch(html,/kategorii po losowaniu zostaną z imieniem/,'drawn categories of upcoming tournaments no longer keep the name');
 });
 test('roles closed (me.features.rolesOpen false, contract (a)): no Role tab without a role; with a role nothing new can be turned on',async()=>{
  const closed=(caps,athletes=[],features={rolesOpen:false,signupMode:'off'})=>({...memberMe(caps,athletes),features});
@@ -581,7 +584,7 @@ test('API stub in a browser: roles closed (rolesOpen false) and the account dele
    await noOverflow(page,'roles closed '+w);await shot(page,'roles-closed-'+w);
    // F2: the delete section and dialog warn about the kept name and offer the initials (ticked).
    await page.goto(url+'#profile?tab=security');await page.waitForSelector('.acct-danger');
-   assert.match(await page.locator('.acct-danger').innerText(),/zostaną z imieniem i nazwiskiem, widocznym dla organizatora i Administratora/);
+   assert.match(await page.locator('.acct-danger').innerText(),/nadchodzących turniejów zostaną wycofane, a gdy losowanie kategorii jest już zapisane, zostaną w nich tylko inicjały\. Wyniki z turniejów, które już się odbyły, zostaną z imieniem i nazwiskiem/);
    await page.click('[data-acct-act="delete-open"]');await page.waitForSelector('#acct-delete-form');
    assert.equal(await page.isChecked('#acct-delete-form [name="athleteInitials"]'),true,'the initials box is ticked by default');
    await noOverflow(page,'delete dialog '+w);await shot(page,'delete-athlete-'+w);

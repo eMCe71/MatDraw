@@ -199,7 +199,7 @@ export default {
  'wzrost':'height',
  'stopień':'grade',
  'rodzaj stopnia':'grade type',
- 'Wyniki zawodnika z zakończonych turniejów i kategorii po losowaniu zostaną z imieniem i nazwiskiem, widocznym dla organizatora i Administratora.':'The athlete’s results from finished tournaments and from categories already drawn keep the full name, visible to the organizer and the Administrator.',
+ 'Zgłoszenia zawodnika do nadchodzących turniejów zostaną wycofane, a gdy losowanie kategorii jest już zapisane, zostaną w nich tylko inicjały. Wyniki z turniejów, które już się odbyły, zostaną z imieniem i nazwiskiem, widocznym tylko dla organizatora turnieju i MatBravo (goście widzą inicjały).':'The athlete’s entries to upcoming tournaments will be withdrawn; where the category draw is already saved, only initials stay in them. Results from tournaments that have already taken place keep the full name, visible only to the tournament organizer and MatBravo (guests see initials).',
  'W oknie usuwania konta możesz zostawić w nich tylko inicjały.':'In the delete dialog you can leave only initials in them.',
  'Zostaw w zachowanych wynikach tylko inicjały zawodnika':'Leave only the athlete’s initials in kept results',
  'Dane zawodnika są już usunięte, w zachowanych wynikach zostały inicjały.':'The athlete data are already erased; kept results show initials.',

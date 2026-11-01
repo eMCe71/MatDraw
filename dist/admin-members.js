@@ -438,7 +438,7 @@ const rolesChanged=()=>{reload();import('./me.js').then(m=>m.loadMe({force:true}
 export function deleteAthleteNote(profiles,{forgotten=false}={}){
  if(!profiles?.length)return h``;
  if(forgotten)return h`<p class="notice mem-warn">${T('Dane zawodnika są już usunięte, w zachowanych wynikach zostały inicjały.')}</p>`;
- return h`<div class="mem-athlete-note"><p>${T('Konto ma profil zawodnika ({names}). Wyniki z zakończonych turniejów i kategorii po losowaniu zostaną z imieniem i nazwiskiem, widocznym dla organizatora i Administratora.',{names:profiles.map(p=>p.name).join(', ')})}</p><label class="checkbox-label"><input type="checkbox" data-mem-initials checked> ${T('Zostaw w zachowanych wynikach tylko inicjały zawodnika')}</label></div>`;
+ return h`<div class="mem-athlete-note"><p>${T('Konto ma profil zawodnika ({names}). Zgłoszenia do nadchodzących turniejów zostaną wycofane, a gdy losowanie kategorii jest już zapisane, zostaną w nich tylko inicjały. Wyniki z turniejów, które już się odbyły, zostaną z imieniem i nazwiskiem, widocznym tylko dla organizatora turnieju i MatBravo (goście widzą inicjały).',{names:profiles.map(p=>p.name).join(', ')})}</p><label class="checkbox-label"><input type="checkbox" data-mem-initials checked> ${T('Zostaw w zachowanych wynikach tylko inicjały zawodnika')}</label></div>`;
 }
 function deleteDialog(m,confirmEnd='',{forgotten=false}={}){
  openModal(T('Usuń konto'),h`<p class="modal-lead">${T('Konto: {email}',{email:m.email})}</p>

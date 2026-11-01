@@ -610,7 +610,7 @@ async function saveEmail(form){
 }
 // Owner decision O7: deleting the account keeps the athlete's full name in kept results; the dialog says so and offers (ticked) to erase
 // the athlete data first with the same password (athlete-forget: initials in kept results), final review F2.
-const KEPT_NAME=()=>T('Wyniki zawodnika z zakończonych turniejów i kategorii po losowaniu zostaną z imieniem i nazwiskiem, widocznym dla organizatora i Administratora.');
+const KEPT_NAME=()=>T('Zgłoszenia zawodnika do nadchodzących turniejów zostaną wycofane, a gdy losowanie kategorii jest już zapisane, zostaną w nich tylko inicjały. Wyniki z turniejów, które już się odbyły, zostaną z imieniem i nazwiskiem, widocznym tylko dla organizatora turnieju i MatBravo (goście widzą inicjały).');
 /** The athlete part of the delete dialog for the account's athlete profiles (none: nothing). */
 export function deleteAthleteView(athletes,{forgotten=false}={}){
  if(!athletes?.length)return h``;
