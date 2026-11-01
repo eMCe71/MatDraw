@@ -95,6 +95,8 @@ export function firstPairs(slots){
   function walk(s){if(s.length===1)return s.filter(Boolean);const a=walk(s.slice(0,s.length/2)),b=walk(s.slice(s.length/2));if(a.length===1&&b.length===1)pairs.push([a[0],b[0]]);return [...a,...b];}
   walk(slots);return pairs;
 }
+/** Same club for the draw (§6.3, Rules::sameClub): equal club names, but 'unaffiliated' athletes are never separated. */
+export const sameClub=(a,b)=>a?.club===b?.club&&a?.clubId!=='unaffiliated'&&b?.clubId!=='unaffiliated';
 export function makeDraw(athletes,seed=1){
   if(athletes.length<3)throw Error('Minimum 3 zawodników. Kategoria wymaga decyzji organizatora.');
   if(athletes.length>64)throw Error('Powyżej 64 zawodników — regulamin wymaga doprecyzowania.');
@@ -102,7 +104,7 @@ export function makeDraw(athletes,seed=1){
   const order=slotOrder(size).slice(0,athletes.length),random=rng(seed);
   const byId=Object.fromEntries(athletes.map(a=>[a.id,a]));
   const slots=Array(size).fill(null);shuffle(athletes,random).forEach((a,i)=>slots[order[i]]=a.id);
-  const cost=s=>firstPairs(s).reduce((n,p)=>n+(byId[p[0]].club===byId[p[1]].club?10000:0),0)+s.reduce((n,id,i)=>n+(id&&byId[id].champion&&s[i^1]?100:0),0);
+  const cost=s=>firstPairs(s).reduce((n,p)=>n+(sameClub(byId[p[0]],byId[p[1]])?10000:0),0)+s.reduce((n,id,i)=>n+(id&&byId[id].champion&&s[i^1]?100:0),0);
   let score=cost(slots);
   for(let k=0;k<2500;k++){
     const i=order[Math.floor(random()*order.length)],j=order[Math.floor(random()*order.length)];
@@ -142,8 +144,8 @@ export function clearWinner(draw,id){
   for(let round=r+1;round<Math.log2(draw.size);round++){index=Math.floor(index/2);if(draw.results[round+'-'+index])throw Error('Najpierw wycofaj wynik w kolejnej rundzie.');}
   delete draw.results[id];draw.revision++;
 }
-export function clubConflicts(draw,athletes){const map=Object.fromEntries(athletes.map(a=>[a.id,a]));return firstPairs(draw.slots).filter(([a,b])=>map[a]?.club===map[b]?.club).length;}
-export function fingerprintCounts(athletes){const {items,unassigned}=categories(athletes);return {athletes:athletes.length,active:athletes.filter(a=>a.presence!=='absent').length,clubs:new Set(athletes.map(a=>a.club)).size,categories:items.length,alerts:items.filter(c=>c.underfilled).length,unassigned:unassigned.length};}
+export function clubConflicts(draw,athletes){const map=Object.fromEntries(athletes.map(a=>[a.id,a]));return firstPairs(draw.slots).filter(([a,b])=>sameClub(map[a],map[b])).length;}
+export function fingerprintCounts(athletes){const {items,unassigned}=categories(athletes);return {athletes:athletes.length,active:athletes.filter(a=>a.presence!=='absent').length,clubs:new Set(athletes.filter(a=>a.clubId!=='unaffiliated').map(a=>a.club)).size,categories:items.length,alerts:items.filter(c=>c.underfilled).length,unassigned:unassigned.length};}
 export function validateAthlete(a){
   if(!a.name?.trim()||!a.club?.trim())throw Error('Podaj imię i nazwisko oraz klub.');
   if(!['M','F'].includes(a.sex)||!['cup','dan'].includes(a.gradeType))throw Error('Sprawdź płeć i rodzaj stopnia.');
