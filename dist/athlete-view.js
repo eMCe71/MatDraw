@@ -1,9 +1,10 @@
 /* What a member sees on "Moje starty" (PLAN-REJESTRACJA-ROLE §7.4): mirror of backend/src/AthleteView.php for the browser demo;
  * tests/athlete-view.test.mjs checks that both give the same answer. Data only, no DOM.
- *  projectAthleteView(profiles, tournaments, withdrawals, today, organizers) = AthleteView::project (pure; inputs and answer
- *   are documented there: profiles, entries, withdrawn, open, every key listed).
- *  athleteView(db, user, today, {withdrawals, organizers}) = AthleteView::fromWorkspace: the inputs from a workspace (the demo
- *   keeps tombstones in db.withdrawals and has no organizer names unless given as {userId: {n}}).
+ *  projectAthleteView(profiles, tournaments, withdrawals, today, organizers, include) = AthleteView::project (pure; inputs and
+ *   answer are documented there: profiles, entries, withdrawn, open, every key listed; include: a tournament id kept in the
+ *   open list beyond OPEN_LIMIT when it qualifies, the ?t= of the athlete route).
+ *  athleteView(db, user, today, {withdrawals, organizers, include}) = AthleteView::fromWorkspace: the inputs from a workspace
+ *   (the demo keeps tombstones in db.withdrawals and has no organizer names unless given as {userId: {n}}).
  *  publicClubs(clubs) = the public-clubs route: verified clubs that are not merged, by name, at most 2000, plus the id of
  *   'unaffiliated'. */
 import {resolveDraw} from './engine.js';
@@ -37,7 +38,7 @@ export function position(d,id,bracket){
  return {slot,round:last.round+1,match:last.number,status,opponent};
 }
 const byDate=newest=>(a,b)=>(newest?cmp(String(b.date),String(a.date)):cmp(String(a.date),String(b.date)))||cmp(String(a.id),String(b.id));
-export function projectAthleteView(profiles,tournaments,withdrawals,today,organizers){
+export function projectAthleteView(profiles,tournaments,withdrawals,today,organizers,include=null){
  profiles=[...profiles].sort((a,b)=>cmp(String(a.id),String(b.id)));const own=new Map(profiles.map(a=>[String(a.id),a]));
  const pending=new Set(),entered=new Set();
  for(const t of tournaments)for(const e of t.entries||[]){const pid=String(e.profileId??'');entered.add(t.id+'/'+pid);if(own.has(pid)&&['open','closed'].includes(t.status))pending.add(pid);}
@@ -67,7 +68,8 @@ export function projectAthleteView(profiles,tournaments,withdrawals,today,organi
   .sort((a,b)=>(Math.trunc(b.at)-Math.trunc(a.at))||cmp(String(a.tournament.id),String(b.tournament.id))||cmp(String(a.profileId),String(b.profileId)));
  for(const w of gone.slice(0,WITHDRAWN_LIMIT))out.withdrawn.push({profileId:w.profileId,tournament:{id:w.tournament.id,name:w.tournament.name,date:w.tournament.date},by:w.by,at:Math.trunc(w.at)});
  const open=tournaments.filter(t=>t.status==='open'&&t.selfEntry===true&&(t.hiddenBy??null)===null&&typeof t.date==='string'&&t.date>=today).sort(byDate(false));
- for(const t of open.slice(0,OPEN_LIMIT)){
+ const shown=open.slice(0,OPEN_LIMIT);if(include!=null&&!shown.some(t=>t.id===include))shown.push(...open.filter(t=>t.id===include));
+ for(const t of shown){
   const inside=new Set((t.entries||[]).map(e=>String(e.profileId??''))),keys=Object.keys(isObj(t.draws)?t.draws:{}).sort();
   const n=t.community?organizers?.[t.createdBy??'']?.n:null;
   out.open.push({id:t.id,name:t.name,city:t.city,date:t.date,community:!!t.community,trusted:!!t.trusted,organizer:typeof n==='string'&&n!==''?{n}:null,
@@ -76,13 +78,13 @@ export function projectAthleteView(profiles,tournaments,withdrawals,today,organi
  return out;
 }
 /** The inputs of projectAthleteView() from a workspace (db.flags for trust, §17), as AthleteView::fromWorkspace. */
-export function athleteView(db,user,today,{withdrawals=null,organizers={}}={}){
+export function athleteView(db,user,today,{withdrawals=null,organizers={},include=null}={}){
  const clubs=db.clubs||[],byId=new Map(db.tournaments.map(t=>[t.id,t]));
  const profiles=db.profiles.filter(a=>a.ownerId!=null&&a.ownerId===user.id).map(a=>{const c=resolveClub(clubs,a.clubId??null);return {...a,clubRow:c?{id:c.id,name:c.name,verified:c.verified!==false}:null};});
  const tournaments=db.tournaments.map(t=>({id:t.id,name:t.name,city:t.city,date:t.date,status:t.status,selfEntry:t.selfEntry===true,hiddenBy:t.hiddenBy??null,createdBy:t.createdBy??null,community:community(db,t),trusted:trusted(db,t),
   entries:t.entries.map(e=>({...e,currentClub:currentClub(clubs,e.clubId??null)})),draws:t.draws}));
  const gone=[];for(const w of withdrawals??db.withdrawals??[]){const t=byId.get(w.tournamentId);if(t)gone.push({profileId:w.profileId,tournament:{id:t.id,name:t.name,date:t.date},by:w.by,at:Math.trunc(w.at)});}
- return projectAthleteView(profiles,tournaments,gone,today,organizers);
+ return projectAthleteView(profiles,tournaments,gone,today,organizers,include);
 }
 /** The answer of the public-clubs route for the demo: verified, not merged, not 'unaffiliated', by name (Polish order). */
 export function publicClubs(clubs){

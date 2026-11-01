@@ -95,3 +95,23 @@ test('PHP public projection equals the demo for community tournaments, unverifie
  // Without currentClub (callers before this plan) the snapshot club is shown, '' for unaffiliated.
  const plain=bridge({job:'guest',tournaments:db.tournaments,today,ids:[t.id]});assert.deepEqual(plain.tournaments,[guestTournament(db.tournaments,t.id,today)]);
 });
+
+// Self-entries in the public preview (PLAN-REJESTRACJA-ROLE §7.1, §10.1; follow-up F2): the sparse selfEntry:true while the
+// tournament takes self-entries (open, switched on), only in the preview, never on the home list; PHP equals the demo.
+test('PHP public projection: sparse selfEntry in the preview of an open tournament with self-entries only (F2)',{skip:!php},()=>{
+ const db=drawn(),today='2026-10-31',base={city:'Opole',mat:'Mata 1',createdBy:'demo-admin',entries:[],draws:{},activity:[]};
+ db.users.push({id:'org-x',role:'member',organizer:true,organizerTrustedAt:null,organizerBlockedAt:null});
+ db.tournaments.push({...base,id:'t-self-open',name:'Zapisy własne',date:'2026-11-20',status:'open',selfEntry:true},{...base,id:'t-self-closed',name:'Zapisy zamknięte',date:'2026-11-21',status:'closed',selfEntry:true},
+  {...base,id:'t-self-off',name:'Bez zapisów własnych',date:'2026-11-22',status:'open',selfEntry:false},{...base,id:'t-self-org',name:'Społeczny z zapisami',date:'2026-11-23',status:'open',selfEntry:true,createdBy:'org-x'},
+  {...base,id:'t-self-draft',name:'Roboczy',date:'2026-11-24',status:'draft',selfEntry:true});
+ const list=guestTournaments(db),ids=['t-self-open','t-self-closed','t-self-off','t-self-org','t-self-draft','t-winter-2027',db.tournaments[0].id];
+ const out=bridge({job:'guest',tournaments:list,today,ids,limit:20});
+ assert.deepEqual(out.upcoming,guestUpcoming(list,today,20));assert.deepEqual(out.tournaments,ids.map(id=>guestTournament(list,id,today)));
+ for(const x of out.upcoming.tournaments)assert.ok(!('selfEntry' in x),'never on the home list: '+x.id);
+ const [open,closed,off,org,draft,winter,staff]=out.tournaments;
+ assert.deepEqual(open.tournament,{id:'t-self-open',name:'Zapisy własne',date:'2026-11-20',city:'Opole',status:'open',selfEntry:true});
+ assert.deepEqual([closed.tournament.selfEntry,off.tournament.selfEntry,draft],[undefined,undefined,null],'closed, switched off, draft');
+ assert.deepEqual(org.tournament,{id:'t-self-org',name:'Społeczny z zapisami',date:'2026-11-23',city:'Opole',status:'open',community:true,trusted:false,selfEntry:true});
+ assert.equal(winter.tournament.selfEntry,true,'demo t-winter-2027 takes self-entries');
+ assert.deepEqual(Object.keys(staff.tournament).sort(),['city','date','id','name','status'],'a staff tournament without self-entries keeps five fields');
+});

@@ -8,15 +8,17 @@ header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store, private');header('X-Content-Type-Options: nosniff');
 // Public, unauthenticated, read-only GET routes for the login screen and the guest preview. They run before
 // Auth::start(): no session, cookie or CSRF token. GuestView (backend/src/GuestView.php) defines every field sent.
+// Which community tournaments count as trusted (the home list, the preview's badge) follows organizers.trustRequired of the
+// effective configuration (PLAN-REJESTRACJA-ROLE §17, §3.2): one query by key on the connection these routes open anyway.
 function respond_public(array $config,string $route):never{
  try{
   if(($_SERVER['REQUEST_METHOD']??'')!=='GET'){header('Allow: GET');throw new AppError('Niedozwolona metoda.',405);}
   $today=date('Y-m-d');// Europe/Warsaw, set by matdraw_config().
-  $repo=new Repository(matdraw_database($config));
-  if($route==='public')$out=GuestView::upcoming($repo->guestTournaments($today),$today);
+  $pdo=matdraw_database($config);$repo=new Repository($pdo);$flags=Settings::flags(Settings::effective($pdo,$config));
+  if($route==='public')$out=GuestView::upcoming($repo->guestTournaments($today,null,$flags),$today);
   else{
    $id=$_GET['id']??null;if(!is_string($id)||!preg_match('/^[A-Za-z0-9_-]{1,40}$/D',$id))throw new AppError('Turniej nie jest dostępny.',404);
-   $out=GuestView::tournament($repo->guestTournaments($today,$id),$id,$today);if(!$out)throw new AppError('Turniej nie jest dostępny.',404);
+   $out=GuestView::tournament($repo->guestTournaments($today,$id,$flags),$id,$today);if(!$out)throw new AppError('Turniej nie jest dostępny.',404);
   }
  }catch(Throwable $e){Routes::fail($e);}
  header('Cache-Control: public, max-age=60');Routes::respond($out);

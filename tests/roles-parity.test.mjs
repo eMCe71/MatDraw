@@ -262,12 +262,32 @@ test('commands with trustRequired=false and paused publishing: every organizer n
  const draft=[{...list[1],payload:{...list[1].payload,status:'draft'}}];assert.equal(runJs(db,draft,paused).results[0].status,200,'drafts are allowed');
 });
 
+/**
+ * organizerBlocked (F3: the Administrator's view of a community tournament whose creator's organizer role is blocked) is set by
+ * Domain::publicData; until dist/workspace.js mirrors it, it is compared only where the JS view has it and checked on its own.
+ */
+function blockedOnly(view,js,db,id){
+ const blocked=new Set(db.users.filter(u=>u.role==='member'&&u.organizerBlockedAt!=null).map(u=>u.id)),admin=id==='demo-admin';
+ const want=view.tournaments.filter(t=>admin&&t.community&&blocked.has(t.createdBy)).map(t=>t.id).sort();
+ assert.deepEqual(view.tournaments.filter(t=>t.organizerBlocked===true).map(t=>t.id).sort(),want,id+': organizerBlocked exactly on blocked organizers\' tournaments');
+ if(admin)assert.ok(blocked.size===0||want.length>0,'the data set has a tournament of a blocked organizer');
+ const mirrored=new Set(js.tournaments.filter(t=>'organizerBlocked' in t).map(t=>t.id));
+ return {...view,tournaments:view.tournaments.map(t=>{if(mirrored.has(t.id)||!('organizerBlocked' in t))return t;const {organizerBlocked,...rest}=t;return rest;})};
+}
 test('publicData equals publicWorkspace for every actor, before and after the commands, for both trust settings',{skip},()=>{
  const after=runJs(rich(),commands()).db;
  for(const [db,flags] of [[rich(),undefined],[after,undefined],[rich(),{organizers:'on',trustRequired:false}],[after,{organizers:'paused',trustRequired:false}]]){
   const views=bridge({job:'public',db,flags,actors:ACTORS}),state=flags?{...db,flags}:db;
-  ACTORS.forEach((id,i)=>assert.deepEqual(views[i],JSON.parse(JSON.stringify(publicWorkspace(state,state.users.find(u=>u.id===id)))),id+' '+JSON.stringify(flags)));
+  ACTORS.forEach((id,i)=>{const js=JSON.parse(JSON.stringify(publicWorkspace(state,state.users.find(u=>u.id===id))));assert.deepEqual(blockedOnly(views[i],js,state,id),js,id+' '+JSON.stringify(flags));});
  }
+});
+
+test('profile.save with a registration that is not an object: the same status in PHP and JS, never a server error',{skip},()=>{
+ const db=rich(),list=[],A={sex:'M',birthDate:'1995-04-04',weight:70,height:175,gradeType:'cup',grade:5,events:['forms']};
+ for(const actor of ['demo-admin','u-org1'])for(const registration of ['x',7,true,['a'],{},false,0,''])
+  list.push({actor,type:'profile.save',payload:{...A,name:'Rejestracja '+list.length,club:{none:true},registration}});
+ const js=runJs(db,list),ph=bridge({job:'execute',db,commands:list});compare(js,ph,list);
+ assert.deepEqual(STATUS(js.results),[404,404,404,404,404,200,200,200,404,404,404,404,404,200,200,200],'no tournament: 404 and nothing saved; a falsy value is no registration');
 });
 
 test('Domain::stale agrees with the JS table of scopes (§5.8)',{skip},()=>{

@@ -37,12 +37,15 @@ use PDO;
  *              or later, nearest first, at most 50; profiles are the non-archived own ones; blocked when the tournament is
  *              not trusted and the profile is not an adult 'self' on the tournament day (§7.1); drawn lets the entry
  *              window mark events whose category was already drawn (engine.js classify gives the category id).
+ *              $include (the route's ?t=<id>, a tournament the member came from: a guest preview, a shared link) is
+ *              always in the list when it qualifies, appended after the first OPEN_LIMIT (it is later than all of them).
  *  Never: other athletes beyond initials and club inside brackets, ids of other entries or profiles, e-mails, creators of
  *  staff tournaments, logs, mats, revisions.
- * build(pdo, u, today, flags) reads the same inputs with a few queries (own profiles; own entries, newest 100; open
- * tournaments, 50; all entries and draws only of tournaments with own entries that are recent or still open or closed;
- * tombstones; organizer names) in one read transaction. fromWorkspace(db, u, today, withdrawals, organizers) builds them
- * from a workspace (the demo and the equivalence test: build() equals fromWorkspace() of the full workspace).
+ * build(pdo, u, today, flags, include) reads the same inputs with a few queries (own profiles; own entries, newest 100; open
+ * tournaments, 50, plus $include when it qualifies; all entries and draws only of tournaments with own entries that are
+ * recent or still open or closed; tombstones; organizer names) in one read transaction. fromWorkspace(db, u, today,
+ * withdrawals, organizers, include) builds them from a workspace (the demo and the equivalence test: build() equals
+ * fromWorkspace() of the full workspace).
  */
 final class AthleteView {
  public const RECENT_DAYS=30,ENTRY_LIMIT=100,OPEN_LIMIT=50,WITHDRAWN_LIMIT=100;
@@ -73,7 +76,7 @@ final class AthleteView {
   return ['slot'=>$slot,'round'=>$last['round']+1,'match'=>$last['number'],'status'=>$status,'opponent'=>$opponent];
  }
  private static function byDate(array $a,array $b,bool $newest):int{return ($newest?strcmp((string)$b['date'],(string)$a['date']):strcmp((string)$a['date'],(string)$b['date']))?:strcmp((string)$a['id'],(string)$b['id']);}
- public static function project(array $profiles,array $tournaments,array $withdrawals,string $today,array $organizers):array {
+ public static function project(array $profiles,array $tournaments,array $withdrawals,string $today,array $organizers,?string $include=null):array {
   usort($profiles,fn($a,$b)=>strcmp((string)$a['id'],(string)$b['id']));$own=[];foreach($profiles as $a)$own[(string)$a['id']]=$a;
   $pending=[];$entered=[];
   foreach($tournaments as $t)foreach($t['entries']??[] as $e){$pid=(string)($e['profileId']??'');$entered[$t['id'].'/'.$pid]=true;if(isset($own[$pid])&&in_array($t['status']??null,['open','closed'],true))$pending[$pid]=true;}
@@ -104,8 +107,9 @@ final class AthleteView {
   usort($gone,fn($a,$b)=>(int)$b['at']<=>(int)$a['at']?:strcmp((string)$a['tournament']['id'],(string)$b['tournament']['id'])?:strcmp((string)$a['profileId'],(string)$b['profileId']));
   foreach(array_slice($gone,0,self::WITHDRAWN_LIMIT) as $w)$out['withdrawn'][]=['profileId'=>$w['profileId'],'tournament'=>['id'=>$w['tournament']['id'],'name'=>$w['tournament']['name'],'date'=>$w['tournament']['date']],'by'=>$w['by'],'at'=>(int)$w['at']];
   $open=array_values(array_filter($tournaments,fn($t)=>($t['status']??null)==='open'&&($t['selfEntry']??false)===true&&($t['hiddenBy']??null)===null&&is_string($t['date']??null)&&$t['date']>=$today));
-  usort($open,fn($a,$b)=>self::byDate($a,$b,false));
-  foreach(array_slice($open,0,self::OPEN_LIMIT) as $t){
+  usort($open,fn($a,$b)=>self::byDate($a,$b,false));$shown=array_slice($open,0,self::OPEN_LIMIT);
+  if($include!==null&&!in_array($include,array_column($shown,'id'),true))foreach($open as $t)if($t['id']===$include)$shown[]=$t;
+  foreach($shown as $t){
    $in=[];foreach($t['entries']??[] as $e)$in[(string)($e['profileId']??'')]=true;$keys=array_map('strval',array_keys(is_array($t['draws']??null)?$t['draws']:[]));sort($keys,SORT_STRING);
    $n=!empty($t['community'])?($organizers[$t['createdBy']??'']['n']??null):null;
    $out['open'][]=['id'=>$t['id'],'name'=>$t['name'],'city'=>$t['city'],'date'=>$t['date'],'community'=>!empty($t['community']),'trusted'=>!empty($t['trusted']),'organizer'=>is_string($n)&&$n!==''?['n'=>$n]:null,
@@ -114,7 +118,7 @@ final class AthleteView {
   return $out;
  }
  /** The inputs of project() from a workspace ($db with flags for trust, §17), for the demo mirror and the equivalence test. */
- public static function fromWorkspace(array $db,array $u,string $today,?array $withdrawals=null,array $organizers=[]):array {
+ public static function fromWorkspace(array $db,array $u,string $today,?array $withdrawals=null,array $organizers=[],?string $include=null):array {
   $clubs=$db['clubs'];$profiles=[];$tournaments=[];$byId=[];
   foreach($db['profiles'] as $a){if(($a['ownerId']??null)===null||$a['ownerId']!==$u['id'])continue;$c=Clubs::resolve($clubs,$a['clubId']??null);$a['clubRow']=$c===null?null:['id'=>$c['id'],'name'=>$c['name'],'verified'=>($c['verified']??true)!==false];$profiles[]=$a;}
   foreach($db['tournaments'] as $t){
@@ -123,13 +127,16 @@ final class AthleteView {
     'entries'=>array_map(fn($e)=>array_replace($e,['currentClub'=>self::currentClub($clubs,$e['clubId']??null)]),$t['entries']),'draws'=>$t['draws']];
   }
   $gone=[];foreach($withdrawals??($db['withdrawals']??[]) as $w){$t=$byId[$w['tournamentId']??'']??null;if($t)$gone[]=['profileId'=>$w['profileId'],'tournament'=>['id'=>$t['id'],'name'=>$t['name'],'date'=>$t['date']],'by'=>$w['by'],'at'=>(int)$w['at']];}
-  return self::project($profiles,$tournaments,$gone,$today,$organizers);
+  return self::project($profiles,$tournaments,$gone,$today,$organizers,$include);
  }
  private static function in(array $values):string{return implode(',',array_fill(0,count($values),'?'));}
  /** Current club of a row joined as c (the club) and m (its merge target): {id, name, verified} with the raw name. */
  private static function joined(array $r,?string $fallback):array{return $r['mid']!==null?['id'=>$r['mid'],'name'=>$r['mname'],'verified'=>(int)$r['mver']===1]:['id'=>$r['cid']??$fallback,'name'=>$r['cname'],'verified'=>$r['cver']!==null&&(int)$r['cver']===1];}
- /** AthleteView of member $u from the database (no workspace, no lock); $flags: Settings::flags of the effective config (trustRequired). */
- public static function build(PDO $pdo,array $u,string $today,array $flags=[]):array {
+ /**
+  * AthleteView of member $u from the database (no workspace, no lock); $flags: Settings::flags of the effective config
+  * (trustRequired); $include: a tournament id that the open list must hold when it qualifies (the route's ?t=, F1).
+  */
+ public static function build(PDO $pdo,array $u,string $today,array $flags=[],?string $include=null):array {
   $any=($flags['trustRequired']??true)===false;$recent=self::recentFrom($today);
   $decode=static fn(string $v):array=>json_decode($v,true,512,JSON_THROW_ON_ERROR);
   $club=' LEFT JOIN clubs c ON c.id=%s LEFT JOIN clubs m ON m.id=c.merged_into';$cols='c.id cid,c.name cname,c.verified cver,m.id mid,m.name mname,m.verified mver';
@@ -140,6 +147,8 @@ final class AthleteView {
    $ids=array_column($profiles,'id');$mine=[];
    if($ids){$q=$pdo->prepare('SELECT e.tournament_id FROM entries e JOIN tournaments t ON t.id=e.tournament_id WHERE e.profile_id IN ('.self::in($ids).') ORDER BY t.event_date DESC,t.id,e.profile_id LIMIT '.self::ENTRY_LIMIT);$q->execute($ids);$mine=array_values(array_unique($q->fetchAll(PDO::FETCH_COLUMN)));}
    $q=$pdo->prepare("SELECT id FROM tournaments WHERE status='open' AND self_entry=1 AND hidden_by IS NULL AND event_date>=? ORDER BY event_date,id LIMIT ".self::OPEN_LIMIT);$q->execute([$today]);$open=$q->fetchAll(PDO::FETCH_COLUMN);
+   // The tournament the member came from is never cut off by OPEN_LIMIT (the same conditions, one query by key).
+   if($include!==null&&!in_array($include,$open,true)){$q=$pdo->prepare("SELECT id FROM tournaments WHERE id=? AND status='open' AND self_entry=1 AND hidden_by IS NULL AND event_date>=?");$q->execute([$include,$today]);if(($x=$q->fetchColumn())!==false)$open[]=$x;}
    $all=array_values(array_unique([...$mine,...$open]));$tournaments=[];$full=[];$part=[];$creators=[];
    if($all){
     $q=$pdo->prepare('SELECT t.id,t.name,t.city,t.event_date,t.status,t.self_entry,t.hidden_by,t.created_by,u.role,u.organizer_trusted_at,u.organizer_blocked_at FROM tournaments t LEFT JOIN users u ON u.id=t.created_by WHERE t.id IN ('.self::in($all).')');$q->execute($all);
@@ -168,6 +177,6 @@ final class AthleteView {
    $pdo->commit();
   }catch(\Throwable $e){$pdo->rollBack();throw $e;}
   $organizers=[];foreach(People::project($pdo,$creators) as $id=>$p)if(isset($p['n']))$organizers[$id]=['n'=>$p['n']];
-  return self::project($profiles,array_values($tournaments),$gone,$today,$organizers);
+  return self::project($profiles,array_values($tournaments),$gone,$today,$organizers,$include);
  }
 }

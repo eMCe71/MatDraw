@@ -130,7 +130,11 @@ test('member commands through Repository::transaction with the actor; organizerS
  // Staff: the Admin sees the community tournament, an editor does not while the organizer is unconfirmed.
  await admin.load();assert.equal(admin.data.tournaments.find(x=>x.id===t).community,true);assert.ok(!JSON.stringify(admin.data.users).includes(org.email));
  const pub=async q=>{const r=await fetch(base+'?'+q);return {status:r.status,data:await r.json()};};
- const view=await pub('route=public-tournament&id='+t);assert.equal(view.status,200);assert.deepEqual([view.data.tournament.community,view.data.tournament.trusted],[true,false]);
+ // The guest routes follow trustRequired of the effective configuration (§17): with confirmation required, an unconfirmed organizer is not trusted.
+ const strict=fixture('roles-settings',{trustRequired:true});let view;
+ try{view=await pub('route=public-tournament&id='+t);assert.equal(view.status,200);assert.deepEqual([view.data.tournament.community,view.data.tournament.trusted],[true,!strict.flags.trustRequired]);}
+ finally{fixture('roles-settings-restore',{old:strict.old});if(strict.old.row===null)fixture('settings-reset');}
+ assert.equal((await pub('route=public-tournament&id='+t)).data.tournament.trusted,!fixture('roles-flags').trustRequired,'without confirmation required every organizer not blocked is trusted');
  const slotClubs=view.data.categories.flatMap(c=>c.bracket?.slots||[]).filter(Boolean);assert.deepEqual(slotClubs,[],'no bracket yet');
  assert.equal(view.data.summary.clubs,1,'unaffiliated is not a club; the unverified club is');
  fixture('domain-organizer',{userId:org.id,trusted:true});const trusted=await pub('route=public-tournament&id='+t);assert.equal(trusted.data.tournament.trusted,true);
