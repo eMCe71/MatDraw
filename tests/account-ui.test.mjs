@@ -832,9 +832,12 @@ test('PHP build in a browser: sign-up with the roles, the athlete step, landing 
     assert.equal(await page.locator('.acct-return [data-acct-act="to-chat"]').count(),1,'the chat stays the second choice');
     assert.equal(JSON.parse(await page.evaluate(()=>sessionStorage.getItem('matdraw.signup.target'))||'null')?.t,tour,'the target survives the Checkout');
     await noOverflow(page,'return '+w);
+    // The entry window is asked for with enter=1 (the tournament takes self-entries, so the window opens and consumes the flag).
+    const visited=[],seen=f=>{if(f===page.mainFrame())visited.push(f.url());};page.on('framenavigated',seen);
     await page.click('[data-acct-act="to-landing"]');
     await page.waitForFunction(t=>location.hash.startsWith('#guest?t='+t),tour,{timeout:20000});
-    assert.equal(new URLSearchParams(await page.evaluate(()=>location.hash.split('?')[1])).get('enter'),'1','the entry window is asked for');
+    await page.waitForSelector('#ath-entry-form',{timeout:20000});page.off('framenavigated',seen);
+    assert.ok(visited.some(u=>u.includes('#guest?t='+tour+'&enter=1')),'the entry window is asked for: '+visited.join(' '));
     assert.equal(await page.evaluate(()=>sessionStorage.getItem('matdraw.signup.target')),null,'the target is used once');
     // F6: the paid member's preview opens the entry window once (enter=1 consumed) over the athlete's call to action.
     await page.waitForSelector('#ath-entry-form',{timeout:20000});
