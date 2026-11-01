@@ -62,6 +62,10 @@ export default {
  'Usuń dane zawodnika':'Delete athlete data',
  'Usunąć dane zawodnika?':'Delete the athlete’s data?',
  'Usuniesz dane: {name}. Zgłoszenia do turniejów, które jeszcze się nie odbyły, zostaną wycofane, a w pozostałych zostaną tylko inicjały. Tej operacji nie można cofnąć.':'You are deleting the data of {name}. Entries in tournaments that have not taken place yet are withdrawn; the others keep only the initials. This cannot be undone.',
+ 'Usuniesz dane zawodnika {name} z konta, do którego należą. Konto zostaje, ale jego profil zawodnika zniknie. Zgłoszenia do turniejów, które jeszcze się nie odbyły, zostaną wycofane, a w zachowanych wynikach zostaną tylko inicjały. Tej operacji nie można cofnąć.':'You are erasing the athlete data of {name} from the account they belong to. The account stays, but its athlete profile goes. Entries in tournaments that have not taken place yet are withdrawn, and kept results show initials only. This cannot be undone.',
+ 'W zachowanych wynikach tego rekordu zostaną tylko inicjały, a rekord zniknie, jeśli nie ma już wyników. Tej operacji nie można cofnąć.':'The kept results of this record will show initials only, and the record goes once it has no results left. This cannot be undone.',
+ 'Dane usunięte na prośbę lub z kontem; zostały tylko zachowane wyniki.':'Data erased on request or with the account; only kept results remain.',
+ 'Dane tego zawodnika zostały usunięte. Zostały tylko wyniki zachowane w turniejach:':'This athlete’s data were erased. Only the results kept in these tournaments remain:',
  'Dane zawodnika usunięte.':'Athlete data deleted.',
  'Klub zapiszemy po sprawdzeniu przez Administratora. Do tego czasu zawodnik jest „Niezrzeszony”.':'We will save the club once the Administrator has checked it. Until then the athlete is “Unaffiliated”.',
  // Entries and check-in.

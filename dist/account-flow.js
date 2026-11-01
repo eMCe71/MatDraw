@@ -489,7 +489,7 @@ function securityView(m){
 <form id="acct-password-form" class="acct-form acct-block" novalidate><h2>${T('Zmień hasło')}</h2><label class="field-label">${must?T('Hasło tymczasowe'):T('Obecne hasło')}<input name="currentPassword" type="password" required autocomplete="current-password"></label>${passwordField({name:'password',id:'acct-new-pw',label:T('Nowe hasło'),autocomplete:'new-password',meter:true})}<p class="acct-hint">${T('Pozostałe sesje zostaną wylogowane.')}</p><div class="form-error" role="alert"></div><div class="acct-actions"><button type="submit" class="btn primary">${T('Zmień hasło')}</button></div></form>
 ${member&&!must?h`<form id="acct-email-form" class="acct-form acct-block" novalidate><h2>${T('Adres e-mail')}</h2><p class="acct-lead">${T('Obecny adres:')} <strong>${m.user?.email||''}</strong></p><label class="field-label">${T('Nowy adres e-mail')}<input name="email" type="email" inputmode="email" autocomplete="email" autocapitalize="none" spellcheck="false" required maxlength="254"></label><label class="field-label">${T('Obecne hasło')}<input name="currentPassword" type="password" required autocomplete="current-password"></label><p class="acct-hint">${T('Po zmianie adresu inne urządzenia zostaną wylogowane.')}</p><div class="form-error" role="alert"></div><div class="acct-actions"><button type="submit" class="btn secondary">${T('Zapisz adres e-mail')}</button></div></form>`:''}
 ${standalone||install?h`<section class="acct-block acct-install"><h2>${T('Aplikacja MatBravo')}</h2>${standalone?h`<p class="acct-lead">${icon('check')} ${T('MatBravo działa na tym urządzeniu jako aplikacja.')}</p>`:h`<p class="acct-lead">${T('Drabinki i czat jednym stuknięciem, z ekranu głównego.')}</p><div class="acct-actions"><button type="button" class="btn secondary" data-acct-act="install">${icon('download')} ${T('Zainstaluj aplikację')}</button></div>`}</section>`:''}
-${member&&!must?h`<section class="acct-block acct-danger"><h2>${T('Usuń konto')}</h2><p class="acct-lead">${T('Usunięcie jest nieodwracalne. Profil i zdjęcie znikną, a Twoje wiadomości zostaną zastąpione informacją o usunięciu. Trwająca subskrypcja zakończy się od razu.')}</p><div class="acct-actions"><button type="button" class="btn acct-danger-btn" data-acct-act="delete-open">${T('Usuń konto…')}</button></div></section>`:''}`;
+${member&&!must?h`<section class="acct-block acct-danger"><h2>${T('Usuń konto')}</h2><p class="acct-lead">${T('Usunięcie jest nieodwracalne. Profil i zdjęcie znikną, a Twoje wiadomości zostaną zastąpione informacją o usunięciu. Trwająca subskrypcja zakończy się od razu.')}</p>${rolesState(m).athletes.length?h`<p class="acct-hint acct-delete-athlete">${icon('info')} ${KEPT_NAME()} ${T('W oknie usuwania konta możesz zostawić w nich tylko inicjały.')}</p>`:''}<div class="acct-actions"><button type="button" class="btn acct-danger-btn" data-acct-act="delete-open">${T('Usuń konto…')}</button></div></section>`:''}`;
 }
 function profileView(m){
  const tab=tabOf(m),p=m.profile||{},f=S.draft,must=!!p.mustChangePassword,src=avatarSrc(p,64),name=[p.firstName,p.lastName].filter(Boolean).join(' ');
@@ -608,15 +608,35 @@ async function saveEmail(form){
  await Client.request('member-email',{method:'POST',body:{currentPassword:el.currentPassword.value,email}});
  await loadMe({force:true});form.removeAttribute('data-dirty');repaint();ui()?.toast?.(T('Zapisano nowy adres e-mail. Inne urządzenia zostały wylogowane.'));
 }
+// Owner decision O7: deleting the account keeps the athlete's full name in kept results; the dialog says so and offers (ticked) to erase
+// the athlete data first with the same password (athlete-forget: initials in kept results), final review F2.
+const KEPT_NAME=()=>T('Wyniki zawodnika z zakończonych turniejów i kategorii po losowaniu zostaną z imieniem i nazwiskiem, widocznym dla organizatora i Administratora.');
+/** The athlete part of the delete dialog for the account's athlete profiles (none: nothing). */
+export function deleteAthleteView(athletes,{forgotten=false}={}){
+ if(!athletes?.length)return h``;
+ if(forgotten)return h`<p class="notice acct-delete-athlete">${T('Dane zawodnika są już usunięte, w zachowanych wynikach zostały inicjały.')}</p>`;
+ return h`<div class="acct-delete-athlete"><p class="acct-hint">${KEPT_NAME()}</p><label class="checkbox-label"><input type="checkbox" name="athleteInitials" checked> <span>${T('Zostaw w zachowanych wynikach tylko inicjały zawodnika')}</span></label></div>`;
+}
 function openDelete(){
- S.del={password:'',confirmEnd:false};
- ui().modal(T('Usunąć konto?'),h`<form id="acct-delete-form" novalidate><p class="modal-lead">${T('Tej operacji nie można cofnąć. Wpisz hasło, aby potwierdzić.')}</p><label class="field-label acct-del-pw">${T('Hasło')}<input name="password" type="password" required autocomplete="current-password"></label><div class="notice acct-delete-end" hidden></div><div class="form-error" role="alert"></div></form>`,h`${ui().button(T('Anuluj'),'close-modal')}<button type="submit" class="btn acct-danger-btn" form="acct-delete-form">${T('Usuń konto')}</button>`);
+ S.del={password:'',confirmEnd:false,forgotten:false};
+ ui().modal(T('Usunąć konto?'),h`<form id="acct-delete-form" novalidate><p class="modal-lead">${T('Tej operacji nie można cofnąć. Wpisz hasło, aby potwierdzić.')}</p><label class="field-label acct-del-pw">${T('Hasło')}<input name="password" type="password" required autocomplete="current-password"></label><div data-acct-delete-athlete>${deleteAthleteView(rolesState(getMe()).athletes)}</div><div class="notice acct-delete-end" hidden></div><div class="form-error" role="alert"></div></form>`,h`${ui().button(T('Anuluj'),'close-modal')}<button type="submit" class="btn acct-danger-btn" form="acct-delete-form">${T('Usuń konto')}</button>`);
 }
 async function deleteAccount(form){
- const d=S.del||(S.del={password:'',confirmEnd:false}),field=form.elements.password,password=field.value||d.password;
+ const d=S.del||(S.del={password:'',confirmEnd:false,forgotten:false}),field=form.elements.password,password=field.value||d.password;
  if(!password)throw new Error('Nieprawidłowe obecne hasło.');
+ // The athlete data first (the box ticked): a refusal here changes nothing; once erased, the account deletion is retried alone.
+ if(form.elements.athleteInitials?.checked&&!d.forgotten){
+  for(const a of rolesState(getMe()).athletes)await athleteApi('athlete-forget',{profileId:a.profileId,password});
+  d.forgotten=true;d.password=password;
+  const part=form.querySelector('[data-acct-delete-athlete]');if(part)setHtml(part,deleteAthleteView([{}],{forgotten:true}));
+ }
  try{await Client.request('account-delete',{method:'POST',body:d.confirmEnd?{password,endSubscription:true}:{password}});}
  catch(error){
+  if(d.forgotten&&!(error?.status===409&&error.data?.confirmEnd)){
+   loadMe({force:true});
+   const box=form.querySelector('.form-error');if(box)box.textContent=T('Dane zawodnika są już usunięte, w zachowanych wynikach zostały inicjały. Konta nie usunięto: {error}',{error:message(error)});
+   return;
+  }
   if(error?.status===409&&error.data?.confirmEnd){
    d.password=password;d.confirmEnd=true;const box=form.querySelector('.acct-delete-end');box.hidden=false;box.setAttribute('role','alert');
    setHtml(box,h`${icon('alert')}<p><strong>${message(error)}</strong> ${T('Potwierdź jeszcze raz, aby usunąć konto i zakończyć subskrypcję.')}</p>`);

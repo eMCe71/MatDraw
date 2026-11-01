@@ -67,6 +67,8 @@ export default {
  'Skopiowano.':'Copied.',
  'Nie udało się skopiować. Zaznacz tekst ręcznie.':'Could not copy. Select the text by hand.',
  'Konto: {email}':'Account: {email}',
+ 'Usuń dane zawodnika: {name}':'Delete athlete data: {name}',
+ 'Konto ma profil zawodnika ({names}). Wyniki z zakończonych turniejów i kategorii po losowaniu zostaną z imieniem i nazwiskiem, widocznym dla organizatora i Administratora.':'The account has an athlete profile ({names}). Results from finished tournaments and from categories already drawn keep the full name, visible to the organizer and the Administrator.',
  'Imię':'First name',
  'Nazwisko':'Last name',
  'Nazwa użytkownika':'Username',

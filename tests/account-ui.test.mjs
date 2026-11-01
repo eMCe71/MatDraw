@@ -448,6 +448,17 @@ test('"Role" tab states: organizer on, off and blocked (with the support address
  assert.match(src,/athleteApi\('athlete-save',\{\.\.\.\(st\.f\.id\?\{id:st\.f\.id\}:\{\}\),\.\.\.athleteBody\(st\.f\)\}\)/);
  for(const lang of ['pl','en'])inLanguage(lang,()=>{for(const me of [memberMe(),memberMe({organizer:true,athlete:true},[ZOSIA]),memberMe({organizerBlocked:true},[{...ZOSIA,archived:true}])])assert.doesNotMatch(view(me),lang==='en'?/[ąćęłńśźż]/:/\[object|undefined/,lang);});
 });
+test('final review F2: the account deletion warns about the kept athlete name and offers the initials (ticked) only with an athlete profile',()=>{
+ assert.equal(String(flow.deleteAthleteView([])),'','no athlete profile: nothing');
+ const html=String(flow.deleteAthleteView([ZOSIA]));
+ assert.match(html,/zostaną z imieniem i nazwiskiem, widocznym dla organizatora i Administratora\./);
+ assert.match(html,/<input type="checkbox" name="athleteInitials" checked> <span>Zostaw w zachowanych wynikach tylko inicjały zawodnika<\/span>/);
+ assert.match(String(flow.deleteAthleteView([ZOSIA],{forgotten:true})),/Dane zawodnika są już usunięte, w zachowanych wynikach zostały inicjały\./);
+ assert.doesNotMatch(String(flow.deleteAthleteView([ZOSIA],{forgotten:true})),/athleteInitials/);
+ const src=source('account-flow.js');
+ assert.ok(src.indexOf("athleteApi('athlete-forget',{profileId:a.profileId,password})")<src.indexOf("Client.request('account-delete'"),'the athlete data first, with the same password');
+ inLanguage('en',()=>assert.match(String(flow.deleteAthleteView([ZOSIA])),/Leave only the athlete’s initials in kept results/));
+});
 test('roles closed (me.features.rolesOpen false, contract (a)): no Role tab without a role; with a role nothing new can be turned on',async()=>{
  const closed=(caps,athletes=[],features={rolesOpen:false,signupMode:'off'})=>({...memberMe(caps,athletes),features});
  const {rolesOpen}=await import('../dist/me.js');
@@ -504,10 +515,86 @@ const serve=()=>new Promise(resolve=>{
   catch{res.writeHead(404);res.end();}
  }).listen(0,'127.0.0.1',()=>resolve({server,url:'http://127.0.0.1:'+server.address().port+'/'}));
 });
+/** Static server of dist/ in the API mode: api(route,method,body) -> [status,json] answers /api/index.php (the PHP build stand-in). */
+const serveApi=api=>new Promise(resolve=>{
+ const server=http.createServer(async(req,res)=>{
+  const u=new URL(req.url,'http://x');let p=decodeURIComponent(u.pathname);if(p.endsWith('/'))p+='index.html';
+  if(p==='/api/index.php'){let body='';for await(const c of req)body+=c;const [status,out]=api(u.searchParams.get('route'),req.method,body?JSON.parse(body):null);res.writeHead(status,{'Content-Type':'application/json'});res.end(JSON.stringify(out));return;}
+  if(p==='/runtime-config.js'){res.writeHead(200,{'Content-Type':TYPES['.js'],'Content-Security-Policy':CSP});res.end("export const CONFIG={mode:'api',apiBase:'./api/index.php'};");return;}
+  if(p==='/sw.js'){res.writeHead(404);res.end();return;}
+  try{const body=await readFile(join(root,normalize(p).replace(/^(\.\.[\/\\])+/,'')));res.writeHead(200,{'Content-Type':TYPES[extname(p)]||'application/octet-stream','Content-Security-Policy':CSP});res.end(body);}
+  catch{res.writeHead(404);res.end();}
+ }).listen(0,'127.0.0.1',()=>resolve({server,url:'http://127.0.0.1:'+server.address().port+'/'}));
+});
+/** A member of the API stub: me with caps, athletes and features (rolesOpen and signupMode as given). */
+const stubMember=({caps={},athletes=[],features={}}={})=>{
+ const c={organizer:false,organizerBlocked:false,organizerTrusted:false,athlete:false,...caps},user={id:'u-m',clubId:null,email:'m@example.test',role:'member',active:true,caps:c};
+ const me={user,profile:{publicId:'Member000001',username:'marta.k',firstName:'Marta',lastName:'Kowalska',sports:['taekwondo'],country:'PL',complete:true,showClub:false,nameDisplay:'initial',avatar:null,usernameChangeAt:null,mustChangePassword:false},
+  access:{full:true,state:'free',until:null,canPost:true,block:null,mutedUntil:null},billing:{enabled:false},features:{signup:false,avatars:'off',chat:true,signupMode:'off',selfEntry:true,...features},athletes};
+ return {user,me,ws:{schemaVersion:2,revision:3,user,clubs:[],users:[],profiles:[],tournaments:[]}};
+};
 const watch=(page,errors)=>{page.on('pageerror',e=>errors.push(e.message));page.on('console',m=>{if(m.type()==='error'&&!/status of 40[0-9]/.test(m.text()))errors.push(m.text());});};
 const shot=async(page,name)=>{if(!SHOTS)return;mkdirSync(SHOTS,{recursive:true});await page.screenshot({path:join(SHOTS,name+'.png'),fullPage:true});};
 const noOverflow=async(page,what)=>assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth-document.documentElement.clientWidth),0,'horizontal overflow: '+what);
 
+test('API stub in a browser: roles closed (rolesOpen false) and the account deletion with the athlete initials (final review F2), 390 and 1440 px',{skip:!BROWSER&&'MATDRAW_BROWSER_TESTS=1 and Playwright needed',timeout:180000},async()=>{
+ const ZOSIA={profileId:'p1',name:'Zosia Kowalska',relation:'guardian',archived:false};
+ let member=stubMember(),sent=[],deleteReplies=[];
+ const api=(route,method,body)=>{
+  if(route==='session')return [200,{user:member.user,csrf:'c1'}];
+  if(route==='bootstrap')return [200,member.ws];
+  if(route==='me')return [200,member.me];
+  if(route==='public-config')return [200,{signup:false,signupMode:'off',billing:false,amounts:{pln:899,usd:299},avatars:false,support:'hello@matbravo.com',roles:true,rolesOpen:false}];
+  if(route==='athlete-forget'){sent.push([route,body]);return body.password==='Dobre-Haslo-2026'?[200,{ok:true,caps:{...member.user.caps,athlete:false}}]:[403,{error:'Nieprawidłowe obecne hasło.'}];}
+  if(route==='account-delete'){sent.push([route,body]);return deleteReplies.shift()||[200,{ok:true}];}
+  if(route==='logout')return [200,{ok:true}];
+  return [404,{error:'Nie ma takiej operacji.'}];
+ };
+ const {server,url}=await serveApi(api),browser=await chromium.launch().catch(e=>{server.close();throw e;}),errors=[];
+ try{
+  for(const [w,hh] of [[390,844],[1440,900]]){
+   const ctx=await browser.newContext({viewport:{width:w,height:hh},locale:'pl-PL',serviceWorkers:'block'}),page=await ctx.newPage();watch(page,errors);
+   // Contract (a): a member without a role, roles closed: no Role tab, the address falls back to the profile tab.
+   member=stubMember({features:{rolesOpen:false}});
+   await page.goto(url+'#profile?tab=roles');await page.waitForSelector('.acct-tabs');
+   assert.equal(await page.locator('#acct-tab-roles').count(),0,'no Role tab without a role');assert.equal(await page.getAttribute('#acct-tab-profile','aria-selected'),'true');
+   // A member with an athlete profile: the tab stays; the organizer role cannot be turned on, with the reason.
+   member=stubMember({caps:{athlete:true},athletes:[ZOSIA],features:{rolesOpen:false}});
+   await page.goto(url+'#profile?tab=roles');await page.reload();await page.waitForSelector('.acct-role [data-acct-act="organizer-toggle"]');
+   assert.equal(await page.isDisabled('[data-acct-act="organizer-toggle"]'),true);
+   assert.match(await page.locator('#acct-roles-closed-org').innerText(),/Role są dostępne po otwarciu rejestracji\./);
+   assert.match((await page.locator('.acct-role [data-acct-act="organizer-toggle"]').ariaSnapshot()),/Role są dostępne po otwarciu rejestracji|Włącz rolę organizatora/);
+   await noOverflow(page,'roles closed '+w);await shot(page,'roles-closed-'+w);
+   // F2: the delete section and dialog warn about the kept name and offer the initials (ticked).
+   await page.goto(url+'#profile?tab=security');await page.waitForSelector('.acct-danger');
+   assert.match(await page.locator('.acct-danger').innerText(),/zostaną z imieniem i nazwiskiem, widocznym dla organizatora i Administratora/);
+   await page.click('[data-acct-act="delete-open"]');await page.waitForSelector('#acct-delete-form');
+   assert.equal(await page.isChecked('#acct-delete-form [name="athleteInitials"]'),true,'the initials box is ticked by default');
+   await noOverflow(page,'delete dialog '+w);await shot(page,'delete-athlete-'+w);
+   // A wrong password: athlete-forget refuses, nothing is deleted.
+   sent=[];await page.fill('#acct-delete-form [name="password"]','Zle-Haslo-0000');await page.click('#modal-root button[form="acct-delete-form"]');
+   await page.waitForFunction(()=>/\S/.test(document.querySelector('#acct-delete-form .form-error')?.textContent||''));
+   assert.deepEqual(sent.map(([r])=>r),['athlete-forget'],'no account-delete after a refused athlete-forget');
+   // The athlete data go first; a refused deletion (429) says they are already erased; the next try sends only account-delete.
+   sent=[];deleteReplies=[[429,{error:'Za dużo prób. Spróbuj ponownie później.'}]];
+   await page.fill('#acct-delete-form [name="password"]','Dobre-Haslo-2026');await page.click('#modal-root button[form="acct-delete-form"]');
+   await page.waitForFunction(()=>/Konta nie usunięto/.test(document.querySelector('#acct-delete-form .form-error')?.textContent||''));
+   assert.deepEqual(sent,[['athlete-forget',{profileId:'p1',password:'Dobre-Haslo-2026'}],['account-delete',{password:'Dobre-Haslo-2026'}]]);
+   assert.match(await page.locator('#acct-delete-form').innerText(),/Dane zawodnika są już usunięte, w zachowanych wynikach zostały inicjały\./);
+   assert.equal(await page.locator('#acct-delete-form [name="athleteInitials"]').count(),0);
+   sent=[];await page.click('#modal-root button[form="acct-delete-form"]');await page.waitForFunction(()=>!document.querySelector('#acct-delete-form'),null,{timeout:10000});
+   assert.deepEqual(sent.map(([r])=>r),['account-delete'],'the athlete data are not erased twice');
+   // Without an athlete profile: no warning and no box.
+   member=stubMember({features:{rolesOpen:true}});
+   await page.goto(url+'#profile?tab=security');await page.reload();await page.waitForSelector('.acct-danger');
+   assert.doesNotMatch(await page.locator('.acct-danger').innerText(),/imieniem i nazwiskiem/);
+   await page.click('[data-acct-act="delete-open"]');await page.waitForSelector('#acct-delete-form');
+   assert.equal(await page.locator('#acct-delete-form [name="athleteInitials"]').count(),0,'no initials box without an athlete profile');
+   await ctx.close();
+  }
+  assert.deepEqual(errors.filter(e=>!/status of 4\d\d/.test(e)),[]);
+ }finally{await browser.close();server.close();}
+});
 test('demo in a browser: sign-up shows the demo message, the profile saves to localStorage and keeps a draft across a language switch',{skip:!BROWSER&&'MATDRAW_BROWSER_TESTS=1 and Playwright needed',timeout:120000},async()=>{
  // The server is closed also when Chromium cannot start, so no open handle keeps the test process alive.
  const {server,url}=await serve(),browser=await chromium.launch().catch(e=>{server.close();throw e;}),errors=[];

@@ -192,15 +192,20 @@ export function organizerActions(m){
  return [c.organizerTrusted||m?.trusted?'untrust':'trust','block'];
 }
 const ORG_LABEL={trust:()=>T('Potwierdź organizatora'),untrust:()=>T('Cofnij potwierdzenie'),block:()=>T('Odbierz rolę organizatora'),unblock:()=>T('Przywróć rolę organizatora')};
-/** One member row. Every API value is escaped by h. selected: the row's checkbox for the bulk action. */
-export function memberRow(m,{selected=false}={}){
+/** The athlete profiles of member id in the Administrator's workspace (records already erased do not count). */
+export function ownedProfiles(id,ws=registry.use('ui')?.getWorkspace?.()){
+ return (Array.isArray(ws?.profiles)?ws.profiles:[]).filter(p=>p&&p.ownerId===id&&typeof p.id==='string'&&p.name!=='Dane usuni\u0119te');
+}
+/** One member row. Every API value is escaped by h. selected: the row's checkbox for the bulk action; profiles: the member's athlete
+ * profiles, each with its erase button (app.js forget-profile: the account stays, kept results get initials, final review F1). */
+export function memberRow(m,{selected=false,profiles=[]}={}){
  const b=planBadge(m.billing,'member'),muted=m.muted,n=Number(m.tournaments)||0,meta=[countryName(m.country),m.createdAt?T('Konto od {date}',{date:fmtSec(m.createdAt)}):'',m.lastLoginAt?T('Ostatnie logowanie: {date}',{date:fmtSec(m.lastLoginAt)}):T('Brak logowań'),n?T('Turnieje: {n}',{n}):''].filter(Boolean).join(' · ');
  return h`<li class="mem-row${m.active?'':' is-off'}${selected?' is-selected':''}" data-mem-id="${m.id}">
   <label class="mem-pick"><input type="checkbox" data-mem-select="${m.id}"${selected?' checked':''}><span class="sr-only">${T('Zaznacz: {name}',{name:m.name||m.email||''})}</span></label>
   <div class="mem-who"><strong class="mem-name">${m.name||T('Profil nieuzupełniony')}</strong>${m.username?h`<span class="mem-user">@${m.username}</span>`:''}<span class="mem-email">${m.email}</span></div>
   <div class="mem-plan">${badgeHtml(b)}${m.active?'':h`<span class="badge warning">${T('Zablokowane')}</span>`}${roleBadges(m).map(badgeHtml)}${muted?h`<a class="badge warning mem-muted" href="#moderation" data-page="moderation">${m.mutedUntil?T('Wyciszony do {date}',{date:fmtSec(m.mutedUntil)}):T('Wyciszony')} · ${T('Moderacja')}</a>`:''}</div>
   <div class="mem-meta">${meta}</div>
-  <div class="mem-actions">${btn(T('Plan'),'plan','small-btn',{'data-mem-id':m.id})}${btn(T('Hasło'),'password','small-btn',{'data-mem-id':m.id})}${btn(T('E-mail'),'email','small-btn',{'data-mem-id':m.id})}${btn(T('Profil'),'profile','small-btn',{'data-mem-id':m.id})}${organizerActions(m).map(a=>btn(ORG_LABEL[a](),'org-'+a,'small-btn',{'data-mem-id':m.id}))}${btn(m.active?T('Zablokuj'):T('Odblokuj'),'active','small-btn',{'data-mem-id':m.id})}${btn(T('Usuń'),'delete','small-btn danger-text',{'data-mem-id':m.id})}</div>
+  <div class="mem-actions">${btn(T('Plan'),'plan','small-btn',{'data-mem-id':m.id})}${btn(T('Hasło'),'password','small-btn',{'data-mem-id':m.id})}${btn(T('E-mail'),'email','small-btn',{'data-mem-id':m.id})}${btn(T('Profil'),'profile','small-btn',{'data-mem-id':m.id})}${organizerActions(m).map(a=>btn(ORG_LABEL[a](),'org-'+a,'small-btn',{'data-mem-id':m.id}))}${btn(m.active?T('Zablokuj'):T('Odblokuj'),'active','small-btn',{'data-mem-id':m.id})}${profiles.map(p=>h`<button type="button" class="btn small-btn danger-text" data-action="forget-profile" data-id="${p.id}" aria-label="${T('Usuń dane zawodnika: {name}',{name:p.name})}">${T('Usuń dane zawodnika')}</button>`)}${btn(T('Usuń'),'delete','small-btn danger-text',{'data-mem-id':m.id})}</div>
  </li>`;
 }
 /** The bar of the bulk action over the list (shown with at least one selected row). */
@@ -220,7 +225,7 @@ export function resultsView(st){
  if(!st.data)return h`<p class="muted mem-state" role="status">${T('Wczytuję członków…')}</p>`;
  const {items=[],total=0,page=1}=st.data,pages=Math.max(1,Math.ceil(total/PAGE_SIZE));
  if(!items.length)return h`<div class="mem-state mem-empty"><p><strong>${T('Brak członków spełniających kryteria.')}</strong></p><p class="muted small">${T('Zmień filtr albo frazę wyszukiwania.')}</p></div>`;
- return h`<p class="mem-count muted small" role="status">${T('Znaleziono: {n}',{n:total})}</p>${bulkBar(picked.size)}<ul class="mem-list">${items.map(m=>memberRow(m,{selected:picked.has(m.id)}))}</ul>
+ return h`<p class="mem-count muted small" role="status">${T('Znaleziono: {n}',{n:total})}</p>${bulkBar(picked.size)}<ul class="mem-list">${items.map(m=>memberRow(m,{selected:picked.has(m.id),profiles:ownedProfiles(m.id)}))}</ul>
   ${pages>1?h`<nav class="mem-pager" aria-label="${T('Strony listy')}">${btn(T('Poprzednia'),'prev','secondary',{disabled:page<=1})}<span class="muted small">${T('Strona {page} z {pages}',{page,pages})}</span>${btn(T('Następna'),'next','secondary',{disabled:page>=pages})}</nav>`:''}`;
 }
 /** Toolbar (search, filter, new account) and the bulk panel around the results region. */
@@ -260,10 +265,10 @@ export const stripeDashboardUrl=u=>typeof u==='string'&&/^https:\/\/dashboard\.s
 export const cancelable=d=>!!d&&ONGOING.includes(d.subStatus)&&!d.cancelAtPeriodEnd&&!!d.subscriptionId;
 
 // ---- Page ----
-const st={q:'',filter:'all',page:1,ownerOf:null,selected:new Set(),data:null,at:0,error:'',seq:0,staff:null,staffAt:0,staffPending:null,focusFrom:null};
+const st={q:'',filter:'all',page:1,ownerOf:null,selected:new Set(),data:null,at:0,error:'',seq:0,staff:null,staffAt:0,staffPending:null,focusFrom:null,forgotten:{}};
 export const state=st;
 /** Forgets the member list, search phrase and staff plans (after sign-out or an expired session: no e-mails stay in memory, plan §8.3 point 8). */
-export function forget(){st.seq++;Object.assign(st,{q:'',filter:'all',page:1,ownerOf:null,selected:new Set(),data:null,at:0,error:'',staff:null,staffAt:0,staffPending:null});}
+export function forget(){st.seq++;Object.assign(st,{q:'',filter:'all',page:1,ownerOf:null,selected:new Set(),data:null,at:0,error:'',staff:null,staffAt:0,staffPending:null,forgotten:{}});}
 /** The list state asked for by the route (#members?filter=..., #members?ownerOf=...): {filter,ownerOf} or null when the route asks nothing. */
 export function routeFilter(params){
  const filter=params?.get?.('filter'),owner=ownerId(params?.get?.('ownerOf'));
@@ -428,9 +433,17 @@ function bulkDialog(){
 const dialogReason=el=>hideReason(el.closest('.modal')?.querySelector('[data-mem-reason]')?.value);
 /** After a change of roles: the list and me again (the menu badge of organizers waiting for confirmation). */
 const rolesChanged=()=>{reload();import('./me.js').then(m=>m.loadMe({force:true})).catch(()=>{});};
-function deleteDialog(m,confirmEnd=''){
+/** The athlete part of the delete dialog (final review F2, owner decision O7): deleting the account keeps the athlete's full name in
+ * kept results; the ticked box erases the athlete data first (profile.forget: initials in kept results). Nothing for no profile. */
+export function deleteAthleteNote(profiles,{forgotten=false}={}){
+ if(!profiles?.length)return h``;
+ if(forgotten)return h`<p class="notice mem-warn">${T('Dane zawodnika są już usunięte, w zachowanych wynikach zostały inicjały.')}</p>`;
+ return h`<div class="mem-athlete-note"><p>${T('Konto ma profil zawodnika ({names}). Wyniki z zakończonych turniejów i kategorii po losowaniu zostaną z imieniem i nazwiskiem, widocznym dla organizatora i Administratora.',{names:profiles.map(p=>p.name).join(', ')})}</p><label class="checkbox-label"><input type="checkbox" data-mem-initials checked> ${T('Zostaw w zachowanych wynikach tylko inicjały zawodnika')}</label></div>`;
+}
+function deleteDialog(m,confirmEnd='',{forgotten=false}={}){
  openModal(T('Usuń konto'),h`<p class="modal-lead">${T('Konto: {email}',{email:m.email})}</p>
   ${confirmEnd?h`<div class="notice mem-warn">${confirmEnd}</div>`:h`<p>${T('Dane osobowe zostaną usunięte, a wiadomości na czacie zostaną jako „Konto usunięte”. Klient w Stripe zostanie usunięty. Tego nie można cofnąć.')}</p><label class="checkbox-label"><input type="checkbox" data-mem-check> ${T('Rozumiem, że tego nie można cofnąć.')}</label>`}
+  ${deleteAthleteNote(ownedProfiles(m.id),{forgotten})}
   <div class="form-error" role="alert"></div>`,all(btn(T('Anuluj'),'close'),confirmEnd?btn(T('Zakończ subskrypcję i usuń konto'),'delete-go','danger-text',{'data-mem-id':m.id,'data-mem-end':'1'}):btn(T('Usuń konto'),'delete-go','primary',{'data-mem-id':m.id,disabled:true,'data-mem-needs-check':true})));
 }
 
@@ -495,8 +508,16 @@ const ACTS={
  'all-members':()=>{st.ownerOf=null;st.filter='all';st.page=1;st.selected.clear();const el=root();if(el)setHtml(el,pageView(st));reload();},
  'delete-go':(el)=>run(el,async()=>{
   const m=memberById(el.dataset.memId);if(!m)return;
+  // The athlete data first, when the box is ticked (F2); a refused deletion afterwards says that the data are already erased.
+  const initials=!!el.closest('.modal')?.querySelector('[data-mem-initials]:checked');let forgotten=!!st.forgotten?.[m.id];
+  if(initials&&!forgotten){for(const p of ownedProfiles(m.id))await ui().commit('profile.forget',{id:p.id});forgotten=true;st.forgotten[m.id]=true;}
   try{await send(memberCall('delete',{userId:m.id,...(el.dataset.memEnd?{endSubscription:true}:{})}));}
-  catch(error){if(error?.status===409&&error.data?.confirmEnd){deleteDialog(m,translateMessage(error.message));return;}throw error;}
+  catch(error){
+   if(error?.status===409&&error.data?.confirmEnd){deleteDialog(m,translateMessage(error.message),{forgotten});return;}
+   if(forgotten){say(el,T('Dane zawodnika są już usunięte, w zachowanych wynikach zostały inicjały. Konta nie usunięto: {error}',{error:translateMessage(error?.message||'')}));return;}
+   throw error;
+  }
+  delete st.forgotten[m.id];
   closeModal();toast(T('Konto usunięte.'));staffPlans(true);reload();
  }),
  'bulk-go':(el)=>run(el,async()=>{
