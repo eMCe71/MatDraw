@@ -4,9 +4,11 @@
  *  eventOptions(profile, measures, tournament) = the events of the entry window: allowed, ineligible on the tournament day (with the
  *   engine's reason) or in a category whose draw is saved (tournament.drawn of the open list), with the category preview.
  *  entryStatus(item) = the card status of an own entry (§7.6); positionStatus(category) = the line of a saved draw.
- *  upcomingCount(view, today) = own starts in the next 7 days (menu badge); ctaFor(view, tournamentId, caps) = the preview CTA. */
+ *  upcomingCount(view, today) = own starts in the next 7 days (menu badge); ctaFor(view, tournamentId, caps) = the preview CTA;
+ *  unavailableReason(tournament, today, {truncated}) = why the preview offers no self-entry. */
 import {EVENTS,classify,eligibility} from './engine.js';
 import {ageAt,dateValid} from './workspace.js';
+import {OPEN_LIMIT} from './athlete-view.js';
 
 export const EVENT_KEYS=Object.keys(EVENTS);
 export const REFRESH_MS=60000,BADGE_DAYS=7,STALE_MS=300000;
@@ -82,13 +84,15 @@ export function upcomingCount(view,today){
 export const activeProfiles=view=>(view?.profiles||[]).filter(p=>!p.archived);
 export const openItem=(view,id)=>(view?.open||[]).find(t=>t.id===id)||null;
 export const entryItem=(view,id,profileId)=>(view?.entries||[]).find(x=>x?.tournament?.id===id&&(profileId==null||x.profileId===profileId))||null;
-/** Call to action in a member's tournament preview (§10.3): {kind:'add'} for a member without an athlete profile; {kind:'entered',
- * profileId,canEdit} when a profile is entered; {kind:'enter',profileId} when the open list allows it; {kind:'blocked',reason:
- * 'minor-untrusted'}; {kind:'unavailable'} otherwise (the caller explains it from the tournament status). selfEntry false
- * (features.selfEntry) gives null: no call to action at all. */
+/** Call to action in a member's tournament preview (§10.3): {kind:'add'} for a member without an athlete profile, only when the
+ * tournament is on the open list of view (the route athlete answers members without a profile too: open, self-entry, future and
+ * not hidden), so nobody is asked for a child's data where a self-entry would be refused; {kind:'entered',profileId,canEdit} when
+ * a profile is entered; {kind:'enter',profileId} when the open list allows it; {kind:'blocked',reason:'minor-untrusted'};
+ * {kind:'unavailable'} otherwise (the caller explains it from the tournament status). selfEntry false (features.selfEntry) and a
+ * member without a profile outside the open list give null: no call to action at all. */
 export function ctaFor(view,id,{athlete=false,selfEntry=true}={}){
  if(selfEntry===false)return null;
- if(!athlete)return {kind:'add'};
+ if(!athlete)return openItem(view,id)?{kind:'add'}:null;
  const entered=entryItem(view,id);if(entered)return {kind:'entered',profileId:entered.profileId,canEdit:!!entered.canEdit};
  const t=openItem(view,id);if(!t)return {kind:'unavailable'};
  const rows=(t.profiles||[]).filter(p=>!p.entered),free=rows.find(p=>!p.blocked);
@@ -96,11 +100,14 @@ export function ctaFor(view,id,{athlete=false,selfEntry=true}={}){
  if(rows.length)return {kind:'blocked',reason:rows[0].blocked};
  return {kind:'unavailable'};
 }
-/** Why a tournament outside the open list takes no self-entry: 'finished', 'closed' (not open or dated before today) or 'off'
- * (open, but the organizer did not switch self-entries on). */
-export function unavailableReason(t,today){
+/** Whether the open list of view may be cut at OPEN_LIMIT (the nearest tournaments first), so a later one can be missing from it. */
+export const openTruncated=view=>(view?.open||[]).length>=OPEN_LIMIT;
+/** Why a tournament outside the open list takes no self-entry: 'finished', 'closed' (not open or dated before today), 'off' (open,
+ * but the organizer did not switch self-entries on) or 'later' instead of 'off' when the open list is cut (truncated: openTruncated),
+ * because then the tournament may take self-entries and only be past the list's end. */
+export function unavailableReason(t,today,{truncated=false}={}){
  if(!t)return 'closed';if(t.status==='finished')return 'finished';
- return t.status!=='open'||typeof t.date!=='string'||t.date<today?'closed':'off';
+ return t.status!=='open'||typeof t.date!=='string'||t.date<today?'closed':truncated?'later':'off';
 }
 /** Body of athlete-entry (§7.2) from the window's values: numbers as numbers, events in engine order, only the listed fields. */
 export function entryBody({tournamentId,profileId,events,weight,height,gradeType,grade,saveToProfile,update}){

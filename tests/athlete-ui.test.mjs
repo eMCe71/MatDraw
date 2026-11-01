@@ -190,12 +190,21 @@ test('open tournaments: enter, entered, minor-untrusted explanation, community b
 
 test('call to action in a member preview: add data, enter, entered, blocked, unavailable with the reason',()=>{
  const view={profiles:[{id:'p1',name:'Ola'}],entries:[{profileId:'p1',tournament:{id:'x'},canEdit:true}],open:[{id:'o',profiles:[{id:'p1',entered:false,blocked:null}]},{id:'m',profiles:[{id:'p1',entered:false,blocked:'minor-untrusted'}]}]};
- assert.deepEqual(data.ctaFor(null,'o',{athlete:false}),{kind:'add'});
+ // A member without a profile is asked for the athlete's data only where a self-entry is possible (the open list of the route).
+ assert.deepEqual(data.ctaFor({open:[{id:'o',profiles:[]}]},'o',{athlete:false}),{kind:'add'});
+ assert.equal(data.ctaFor({open:[{id:'o',profiles:[]}]},'off',{athlete:false}),null,'open, but without self-entries: no call to action');
+ assert.equal(data.ctaFor(null,'o',{athlete:false}),null,'no open list (the request failed): no call to action');
  assert.deepEqual(data.ctaFor(view,'o',{athlete:true}),{kind:'enter',profileId:'p1'});
  assert.deepEqual(data.ctaFor(view,'x',{athlete:true}),{kind:'entered',profileId:'p1',canEdit:true});
  assert.deepEqual(data.ctaFor(view,'m',{athlete:true}),{kind:'blocked',reason:'minor-untrusted'});
  assert.deepEqual(data.ctaFor(view,'z',{athlete:true}),{kind:'unavailable'});assert.equal(data.ctaFor(view,'o',{athlete:true,selfEntry:false}),null);
  assert.deepEqual([{status:'finished',date:'2030-01-01'},{status:'closed',date:'2030-07-01'},{status:'open',date:'2030-01-01'},{status:'open',date:'2030-07-01'},null].map(x=>data.unavailableReason(x,TODAY)),['finished','closed','closed','off','closed']);
+ // An open list cut at OPEN_LIMIT does not prove that self-entries are off.
+ const many={open:Array.from({length:50},(_,i)=>({id:'t'+i,profiles:[]}))};assert.equal(data.openTruncated(many),true);assert.equal(data.openTruncated(view),false);assert.equal(data.openTruncated(null),false);
+ assert.deepEqual([{status:'open',date:'2030-07-01'},{status:'closed',date:'2030-07-01'},{status:'finished',date:'2030-07-01'}].map(x=>data.unavailableReason(x,TODAY,{truncated:true})),['later','closed','finished']);
+ assert.equal(data.ctaFor(many,'beyond',{athlete:false}),null);
+ assert.match(text(flow.ctaHtml({kind:'unavailable'},'z',{reason:'later'})),/Tego turnieju nie ma jeszcze na Twojej liście „Otwarte turnieje”\./);
+ assert.doesNotMatch(text(flow.ctaHtml({kind:'unavailable'},'z',{reason:'later'})),/nie włączył/);
  const add=String(flow.ctaHtml({kind:'add'},'t<1>'));assert.match(add,/href="#profile\?tab=roles&amp;add=1&amp;then=t%3C1%3E">Dodaj dane zawodnika, aby się zgłosić</);
  assert.match(text(flow.ctaHtml({kind:'enter',profileId:'p1'},'o',{view})),/Zapisy są otwarte Zgłoś zawodnika: Ola\..*Zgłoś się/);
  assert.match(String(flow.ctaHtml({kind:'entered',profileId:'p1',canEdit:true},'x',{view})),/Zgłoszenie przyjęte: Ola.*data-action="athlete-edit".*href="#starts">Moje starty</s);
@@ -231,6 +240,12 @@ test('demo adapter: the athlete demo enters t-winter-2027, sees the entry, corre
  assert.equal(view.open.find(t=>t.id==='t-winter-2027').profiles[0].entered,false);
  assert.equal((await Client.athleteRequest('public-clubs')).unaffiliated,'unaffiliated');
  await assert.rejects(Client.athleteRequest('bogus'),e=>e.status===400);
+ // A member without an athlete profile (the demo organizer): the open list has t-winter-2027 (self-entries on) and not
+ // t-autumn-2026 (open, self-entries off), so the preview asks for the athlete's data only in the first one.
+ await Client.logout();await Client.login('organizer@matdraw.example','MatDrawDemo2026!');
+ view=await Client.athleteRequest('athlete');assert.deepEqual(view.profiles,[]);assert.deepEqual(view.entries,[]);
+ assert.ok(view.open.some(t=>t.id==='t-winter-2027'));assert.ok(!view.open.some(t=>t.id==='t-autumn-2026'));
+ assert.deepEqual(data.ctaFor(view,'t-winter-2027',{athlete:false}),{kind:'add'});assert.equal(data.ctaFor(view,'t-autumn-2026',{athlete:false}),null);
  await Client.logout();await Client.login('editor@matdraw.example','MatDrawDemo2026!');
  await assert.rejects(Client.athleteRequest('athlete'),e=>e.status===403,'staff have no athlete view');
  await Client.logout();
@@ -292,6 +307,8 @@ test('demo in a browser (PL 1440, EN 390): #starts, the entry window by keyboard
    assert.equal(await page.locator('h1').innerText(),lang==='pl'?'Moje starty':'My competitions');
    assert.equal(await page.locator('.ath-profile h2').innerText(),'Zuzanna Demo');
    assert.deepEqual(await unnamed(page,'#main'),[],'every control of #starts has a name');
+   assert.equal(await page.evaluate(()=>[...document.querySelectorAll('[data-starts-root],[data-starts-root] *')].some(el=>[...el.attributes].some(a=>/2012-03-08|"birthDate"/.test(a.value)))),false,'the view (birth date) is not copied into attributes');
+   assert.equal(await page.getAttribute('[data-starts-root]','data-ath-key'),null);
    // The entry window, opened and filled by keyboard.
    await page.locator('.ath-open [data-action="athlete-enter"][data-id="t-winter-2027"]').focus();await page.keyboard.press('Enter');
    await page.waitForSelector('#ath-entry-form');
@@ -334,6 +351,15 @@ test('demo in a browser (PL 1440, EN 390): #starts, the entry window by keyboard
    if(lang==='pl')await page.click('[data-set-lang="pl"]');
    await ctx.close();
   }
+  // A member without an athlete profile (the demo organizer): "add athlete data" only where self-entries are on.
+  const ctx=await browser.newContext({viewport:{width:1440,height:900},locale:'pl-PL',serviceWorkers:'block'}),page=await ctx.newPage();
+  page.on('pageerror',e=>problems.push('organizer: '+e.message));page.on('console',m=>{if(m.type()==='error')problems.push('organizer: '+m.text());});
+  await page.goto(url);await page.click('[data-action="demo-login"][data-role="organizer"]');await page.waitForSelector('.app-shell');
+  await page.goto(url+'#guest?t=t-winter-2027');await page.waitForSelector('.ath-cta');
+  assert.match(await page.locator('.ath-cta').innerText(),/Dodaj dane zawodnika, aby się zgłosić/);
+  await page.goto(url+'#guest?t=t-autumn-2026');await page.waitForSelector('.guest-stats [data-athlete-cta], [data-athlete-cta]',{state:'attached'});await page.waitForTimeout(500);
+  assert.equal(await page.locator('.ath-cta').count(),0,'t-autumn-2026 is open without self-entries: no call to action');
+  await ctx.close();
   assert.deepEqual(problems,[]);
  }finally{await browser.close();server.close();}
 });

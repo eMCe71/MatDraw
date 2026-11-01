@@ -85,5 +85,6 @@ export default {
  'Status, kategorię i drabinkę znajdziesz w „Moich startach”.':'You will find the status, category and bracket in “My competitions”.',
  'Samodzielne zgłoszenie niedostępne':'Self-entry not available',
  'Ten turniej już się odbył.':'This tournament has already taken place.',
- 'Organizator nie włączył samodzielnych zgłoszeń. Zgłosi Cię klub albo organizator turnieju.':'The organiser has not switched on self-entries. Your club or the tournament organiser will enter you.'
+ 'Organizator nie włączył samodzielnych zgłoszeń. Zgłosi Cię klub albo organizator turnieju.':'The organiser has not switched on self-entries. Your club or the tournament organiser will enter you.',
+ 'Tego turnieju nie ma jeszcze na Twojej liście „Otwarte turnieje”. Sprawdź ponownie bliżej terminu zawodów albo zapytaj organizatora.':'This tournament is not on your “Open tournaments” list yet. Check again closer to the competition date or ask the organiser.'
 };

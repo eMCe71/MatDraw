@@ -16,7 +16,7 @@ import {t as T,locale,ruleLabel,ruleText,translateMessage,gradeLabel,gradeName} 
 import {EVENTS} from './engine.js';
 import {warsawToday} from './guest-view.js';
 import {athleteUser,cachedView,loadView} from './athlete-boot.js';
-import {eventOptions,chosenEvents,categoryPreview,measuresOf,measuresValid,entryStatus,positionStatus,sortEntries,activeProfiles,openItem,entryItem,ctaFor,unavailableReason,entryBody,entryAge} from './athlete-data.js';
+import {eventOptions,chosenEvents,categoryPreview,measuresOf,measuresValid,entryStatus,positionStatus,sortEntries,activeProfiles,openItem,entryItem,ctaFor,unavailableReason,openTruncated,entryBody,entryAge} from './athlete-data.js';
 
 const ui=()=>registry.use('ui');
 const icon=(name,cls='')=>ui()?.icon?.(name,cls)??'';
@@ -71,7 +71,7 @@ export function noticeTexts(t){
  }else out.push(T('Turniej prowadzi zespół MatBravo.'));
  return out;
 }
-const unavailableText=reason=>reason==='finished'?T('Ten turniej już się odbył.'):reason==='off'?T('Organizator nie włączył samodzielnych zgłoszeń. Zgłosi Cię klub albo organizator turnieju.'):T('Zapisy do tego turnieju są zamknięte.');
+const unavailableText=reason=>reason==='finished'?T('Ten turniej już się odbył.'):reason==='off'?T('Organizator nie włączył samodzielnych zgłoszeń. Zgłosi Cię klub albo organizator turnieju.'):reason==='later'?T('Tego turnieju nie ma jeszcze na Twojej liście „Otwarte turnieje”. Sprawdź ponownie bliżej terminu zawodów albo zapytaj organizatora.'):T('Zapisy do tego turnieju są zamknięte.');
 const BLOCKED=()=>T('Zgłoszenia osób niepełnoletnich do tego turnieju będą możliwe, gdy MatBravo potwierdzi organizatora.');
 const STATE_ICON={paused:'pause',finished:'trophy',absent:'alert',present:'check',closed:'clock',accepted:'check'};
 const STATE_TONE={paused:'warn',finished:'done',absent:'warn',present:'ok',closed:'wait',accepted:'ok'};
@@ -131,15 +131,17 @@ ${gone.length?h`<section class="ath-section" aria-labelledby="ath-gone-title"><d
 const features=()=>getMe()?.features||{};
 const paintKey=view=>JSON.stringify([view,selected,getLocaleKey(),features().selfEntry]);
 const getLocaleKey=()=>{try{return locale();}catch{return '';}};
+// What #starts shows now: the root element and the key of its view, kept here and never in the DOM (the view holds the child's data).
+let painted={root:null,key:null};
 function paintStarts(view,{force=false}={}){
  const root=document.querySelector('[data-starts-root]');if(!root)return;
- const key=paintKey(view);if(!force&&root.dataset.athKey===key)return;
- setHtml(root,startsHtml(view,{selfEntry:features().selfEntry!==false}));root.dataset.athKey=key;root.removeAttribute('aria-busy');
+ const key=paintKey(view);if(!force&&painted.root===root&&painted.key===key)return;
+ setHtml(root,startsHtml(view,{selfEntry:features().selfEntry!==false}));painted={root,key};root.removeAttribute('aria-busy');
 }
 function paintError(error){
  const root=document.querySelector('[data-starts-root]');if(!root)return;
  setHtml(root,h`<section class="panel empty-state ath-error" role="alert"><h3>${T('Nie udało się wczytać Twoich startów.')}</h3><p>${translateMessage(error?.message||'')}</p><button type="button" class="btn primary" data-action="athlete-refresh">${icon('refresh')}<span>${T('Spróbuj ponownie')}</span></button></section>`);
- root.removeAttribute('aria-busy');delete root.dataset.athKey;
+ root.removeAttribute('aria-busy');painted={root:null,key:null};
 }
 /** After 'painted' of #starts: the cached view at once, a fresh one when it is older than 60 s. */
 export async function mountStarts(){
@@ -153,7 +155,14 @@ export async function refreshStarts(){
 }
 
 // ---- Call to action in a member's tournament preview ----
-const publicCache=new Map();
+const publicCache=new Map(),offerCache={userId:null,at:0,open:null};
+/** The open list for a member without an athlete profile (route athlete: open self-entry tournaments, no profiles), for 60 s.
+ * Only open is kept. Rejects with the request's error. */
+async function offerView(u){
+ if(offerCache.userId===u.id&&offerCache.open&&Date.now()-offerCache.at<60000)return {open:offerCache.open};
+ const view=await Client.athleteRequest('athlete'),open=Array.isArray(view?.open)?view.open:[];
+ Object.assign(offerCache,{userId:u.id,at:Date.now(),open});return {open};
+}
 async function publicInfo(id){
  const hit=publicCache.get(id);if(hit&&Date.now()-hit.at<60000)return hit.t;
  const t=await Client.publicTournament(id).then(d=>d?.tournament||null,()=>null);publicCache.set(id,{t,at:Date.now()});return t;
@@ -169,17 +178,15 @@ export function ctaHtml(state,id,{view=null,reason='closed'}={}){
  return h`<div class="ath-cta ath-cta-off"><span class="ath-cta-icon">${icon('info')}</span><div class="ath-cta-copy"><strong>${T('Samodzielne zgłoszenie niedostępne')}</strong><p>${unavailableText(reason)}</p></div></div>`;
 }
 let ctaTicket=0;
-/** After 'painted' {view:'guest', memberPreview:true}: fills [data-athlete-cta]. #guest?t=…&enter=1 opens the entry window once. */
+/** After 'painted' {view:'guest', memberPreview:true}: fills [data-athlete-cta]. #guest?t=…&enter=1 opens the entry window once.
+ * A member without an athlete profile is asked for the athlete's data only for a tournament on the open list (ctaFor). */
 export async function mountCta(mount){
  const id=mount.dataset.tournamentId,ticket=String(++ctaTicket),u=signedIn(),athlete=athleteUser(u),selfEntry=features().selfEntry!==false;mount.dataset.athTicket=ticket;
  if(!id||!u)return;
  let view=null;
- if(athlete){try{view=await loadView();}catch(error){if(error?.status===401){ui()?.handleError?.(error);return;}view=null;}if(!view)return;}
+ if(athlete||selfEntry&&u.role==='member'){try{view=athlete?await loadView():await offerView(u);}catch(error){if(error?.status===401){ui()?.handleError?.(error);return;}view=null;}if(!view)return;}
  let state=ctaFor(view,id,{athlete,selfEntry}),reason='closed';
- if(state&&(state.kind==='add'||state.kind==='unavailable')){
-  const t=await publicInfo(id),today=warsawToday();reason=unavailableReason(t,today);
-  if(state.kind==='add'&&(!t||t.status!=='open'||t.date<today))state=null;// no "add data" call where nobody can enter
- }
+ if(state?.kind==='unavailable')reason=unavailableReason(await publicInfo(id),warsawToday(),{truncated:openTruncated(view)});
  if(!mount.isConnected||mount.dataset.athTicket!==ticket)return;
  setHtml(mount,ctaHtml(state,id,{view,reason}));
  const q=new URLSearchParams(location.hash.split('?')[1]||'');
