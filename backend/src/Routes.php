@@ -8,6 +8,7 @@ namespace MatDraw;
  *             'user'=>'required'|'optional'|'admin'|'member'|'anon' (peek/session/upload; default required),
  *             'max'=>bytes, 'types'=>[content types] (upload), 'tag'=>'chat'|null,
  *             'reject'=>callable(int $status) (upload: throws the route's own 413/415 message),
+ *             'settings'=>true (a public route that needs the effective configuration, e.g. public-config),
  *             'handler'=>callable(RouteContext):mixed]]
  * Names are unique across files and never one of LEGACY (index.php serves those); a duplicate stops every request
  * with a RuntimeException. Modes:
@@ -16,6 +17,11 @@ namespace MatDraw;
  *   session Auth::start; POST needs Origin/CSRF and a JSON body (application/json, max bytes, default 16 KB, depth 32).
  *   upload  Auth::start, Origin/CSRF, raw body with a Content-Type from types, max bytes (CONTENT_LENGTH and max+1 read).
  *   webhook no session, raw body up to max (default 1 MiB); the handler verifies the signature.
+ * Effective configuration (PLAN-REJESTRACJA-ROLE §3.2, the one place of the overlay for registry routes): for session and
+ * upload routes, peek routes called with a session cookie and routes flagged 'settings' (plus SETTINGS), the connection
+ * opens once, Settings::effective() is computed and both go into RouteContext: $ctx->config is the effective
+ * configuration, $ctx->file the raw config.php. Guest routes without a cookie (public-chat*, chat-feed and avatar of a
+ * guest) open no extra connection and get the raw file, which holds no switch they read.
  * The user requirement is checked before the handler runs (an admin route answers 403 before reading any data).
  * The handler returns the JSON value (null → 204) or emits its own response and exits (images). Errors: AppError and
  * ApiError → {error, csrf (session/upload), ...data}; schema behind code (SQLSTATE 42S02/42S22) → 503; anything else
@@ -26,6 +32,8 @@ final class Routes {
  public const MIN_CLIENT_API=1;
  public const LEGACY=['session','bootstrap','login','logout','command','public','public-tournament'];
  private const MODES=['public','peek','session','upload','webhook'],USERS=['required','optional','admin','member','anon'];
+ /** Routes defined in other files that need the effective configuration even without their 'settings' flag. */
+ public const SETTINGS=['public-config'];
  private static array $cache=[];
  /** Whether error responses carry the session's CSRF token (set once a session route started the session). */
  private static bool $csrf=false;
@@ -53,7 +61,7 @@ final class Routes {
   else{$r['user']??='required';if(!in_array($r['user'],self::USERS,true))$bad();}
   if(isset($r['max'])&&(!is_int($r['max'])||$r['max']<1))$bad();
   if($mode==='upload'&&(!is_array($r['types']??null)||!$r['types']))$bad();
-  if(isset($r['tag'])&&$r['tag']!=='chat'||isset($r['reject'])&&!is_callable($r['reject']))$bad();
+  if(isset($r['tag'])&&$r['tag']!=='chat'||isset($r['reject'])&&!is_callable($r['reject'])||isset($r['settings'])&&!is_bool($r['settings']))$bad();
   return $r;
  }
  public static function has(string $name):bool{return isset(self::all()[$name]);}
@@ -82,12 +90,19 @@ final class Routes {
     if($mode!=='webhook')Auth::requireCsrf($c);
     if($mode==='session')$body=self::json((int)($r['max']??16384));else $raw=self::raw($r);
    }
-   $ctx=new RouteContext($name,$r,$c,$body,$raw);
+   $pdo=null;$eff=$c;
+   if(self::needsSettings($name,$r,$_COOKIE[Auth::COOKIE]??null)){$pdo=\matdraw_database($c);$eff=Settings::effective($pdo,$c);}
+   $ctx=new RouteContext($name,$r,$eff,$body,$raw,$pdo,$c);
    self::requireUser($ctx,$r['user']);
    $out=($r['handler'])($ctx);
   }catch(\Throwable $e){self::fail($e);}
   if($out===null){http_response_code(204);header_remove('Content-Type');exit;}
   self::respond($out);
+ }
+ /** Whether dispatch computes the effective configuration for route $name (see the class comment); $cookie: the session cookie. */
+ public static function needsSettings(string $name,array $r,mixed $cookie):bool {
+  return in_array($r['auth'],['session','upload'],true)||!empty($r['settings'])||in_array($name,self::SETTINGS,true)
+   ||$r['auth']==='peek'&&is_string($cookie)&&preg_match('/^[A-Za-z0-9,-]{22,256}$/D',$cookie);
  }
  /** Marks a legacy route that started a session, so its errors carry the CSRF token as before. */
  public static function withCsrf():void{self::$csrf=true;}
