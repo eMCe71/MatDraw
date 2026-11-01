@@ -273,10 +273,11 @@ Wszystkie poniższe klucze są **opcjonalne**: bez nich aplikacja używa bezpiec
 
 | Klucz | Domyślnie | Do czego |
 |---|---|---|
-| `signup_enabled` | `false` | samodzielna rejestracja członków |
+| `signup_enabled` | `false` | **wartość początkowa** rejestracji członków (do pierwszego zapisu w panelu „Ustawienia”) |
+| `signup_force_off` | `false` | awaryjne zamknięcie rejestracji przez SSH, ponad ustawieniem z panelu (sekcja „Procedura nadużyć”) |
 | `signup_invite_token` | brak | rejestracja tylko z linku `#signup?invite=…` (okno testów; co najmniej 24 znaki) |
-| `support_email` | brak | adres pomocy, np. `pomoc@matbravo.com` (wymagany przy rejestracji) |
-| `billing_enabled`, `billing_enforce`, `billing_mode` | `false`, `false`, `'test'` | płatności, wymuszanie płatności, tryb Stripe (`'test'` albo `'live'`) |
+| `support_email` | brak | **wartość początkowa** adresu pomocy; po zapisie w panelu liczy się adres z panelu, bez żadnego wpisu `hello@matbravo.com` |
+| `billing_enabled`, `billing_enforce`, `billing_mode` | `false`, `false`, `'test'` | `billing_enabled` **udostępnia Stripe** (ceny, portal, wybór trybu „Otwarta, płatna” w panelu); `billing_enforce` to wartość początkowa wymuszania płatności; `billing_mode` to tryb Stripe (`'test'` albo `'live'`). **Checkout otwiera się tylko wtedy, gdy płatności są wymagane**: `billing_enforce` z pliku przed pierwszym zapisem w panelu, a potem tryb „płatna” z panelu. Gdy nie są wymagane, Checkout odpowiada „Płatności nie są teraz wymagane.” |
 | `stripe_secret_key`, `stripe_prices`, `billing_amounts`, `stripe_portal_configuration`, `stripe_webhook_secrets` | — | wkleja je blok wypisany przez `stripe-setup.php` |
 | `stripe_api_version` | `'2026-09-30.endive'` | potwierdź w panelu Stripe (Workbench) w dniu konfiguracji |
 | `signup_limit_*`, `login_limit_ip`, `username_check_limit_*` | patrz „Limity w dniu zawodów” | ochrona przed nadużyciami |
@@ -295,7 +296,45 @@ Wszystkie poniższe klucze są **opcjonalne**: bez nich aplikacja używa bezpiec
 | start (kroki ręczne, punkt 9) | `true` | usunięty | `true` | `true` | „Załóż konto · 8,99 zł / mies.” |
 | darmowa beta (tylko świadomie) | `true` z `signup_free_beta=true` | brak | `false` | `false` | „Załóż konto” bez ceny |
 
-Inne kombinacje aplikacja odrzuca: `billing_enforce` wymaga `billing_enabled`; rejestracja (także z tokenem) wymaga `support_email`; otwarta rejestracja wymaga `billing_enforce=true` (albo jawnej darmowej bety). Istniejące konta personelu po pierwszym wdrożeniu są oznaczone jako darmowe, więc włączenie płatności nie odbierze klubom dostępu.
+Powyższa tabela dotyczy **pliku `config.php`** i jego wartości początkowych. Od wydania z rolami to, co naprawdę obowiązuje, liczy się z pliku i z ustawień zapisanych w panelu Administratora („Ustawienia”): panel wygrywa z wartościami początkowymi, a `signup_force_off` i brak konfiguracji Stripe wygrywają z panelem. Macierz panelu:
+
+| Panel: rejestracja / płatności | `billing_enabled` w pliku | Skutek |
+|---|---|---|
+| Wyłączona | dowolnie | gość widzi „Zaloguj się, aby pisać”; bez karty „Nowe konto” (stan po wdrożeniu) |
+| Otwarta, bezpłatna | `false` albo `true` | „Załóż konto” bez ceny, bez kroku planu; konta z tego okresu są oznaczone jako konta z okresu bezpłatnego |
+| Otwarta, płatna | `true` (obowiązkowo) | „Załóż konto · 8,99 zł / mies.”; przełączenie wymaga udanej kontroli Stripe i decyzji o kontach z okresu bezpłatnego |
+| zapisano „płatna”, ale z pliku zniknęło `billing_enabled` | `false` | rejestracja zamknięta awaryjnie, istniejące konta mają pełny dostęp, czerwony baner w panelu |
+
+Inne kombinacje **w pliku** aplikacja odrzuca: `billing_enforce` wymaga `billing_enabled`; rejestracja (także z tokenem) wymaga `support_email`; otwarta rejestracja wymaga `billing_enforce=true` (albo jawnej darmowej bety). Istniejące konta personelu po pierwszym wdrożeniu są oznaczone jako darmowe, więc włączenie płatności nie odbierze klubom dostępu.
+
+## To wdrożenie: migracje 0007–0009 (role organizatora i zawodnika)
+
+Wydanie z rolami dodaje trzy migracje (schemat v6 → v9). Wszystkie tylko dodają, więc poprzednie wydanie dalej działa na nowym schemacie (zadanie CI „Zgodność wstecz” to sprawdza).
+
+1. Scal do `main` w **dzień bez zawodów**. Pipeline robi kopię bazy przed migracją (`db-<data>-pre-v6-to-v9-<wydanie>.sql.gz` w `~/matdraw/backups`) i dopiero potem migruje. Sprawdź, czy ta kopia jest w katalogu, zanim uznasz wdrożenie za zakończone.
+2. `0007_roles` oznacza wszystkie istniejące kluby jako zweryfikowane i wyłącza „Zawodnicy mogą zgłaszać się sami” w istniejących turniejach. `0008_settings` tworzy tabelę ustawień **bez wiersza**, więc rejestracja zostaje wyłączona, a płatności bez zmian: dopóki Administrator nie zapisze „Ustawień”, obowiązuje `config.php`. `0009_lobby_order` zmienia tylko kolejność kanałów czatu (Taekwondo Polska pierwszy).
+3. **W `config.php` nic nie zmieniaj.** Nowy klucz `signup_force_off` jest opcjonalny.
+4. Wydanie zmienia wygląd aplikacji, więc otwarte karty i aplikacja na telefonie pokażą pasek „Dostępna jest nowa wersja MatBravo. [Odśwież]”. `min_client_api` zostaje bez zmian (`1`), nikt nie jest zmuszany do odświeżenia.
+5. **Strażnik „floor” (0007).** Dopóki w bazie nie ma danych społeczności (profili kont zawodników, turniejów lub klubów założonych przez członków, ukrytych turniejów, scalonych klubów), rollback do wydania sprzed 0007 jest możliwy. Gdy takie dane powstaną (czyli po otwarciu rejestracji i pierwszym organizatorze albo zawodniku), `rollback` i `activate` starszego wydania **odmawiają** („Powrót zablokowany…”): stary kod pokazałby te dane personelowi. Wtedy poprawiasz błąd nowym wdrożeniem (`git revert` na `main`), a awaryjnie zamykasz rejestrację w panelu lub przez `signup_force_off`. Dlatego przed otwarciem rejestracji sprawdź nowe wydanie na produkcji, jako gość i jako Administrator (lista w `HANDOFF.md`).
+6. Po wdrożeniu jednorazowo, jeśli kiedykolwiek używałeś `seed-athletes` na produkcji: uruchom go raz (`--remove` albo zwykłe uruchomienie, `INSTALL-PL.md`, „Przykładowi zawodnicy”), bo kluby demo pozostają zweryfikowane, dopóki skrypt ich nie odznaczy.
+
+## Otwarcie rejestracji i procedura nadużyć
+
+Rejestracją steruje się z panelu Administratora, bez wdrożenia i bez SSH (**Ustawienia**). `config.php` zostaje tylko wartością początkową i awaryjnym sufitem.
+
+**Otwarcie.** Najpierw załóż skrzynkę `hello@matbravo.com` (adres pomocy widzi każdy przy „Nie pamiętasz hasła?”) i odbierz sesję prawną (dane dzieci; `HANDOFF.md`). Potem **Ustawienia → Rejestracja nowych kont → „Otwarta, bezpłatna”**. Wyloguj się i sprawdź jako gość kartę „Załóż konto”. Płatna rejestracja: najpierw Stripe (sekcja „Stripe — konfiguracja krok po kroku”, w pliku `billing_enabled=true`), potem **„Sprawdź Stripe”** i **„Otwarta, płatna”** z decyzją o kontach z okresu bezpłatnego (zostaw darmowe albo płatne od daty co najmniej 14 dni w przód).
+
+**Procedura nadużyć** (od najlżejszego do najcięższego kroku):
+
+1. **Obejrzyj kolejkę**: Ustawienia → „Historia zmian” (ostatnie 50 wpisów: ustawienia, organizatorzy, kluby, ukrycia turniejów, zapomnienia profili) i Członkowie → filtr „Do potwierdzenia”. Kluby: **Kluby** → niezweryfikowane i oczekujące nazwy.
+2. **Pojedynczy turniej**: karta turnieju (Administrator) → **„Ukryj turniej”** z powodem (organizator go zobaczy). Turniej znika z list publicznych i staje się roboczym; opcja „Wycofaj też zgłoszenia samych zawodników” usuwa ich zgłoszenia.
+3. **Pojedynczy organizator**: Członkowie → **„Odbierz rolę organizatora”** (z ukryciem nadchodzących turniejów) albo **„Zablokuj konto”**.
+4. **Fala fałszywych organizatorów**: zaznacz wiersze w Członkowie i użyj akcji zbiorczej **„Zablokuj i ukryj turnieje”** (do 50 naraz). Gdy przyjdzie więcej, włącz w Ustawienia → Organizatorzy **„Wymagaj potwierdzenia organizatorów”** (od tej chwili turnieje niepotwierdzonych nie trafiają na stronę główną ani do lobby czatu i nie przyjmują zgłoszeń osób niepełnoletnich) i ewentualnie ustaw **„Publikowanie turniejów przez nowych organizatorów” na „Wstrzymane”**. Wstrzymanie działa tylko na niepotwierdzonych, więc bez „Wymagaj potwierdzenia organizatorów” nikogo nie zatrzyma.
+5. **Zamknij rejestrację**: Ustawienia → **„Wyłączona”**. Działa od razu; zalogowani dalej korzystają z serwisu.
+6. **Panel nie działa**: przez SSH dopisz w `~/matdraw/shared/config.php` linię `'signup_force_off' => true,` (działa od razu, bez wdrożenia; panel pokaże czerwony baner). Aby ją cofnąć, usuń linię. Pełne wyłączenie czatu: sekcja „Wyłącznik czatu”; przerwa techniczna: plik `maintenance`.
+7. **Usunięcie danych osoby** (prośba rodzica, retencja): konto kasuje się w Członkowie (to usuwa profile, klienta Stripe i zgłoszenia, o ile turniej się nie zakończył; zgłoszenia w turniejach zakończonych lub z zapisanym losowaniem zostają bez imienia). Dane dodane przez organizatora usuwa on sam albo Administrator (`profile.forget`), a bez interwencji zadanie `community-retention` anonimizuje je po 24 miesiącach od ostatniego turnieju.
+
+Przy rosnącym obciążeniu: limity w dniu zawodów i odpowiedzi 429/503 (sekcje niżej). Limity nowych turniejów i klubów są stałymi w kodzie (3 nowe turnieje na dobę na organizatora, 10 opublikowanych nadchodzących, 50 na dobę od niepotwierdzonych razem).
 
 ## Kroki ręczne właściciela (w tej kolejności)
 
@@ -306,8 +345,8 @@ Inne kombinacje aplikacja odrzuca: `billing_enforce` wymaga `billing_enabled`; r
 5. **Kopie zapasowe (przed startem płatności):** cron z `dump.php --auto` (sekcja „Migracje bazy i kopie zapasowe”), pytanie do AfterMarket o ich własne kopie, comiesięczne pobieranie `~/matdraw/backups` na własny dysk.
 6. **Stripe w trybie testowym** — sekcja „Stripe — konfiguracja krok po kroku”, punkty 1–4.
 7. **Ustawienia w panelu Stripe** — tamże, punkt 5 (osobno dla trybu testowego i na żywo).
-8. **Okno testów:** w `config.php` `billing_enabled=true`, `billing_mode='test'`, `billing_enforce=true`, `signup_enabled=false`, `signup_invite_token` (losowe 32 znaki, np. z `/usr/local/php83/bin/php -r 'echo bin2hex(random_bytes(16)), PHP_EOL;'`) i `support_email`. Zalogowany jako Administrator otwórz w przeglądarce `https://matbravo.com/api/index.php?route=diagnostics&probe=stripe` (dla tej diagnostyki nie ma ekranu w panelu): w odpowiedzi musi być `"stripe":{"reachable":true,…}` (limit 6 sprawdzeń na godzinę). Sprawdź też `"server":{…,"afterResponse":true}`: przy `false` hosting nie umie wysłać odpowiedzi przed dokończeniem pracy, więc synchronizacja płatności i zadania w tle nie działają przy okazji ruchu i wpis crona `stripe-sync.php --events --due` (sekcja „Cron”) jest **obowiązkowy**. Testy z linku `https://matbravo.com/#signup?invite=TOKEN`: karta testowa 4242 4242 4242 4242, płatność z 3DS, portal klienta, anulowanie, usunięcie konta. Nowe konta personelu zakładane w tym oknie oznaczaj jako darmowe.
-9. **Tryb na żywo:** najpierw, jeszcze przy `billing_mode='test'`, usuń konta testowe w panelu **Członkowie**: usunięcie konta kasuje w Stripe wszystkich klientów tego konta (także zastąpionych przy zmianie waluty), ale tylko w bieżącym trybie, bo `config.php` ma jeden klucz. Konto testowe usunięte dopiero w trybie na żywo zostaje oznaczone jako problem, a jego klienta testowego usuwasz ręcznie w panelu Stripe (identyfikator jest w historii płatności konta). Potem `stripe-setup.php --mode=live` (ukryte pole, potem Roll key klucza `sk_live_…`), klucz `rk_live_…` w config i `billing_mode='live'`, jedna własna płatność i zwrot w panelu Stripe. Następnie `signup_enabled=true` i usunięcie `signup_invite_token` — to jest start.
+8. **Okno testów** (jeszcze bez zapisywania ustawień w panelu „Ustawienia”, bo od pierwszego zapisu liczy się panel): w `config.php` `billing_enabled=true`, `billing_mode='test'`, `billing_enforce=true`, `signup_enabled=false`, `signup_invite_token` (losowe 32 znaki, np. z `/usr/local/php83/bin/php -r 'echo bin2hex(random_bytes(16)), PHP_EOL;'`) i `support_email`. Zalogowany jako Administrator otwórz w przeglądarce `https://matbravo.com/api/index.php?route=diagnostics&probe=stripe` (dla tej diagnostyki nie ma ekranu w panelu): w odpowiedzi musi być `"stripe":{"reachable":true,…}` (limit 6 sprawdzeń na godzinę). Sprawdź też `"server":{…,"afterResponse":true}`: przy `false` hosting nie umie wysłać odpowiedzi przed dokończeniem pracy, więc synchronizacja płatności i zadania w tle nie działają przy okazji ruchu i wpis crona `stripe-sync.php --events --due` (sekcja „Cron”) jest **obowiązkowy**. Testy z linku `https://matbravo.com/#signup?invite=TOKEN`: karta testowa 4242 4242 4242 4242, płatność z 3DS, portal klienta, anulowanie, usunięcie konta. Nowe konta personelu zakładane w tym oknie oznaczaj jako darmowe.
+9. **Tryb na żywo:** najpierw, jeszcze przy `billing_mode='test'`, usuń konta testowe w panelu **Członkowie**: usunięcie konta kasuje w Stripe wszystkich klientów tego konta (także zastąpionych przy zmianie waluty), ale tylko w bieżącym trybie, bo `config.php` ma jeden klucz. Konto testowe usunięte dopiero w trybie na żywo zostaje oznaczone jako problem, a jego klienta testowego usuwasz ręcznie w panelu Stripe (identyfikator jest w historii płatności konta). Potem `stripe-setup.php --mode=live` (ukryte pole, potem Roll key klucza `sk_live_…`), klucz `rk_live_…` w config i `billing_mode='live'`, jedna własna płatność i zwrot w panelu Stripe. Następnie usuń `signup_invite_token` z `config.php` i w panelu wybierz **Ustawienia → „Otwarta, płatna”** (decyzja o kontach z okresu bezpłatnego, kontrola Stripe) — to jest start. `signup_enabled=true` w pliku nie jest już potrzebne: od pierwszego zapisu liczy się panel. Jeśli rejestracja ma być po prostu bezpłatna (bez Stripe), wybierz „Otwarta, bezpłatna”; kroki 5–9 dotyczą tylko płatności.
 10. **(Opcjonalnie) zgłoszenie do AfterMarket** w sprawie webhooków Stripe (treść w sekcji Stripe, punkt 6). W tym samym zgłoszeniu zapytaj o limity żądań na IP i o LSCache.
 11. **(Opcjonalnie) dodatkowe wpisy crona** — sekcja „Cron (zalecany)”.
 12. **Test obciążenia z zewnątrz** po pierwszym wdrożeniu — sekcja „Odpowiedzi hostingu 429/503”.
