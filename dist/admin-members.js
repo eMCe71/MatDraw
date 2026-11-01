@@ -6,6 +6,11 @@
  *  - the staff accounts panel: [data-billing-badge] (GET admin-billing?list=staff) and [data-account-billing] inside the account form
  *    (switch "Darmowe konto", reason, end date, require-from date, currency, sync state), saved by POST admin-billing-action after 'saved';
  *  - the bulk action "require payment from" for the grandfathered staff accounts.
+ * Roles (PLAN-REJESTRACJA-ROLE §5.5, §10.5): badges (organizer, confirmed, blocked, athlete, free sign-up), the role filters (organizers,
+ * organizers waiting for confirmation, athletes, free sign-up; ownerOf=<tournament> from a tournament card), confirm or take back an
+ * organizer, take the organizer role away or give it back (optionally hiding the person's upcoming tournaments), row selection and the
+ * bulk action "block and hide tournaments" (admin-member organizer-bulk, a done/failed summary). The filter and ownerOf come from the
+ * route (#members?filter=…, #members?ownerOf=…); a tournament id is not personal data.
  * Personal data (e-mails, names, search phrases) travels only in POST bodies, never in a URL. Every value from the API reaches the DOM
  * through h`…` (escaping) or textContent. Dialogs use ui.modal; their buttons carry data-mem-act (not data-action), handled here.
  * The plain functions up to "Page" are pure and tested in tests/members-ui.test.mjs. */
@@ -16,7 +21,10 @@ import {warsawToday} from './guest-view.js';
 import {COUNTRIES,SPORTS,normalizeUsername} from './profile-data.js';
 
 export const PAGE_SIZE=50,GRACE_DAYS=7,BULK_MIN_DAYS=14,FRESH_MS=15000,STAFF_MS=30000;
-export const FILTERS=[['all',()=>T('Wszyscy')],['paid',()=>T('Płacący')],['free',()=>T('Darmowi')],['none',()=>T('Bez planu')],['problem',()=>T('Problem z płatnością')],['muted',()=>T('Wyciszeni')]];
+export const FILTERS=[['all',()=>T('Wszyscy')],['paid',()=>T('Płacący')],['free',()=>T('Darmowi')],['none',()=>T('Bez planu')],['problem',()=>T('Problem z płatnością')],['muted',()=>T('Wyciszeni')],
+ ['organizers',()=>T('Organizatorzy')],['organizers-pending',()=>T('Organizatorzy do potwierdzenia')],['athletes',()=>T('Zawodnicy')],['free-signup',()=>T('Konta z okresu bezpłatnego')]];
+/** At most this many accounts in one bulk action (Members::BULK_MAX). */
+export const BULK_MAX=50;
 const INTERNAL_REASONS=['grandfathered','staff-default'];
 const ONGOING=['active','trialing','past_due'];
 /** Statuses the server refuses a currency change for (BillingSync::ONGOING: ONGOING plus 'incomplete'). */
@@ -109,7 +117,9 @@ export const clampPage=(data,page)=>data&&!(data.items?.length)&&data.total>0&&p
 
 // ---- Requests: only names, ids and bodies; personal data stays in the body ----
 export const call=(route,body)=>({route,options:{method:'POST',body}});
-export const listBody=({q='',filter='all',page=1}={})=>({q:String(q??'').trim().slice(0,100),filter:FILTERS.some(([key])=>key===filter)?filter:'all',page:Number.isInteger(page)&&page>=1?page:1});
+/** A tournament id for the ownerOf filter (the same pattern as the server), or null. */
+export const ownerId=v=>typeof v==='string'&&/^[A-Za-z0-9_-]{1,40}$/.test(v)?v:null;
+export const listBody=({q='',filter='all',page=1,ownerOf=null}={})=>({q:String(q??'').trim().slice(0,100),filter:FILTERS.some(([key])=>key===filter)?filter:'all',page:Number.isInteger(page)&&page>=1?page:1,...(ownerId(ownerOf)?{ownerOf}:{})});
 export const listCall=state=>call('admin-members',listBody(state));
 export const memberCall=(action,fields={})=>call('admin-member',{action,...fields});
 export const billingCall=fields=>call('admin-billing-action',fields);
@@ -121,7 +131,28 @@ export const send=spec=>io.request(spec.route,spec.options);
 /** Body of admin-member create (§4.3): a free account with a reason; no password, so the server generates a temporary one. */
 export function createBody(v){
  const sports=Array.isArray(v.sports)?v.sports:[];
- return {email:String(v.email??'').trim(),firstName:String(v.firstName??'').trim(),lastName:String(v.lastName??'').trim(),username:normalizeUsername(String(v.username??'')),country:v.country,sports,free:true,reason:String(v.reason??'').trim(),...(v.until?{until:v.until}:{})};
+ return {email:String(v.email??'').trim(),firstName:String(v.firstName??'').trim(),lastName:String(v.lastName??'').trim(),username:normalizeUsername(String(v.username??'')),country:v.country,sports,free:true,reason:String(v.reason??'').trim(),...(v.until?{until:v.until}:{}),...(v.organizer===true?{organizer:true}:{})};
+}
+/** Reason of hidden tournaments (shown to the organizer): spaces collapsed, at most 200 characters ({ok:false,error} above). */
+export function hideReason(v){const r=String(v??'').replace(/\s+/g,' ').trim();return [...r].length>200?{ok:false,error:T('Powód może mieć najwyżej 200 znaków.')}:{ok:true,reason:r};}
+/** admin-member organizer: take the role away (blocked) or give it back; hiding the upcoming tournaments only with a block. */
+export function organizerCall(userId,{blocked,hide=false,reason=''}){return memberCall('organizer',{userId,blocked:!!blocked,...(blocked&&hide?{hideTournaments:true,reason}:{})});}
+/** admin-member organizer-trust: confirm the organizer or take the confirmation back. */
+export const trustCall=(userId,trusted)=>memberCall('organizer-trust',{userId,trusted:!!trusted});
+/** admin-member active false, with the person's upcoming tournaments hidden when asked. */
+export const blockCall=(userId,{hide=false,reason=''}={})=>memberCall('active',{userId,active:false,...(hide?{hideTournaments:true,reason}:{})});
+/** admin-member organizer-bulk (§5.5): block the role and hide the tournaments of the selected accounts (at most 50, no duplicates),
+ * deactivate also blocks the accounts. Returns {ok:false,error} for an empty or too large selection. */
+export function bulkCall(ids,{reason='',deactivate=false}={}){
+ const userIds=[...new Set((ids||[]).filter(id=>typeof id==='string'&&id))];
+ if(!userIds.length)return {ok:false,error:T('Zaznacz co najmniej jedno konto.')};
+ if(userIds.length>BULK_MAX)return {ok:false,error:T('Zaznacz najwyżej 50 kont.')};
+ return {ok:true,call:memberCall('organizer-bulk',{userIds,block:true,hideTournaments:true,deactivate:!!deactivate,reason})};
+}
+/** The done/failed summary of organizer-bulk with the names of the accounts (from the list; an unknown id stays an id). */
+export function bulkSummary(result,items=[]){
+ const name=id=>{const m=items.find(i=>i.id===id);return m?(m.name||m.email||id):id;};
+ return {done:(result?.done||[]).map(name),failed:(result?.failed||[]).map(f=>({name:name(f?.id),error:translateMessage(String(f?.error||''))}))};
 }
 /** Fields of admin-member profile: only what changed (empty name fields stay as they are); username null makes the member choose a new name. */
 export function profileFields(v,item={}){
@@ -143,23 +174,53 @@ const sportLabel=slug=>{const s=SPORTS.find(x=>x[0]===slug);return s?T(s[1]):slu
 const all=(...parts)=>h`${parts}`;
 const btn=(label,act,cls='secondary',attrs={})=>h`<button type="button" class="btn ${cls}" data-mem-act="${act}"${Object.entries(attrs).map(([k,v])=>v==null||v===false?'':v===true?h` ${k}`:h` ${k}="${v}"`)}>${label}</button>`;
 
-/** One member row. Every API value is escaped by h. */
-export function memberRow(m){
- const b=planBadge(m.billing,'member'),muted=m.muted,meta=[countryName(m.country),m.createdAt?T('Konto od {date}',{date:fmtSec(m.createdAt)}):'',m.lastLoginAt?T('Ostatnie logowanie: {date}',{date:fmtSec(m.lastLoginAt)}):T('Brak logowań')].filter(Boolean).join(' · ');
- return h`<li class="mem-row${m.active?'':' is-off'}" data-mem-id="${m.id}">
+// ---- Roles (§5.5, §10.5) ----
+/** Role badges of a list item from its sparse fields caps, trusted and freeSignup: {text,type}[]. */
+export function roleBadges(m){
+ const c=m?.caps||{},out=[];
+ if(c.organizerBlocked)out.push({text:T('Organizator — zablokowany'),type:'warning'});
+ else if(c.organizer)out.push(c.organizerTrusted||m?.trusted?{text:T('Organizator — potwierdzony'),type:'success'}:{text:T('Organizator'),type:'neutral'});
+ if(c.athlete)out.push({text:T('Zawodnik'),type:'neutral'});
+ if(m?.freeSignup)out.push({text:T('Konto z okresu bezpłatnego'),type:'neutral'});
+ return out;
+}
+/** Organizer actions of a list item: trust or untrust (role on), block (role on) or unblock (role taken away). */
+export function organizerActions(m){
+ const c=m?.caps||{};
+ if(c.organizerBlocked)return ['unblock'];
+ if(!c.organizer)return [];
+ return [c.organizerTrusted||m?.trusted?'untrust':'trust','block'];
+}
+const ORG_LABEL={trust:()=>T('Potwierdź organizatora'),untrust:()=>T('Cofnij potwierdzenie'),block:()=>T('Odbierz rolę organizatora'),unblock:()=>T('Przywróć rolę organizatora')};
+/** One member row. Every API value is escaped by h. selected: the row's checkbox for the bulk action. */
+export function memberRow(m,{selected=false}={}){
+ const b=planBadge(m.billing,'member'),muted=m.muted,n=Number(m.tournaments)||0,meta=[countryName(m.country),m.createdAt?T('Konto od {date}',{date:fmtSec(m.createdAt)}):'',m.lastLoginAt?T('Ostatnie logowanie: {date}',{date:fmtSec(m.lastLoginAt)}):T('Brak logowań'),n?T('Turnieje: {n}',{n}):''].filter(Boolean).join(' · ');
+ return h`<li class="mem-row${m.active?'':' is-off'}${selected?' is-selected':''}" data-mem-id="${m.id}">
+  <label class="mem-pick"><input type="checkbox" data-mem-select="${m.id}"${selected?' checked':''}><span class="sr-only">${T('Zaznacz: {name}',{name:m.name||m.email||''})}</span></label>
   <div class="mem-who"><strong class="mem-name">${m.name||T('Profil nieuzupełniony')}</strong>${m.username?h`<span class="mem-user">@${m.username}</span>`:''}<span class="mem-email">${m.email}</span></div>
-  <div class="mem-plan">${badgeHtml(b)}${m.active?'':h`<span class="badge warning">${T('Zablokowane')}</span>`}${muted?h`<a class="badge warning mem-muted" href="#moderation" data-page="moderation">${m.mutedUntil?T('Wyciszony do {date}',{date:fmtSec(m.mutedUntil)}):T('Wyciszony')} · ${T('Moderacja')}</a>`:''}</div>
+  <div class="mem-plan">${badgeHtml(b)}${m.active?'':h`<span class="badge warning">${T('Zablokowane')}</span>`}${roleBadges(m).map(badgeHtml)}${muted?h`<a class="badge warning mem-muted" href="#moderation" data-page="moderation">${m.mutedUntil?T('Wyciszony do {date}',{date:fmtSec(m.mutedUntil)}):T('Wyciszony')} · ${T('Moderacja')}</a>`:''}</div>
   <div class="mem-meta">${meta}</div>
-  <div class="mem-actions">${btn(T('Plan'),'plan','small-btn',{'data-mem-id':m.id})}${btn(T('Hasło'),'password','small-btn',{'data-mem-id':m.id})}${btn(T('E-mail'),'email','small-btn',{'data-mem-id':m.id})}${btn(T('Profil'),'profile','small-btn',{'data-mem-id':m.id})}${btn(m.active?T('Zablokuj'):T('Odblokuj'),'active','small-btn',{'data-mem-id':m.id})}${btn(T('Usuń'),'delete','small-btn danger-text',{'data-mem-id':m.id})}</div>
+  <div class="mem-actions">${btn(T('Plan'),'plan','small-btn',{'data-mem-id':m.id})}${btn(T('Hasło'),'password','small-btn',{'data-mem-id':m.id})}${btn(T('E-mail'),'email','small-btn',{'data-mem-id':m.id})}${btn(T('Profil'),'profile','small-btn',{'data-mem-id':m.id})}${organizerActions(m).map(a=>btn(ORG_LABEL[a](),'org-'+a,'small-btn',{'data-mem-id':m.id}))}${btn(m.active?T('Zablokuj'):T('Odblokuj'),'active','small-btn',{'data-mem-id':m.id})}${btn(T('Usuń'),'delete','small-btn danger-text',{'data-mem-id':m.id})}</div>
  </li>`;
+}
+/** The bar of the bulk action over the list (shown with at least one selected row). */
+export function bulkBar(n){
+ return n?h`<div class="mem-selbar" role="region" aria-label="${T('Zaznaczone konta')}"><span class="small"><strong>${T('Zaznaczono: {n}',{n})}</strong></span>${btn(T('Zablokuj i ukryj turnieje'),'org-bulk','primary small-btn')}${btn(T('Wyczyść zaznaczenie'),'unselect','small-btn')}</div>`:h``;
+}
+/** The done/failed summary dialog body of the bulk action. */
+export function bulkSummaryView(s){
+ return h`<p class="modal-lead">${T('Zrobione: {n}',{n:s.done.length})}${s.failed.length?h` · ${T('Nie udało się: {n}',{n:s.failed.length})}`:''}</p>
+  ${s.done.length?h`<ul class="mem-steps">${s.done.map(name=>h`<li>${name}</li>`)}</ul>`:''}
+  ${s.failed.length?h`<div class="notice mem-warn"><ul class="mem-steps">${s.failed.map(f=>h`<li><strong>${f.name}</strong>: ${f.error}</li>`)}</ul></div>`:''}`;
 }
 /** The list with count and paging, or the loading / error / empty state. */
 export function resultsView(st){
+ const picked=st.selected instanceof Set?st.selected:new Set();
  if(st.error)return h`<div class="mem-state"><p class="form-error" role="alert">${st.error}</p>${btn(T('Spróbuj ponownie'),'retry')}</div>`;
  if(!st.data)return h`<p class="muted mem-state" role="status">${T('Wczytuję członków…')}</p>`;
  const {items=[],total=0,page=1}=st.data,pages=Math.max(1,Math.ceil(total/PAGE_SIZE));
  if(!items.length)return h`<div class="mem-state mem-empty"><p><strong>${T('Brak członków spełniających kryteria.')}</strong></p><p class="muted small">${T('Zmień filtr albo frazę wyszukiwania.')}</p></div>`;
- return h`<p class="mem-count muted small" role="status">${T('Znaleziono: {n}',{n:total})}</p><ul class="mem-list">${items.map(memberRow)}</ul>
+ return h`<p class="mem-count muted small" role="status">${T('Znaleziono: {n}',{n:total})}</p>${bulkBar(picked.size)}<ul class="mem-list">${items.map(m=>memberRow(m,{selected:picked.has(m.id)}))}</ul>
   ${pages>1?h`<nav class="mem-pager" aria-label="${T('Strony listy')}">${btn(T('Poprzednia'),'prev','secondary',{disabled:page<=1})}<span class="muted small">${T('Strona {page} z {pages}',{page,pages})}</span>${btn(T('Następna'),'next','secondary',{disabled:page>=pages})}</nav>`:''}`;
 }
 /** Toolbar (search, filter, new account) and the bulk panel around the results region. */
@@ -170,6 +231,7 @@ export function pageView(st){
    <button class="btn primary" type="submit">${T('Szukaj')}</button>
    ${btn(T('Nowe darmowe konto'),'create','secondary')}
   </form>
+  ${ownerId(st.ownerOf)?h`<div class="mem-owner notice"><span>${T('Organizator wybranego turnieju')}</span>${btn(T('Pokaż wszystkich'),'all-members','small-btn')}</div>`:''}
   <details class="mem-bulk"><summary>${T('Wymagaj płatności od…')}</summary>
    <form class="mem-bulk-form" data-mem-form="bulk">
     <p class="muted small">${T('Dotyczy kont personelu, które są darmowe od początku (istniejące konta). Od 14 dni przed datą zobaczą baner, od daty mają 7 dni karencji, potem tylko podgląd.')}</p>
@@ -198,10 +260,16 @@ export const stripeDashboardUrl=u=>typeof u==='string'&&/^https:\/\/dashboard\.s
 export const cancelable=d=>!!d&&ONGOING.includes(d.subStatus)&&!d.cancelAtPeriodEnd&&!!d.subscriptionId;
 
 // ---- Page ----
-const st={q:'',filter:'all',page:1,data:null,at:0,error:'',seq:0,staff:null,staffAt:0,staffPending:null};
+const st={q:'',filter:'all',page:1,ownerOf:null,selected:new Set(),data:null,at:0,error:'',seq:0,staff:null,staffAt:0,staffPending:null};
 export const state=st;
 /** Forgets the member list, search phrase and staff plans (after sign-out or an expired session: no e-mails stay in memory, plan §8.3 point 8). */
-export function forget(){st.seq++;Object.assign(st,{q:'',filter:'all',page:1,data:null,at:0,error:'',staff:null,staffAt:0,staffPending:null});}
+export function forget(){st.seq++;Object.assign(st,{q:'',filter:'all',page:1,ownerOf:null,selected:new Set(),data:null,at:0,error:'',staff:null,staffAt:0,staffPending:null});}
+/** The list state asked for by the route (#members?filter=..., #members?ownerOf=...): {filter,ownerOf} or null when the route asks nothing. */
+export function routeFilter(params){
+ const filter=params?.get?.('filter'),owner=ownerId(params?.get?.('ownerOf'));
+ if(owner)return {filter:'all',ownerOf:owner};
+ return filter&&FILTERS.some(([key])=>key===filter)?{filter,ownerOf:null}:null;
+}
 registry.on('logout',forget);
 const ui=()=>registry.use('ui');
 const toast=message=>ui()?.toast?.(message);
@@ -241,6 +309,7 @@ async function load(force=false){
   const data=await send(listCall(st));if(seq!==st.seq)return;
   const back=clampPage(data,st.page);if(back){st.page=back;return load(true);}
   st.data=data;st.at=Date.now();
+  const ids=new Set((data?.items||[]).map(i=>i.id));for(const id of [...st.selected])if(!ids.has(id))st.selected.delete(id);
  }
  catch(error){if(seq!==st.seq)return;st.error=translateMessage(error.message);}
  paintResults();
@@ -250,7 +319,10 @@ export const reload=()=>load(true);
 export function mountMembersPage(el=root()){
  if(!el||el.dataset.memMounted)return;el.dataset.memMounted='1';
  if(io.demo){setHtml(el,h`<section class="panel mem-demo"><h3>${T('Konta członków działają z serwerem')}</h3><p class="muted">${T('Ta funkcja jest niedostępna w wersji demonstracyjnej.')}</p></section>`);return;}
- setHtml(el,pageView(st));load();paintBulk();
+ // A filter from the route (the settings panel's queue link, a tournament card's "show organizer") replaces the remembered one once.
+ const asked=routeFilter(registry.parseRoute(globalThis.location?.hash||'').params);
+ if(asked){Object.assign(st,{...asked,q:'',page:1,data:null,at:0});st.selected.clear();try{history.replaceState(null,'','#members');}catch{}}
+ setHtml(el,pageView(st));load(!!asked);paintBulk();
 }
 
 // ---- Dialogs ----
@@ -281,6 +353,7 @@ function createDialog(){
    <fieldset class="span-two mem-sports"><legend>${T('Sporty')}</legend>${SPORTS.map(([slug,label])=>h`<label class="mem-chip"><input type="checkbox" name="sports" value="${slug}"> ${T(label)}</label>`)}</fieldset>
    <label class="span-two">${T('Powód darmowego konta')}<input name="reason" required maxlength="200" autocomplete="off"></label>
    <label class="span-two">${T('Darmowe do (opcjonalnie)')}<input name="until" type="date" min="${dayAdd(today,1)}"></label>
+   <label class="checkbox-label span-two"><input type="checkbox" name="organizer"> ${T('Organizator turnieju (może tworzyć własne turnieje)')}</label>
   </div><p class="muted small form-note">${T('Hasło tymczasowe zostanie wygenerowane i pokazane jeden raz.')}</p><div class="form-error" role="alert"></div></form>`,
   all(btn(T('Anuluj'),'close'),h`<button class="btn primary" type="submit" form="mem-create-form">${T('Utwórz konto')}</button>`),true);
 }
@@ -317,12 +390,32 @@ function profileDialog(m){
    <label class="checkbox-label span-two"><input type="checkbox" name="clearClub"> ${T('Wyczyść tekst klubu')}</label></div>
   <div class="form-error" role="alert"></div></form>`,all(btn(T('Anuluj'),'close'),h`<button class="btn primary" type="submit" form="mem-profile-form">${T('Zapisz profil')}</button>`));
 }
+/** "Hide also the person's upcoming tournaments" with the reason the organizer sees (§5.5); only for an account that created tournaments.
+ * m.tournaments counts every tournament of the person (past and hidden ones too) while Members::hideTournaments hides only the upcoming
+ * ones not hidden yet, so the number is labelled as the total and the result toast gives the hidden count. */
+export const hideFields=(m,checked=true)=>Number(m.tournaments)>0?h`<label class="checkbox-label"><input type="checkbox" data-mem-hide${checked?' checked':''}> ${T('Ukryj też jego nadchodzące turnieje (wszystkie jego turnieje: {n})',{n:Number(m.tournaments)})}</label>
+  <label class="field-label mem-reason">${T('Powód ukrycia (widzi go organizator)')}<textarea data-mem-reason maxlength="200" rows="2"></textarea></label><p class="muted small">${T('Ukryte zostaną nadchodzące turnieje tej osoby razem ze zgłoszeniami samych zawodników.')}</p>`:'';
 function activeDialog(m){
  const live=hasLiveSubscription(m.billing);
  openModal(T('Zablokuj konto'),h`<p class="modal-lead">${T('Konto: {email}',{email:m.email})}</p><p>${T('Zablokowana osoba zostanie wylogowana i nie wejdzie do czatu, dopóki jej nie odblokujesz.')}</p>
   ${live?h`<div class="notice mem-warn">${T('Ta osoba ma trwającą subskrypcję. Zablokowanie nie zatrzymuje płatności.')}</div><label class="checkbox-label"><input type="checkbox" data-mem-stop checked> ${T('Zatrzymaj subskrypcję na koniec okresu')}</label>`:''}
-  <div class="form-error" role="alert"></div>`,all(btn(T('Anuluj'),'close'),btn(T('Zablokuj'),'active-go','primary',{'data-mem-id':m.id})));
+  ${hideFields(m,false)}<div class="form-error" role="alert"></div>`,all(btn(T('Anuluj'),'close'),btn(T('Zablokuj'),'active-go','primary',{'data-mem-id':m.id})));
 }
+function organizerDialog(m){
+ openModal(T('Odbierz rolę organizatora'),h`<p class="modal-lead">${T('Konto: {email}',{email:m.email})}</p><p>${T('Ta osoba nie utworzy ani nie zmieni turniejów i nie włączy sobie roli z powrotem. Konto i czat działają dalej.')}</p>
+  ${hideFields(m)}<div class="form-error" role="alert"></div>`,all(btn(T('Anuluj'),'close'),btn(T('Odbierz rolę organizatora'),'org-block-go','primary',{'data-mem-id':m.id})));
+}
+function bulkDialog(){
+ const n=st.selected.size;
+ openModal(T('Zablokuj i ukryj turnieje'),h`<p class="modal-lead">${T('Zaznaczone konta: {n}',{n})}</p><p>${T('Każde zaznaczone konto straci rolę organizatora, a jego nadchodzące turnieje zostaną ukryte razem ze zgłoszeniami samych zawodników.')}</p>
+  <label class="field-label mem-reason">${T('Powód ukrycia (widzi go organizator)')}<textarea data-mem-reason maxlength="200" rows="2"></textarea></label>
+  <label class="checkbox-label"><input type="checkbox" data-mem-deactivate> ${T('Zablokuj też konta (wylogowanie, bez czatu)')}</label><div class="form-error" role="alert"></div>`,
+  all(btn(T('Anuluj'),'close'),btn(T('Zablokuj i ukryj turnieje'),'org-bulk-go','primary')));
+}
+/** The reason typed in the open dialog (checked), or {ok:false,error}. */
+const dialogReason=el=>hideReason(el.closest('.modal')?.querySelector('[data-mem-reason]')?.value);
+/** After a change of roles: the list and me again (the menu badge of organizers waiting for confirmation). */
+const rolesChanged=()=>{reload();import('./me.js').then(m=>m.loadMe({force:true})).catch(()=>{});};
 function deleteDialog(m,confirmEnd=''){
  openModal(T('Usuń konto'),h`<p class="modal-lead">${T('Konto: {email}',{email:m.email})}</p>
   ${confirmEnd?h`<div class="notice mem-warn">${confirmEnd}</div>`:h`<p>${T('Dane osobowe zostaną usunięte, a wiadomości na czacie zostaną jako „Konto usunięte”. Klient w Stripe zostanie usunięty. Tego nie można cofnąć.')}</p><label class="checkbox-label"><input type="checkbox" data-mem-check> ${T('Rozumiem, że tego nie można cofnąć.')}</label>`}
@@ -363,11 +456,31 @@ const ACTS={
   showSecret({email:m.email,password:r.temporaryPassword});reload();
  }),
  'active-go':(el)=>run(el,async()=>{
-  const m=memberById(el.dataset.memId);if(!m)return;const stop=!!el.closest('.modal')?.querySelector('[data-mem-stop]:checked');
-  await send(memberCall('active',{userId:m.id,active:false}));
+  const m=memberById(el.dataset.memId);if(!m)return;const box=el.closest('.modal'),stop=!!box?.querySelector('[data-mem-stop]:checked'),hide=!!box?.querySelector('[data-mem-hide]:checked');
+  const why=hide?dialogReason(el):{ok:true,reason:''};if(!why.ok){say(el,why.error);return;}
+  const r=await send(blockCall(m.id,{hide,reason:why.reason}));
   if(stop)await stopSubscription(m.id);
-  closeModal();toast(T('Konto zablokowane.'));reload();
+  closeModal();toast(hide?T('Konto zablokowane. Ukryte turnieje: {n}',{n:r?.hidden??0}):T('Konto zablokowane.'));rolesChanged();
  }),
+ 'org-trust':(el)=>run(el,async()=>{await send(trustCall(el.dataset.memId,true));toast(T('Organizator potwierdzony.'));rolesChanged();}),
+ 'org-untrust':(el)=>run(el,async()=>{await send(trustCall(el.dataset.memId,false));toast(T('Potwierdzenie cofnięte.'));rolesChanged();}),
+ 'org-block':(el)=>{const m=memberById(el.dataset.memId);if(m)organizerDialog(m);},
+ 'org-block-go':(el)=>run(el,async()=>{
+  const m=memberById(el.dataset.memId);if(!m)return;const hide=!!el.closest('.modal')?.querySelector('[data-mem-hide]:checked');
+  const why=hide?dialogReason(el):{ok:true,reason:''};if(!why.ok){say(el,why.error);return;}
+  const r=await send(organizerCall(m.id,{blocked:true,hide,reason:why.reason}));
+  closeModal();toast(hide?T('Rola organizatora odebrana. Ukryte turnieje: {n}',{n:r?.hidden??0}):T('Rola organizatora odebrana.'));rolesChanged();
+ }),
+ 'org-unblock':(el)=>run(el,async()=>{await send(organizerCall(el.dataset.memId,{blocked:false}));toast(T('Rola organizatora przywrócona.'));rolesChanged();}),
+ 'org-bulk':()=>bulkDialog(),
+ 'org-bulk-go':(el)=>run(el,async()=>{
+  const why=dialogReason(el);if(!why.ok){say(el,why.error);return;}
+  const c=bulkCall([...st.selected],{reason:why.reason,deactivate:!!el.closest('.modal')?.querySelector('[data-mem-deactivate]:checked')});if(!c.ok){say(el,c.error);return;}
+  const r=await send(c.call),summary=bulkSummary(r,st.data?.items||[]);
+  st.selected.clear();openModal(T('Wynik akcji zbiorczej'),bulkSummaryView(summary),btn(T('Zamknij'),'close','primary'));rolesChanged();
+ }),
+ unselect:()=>{st.selected.clear();paintResults();},
+ 'all-members':()=>{st.ownerOf=null;st.filter='all';st.page=1;st.selected.clear();const el=root();if(el)setHtml(el,pageView(st));reload();},
  'delete-go':(el)=>run(el,async()=>{
   const m=memberById(el.dataset.memId);if(!m)return;
   try{await send(memberCall('delete',{userId:m.id,...(el.dataset.memEnd?{endSubscription:true}:{})}));}
@@ -393,7 +506,7 @@ const ACTS={
  'stop-later':(el)=>run(el,async()=>{await send(billingCall({action:'cancelAtPeriodEnd',userId:el.dataset.memId}));closeModal();toast(T('Subskrypcja zakończy się z końcem okresu.'));staffPlans(true).then(()=>fillStaffBadges());if(root())reload();})
 };
 export const FORMS={
- search:(form)=>{const f=new FormData(form);st.q=String(f.get('q')||'');st.filter=String(f.get('filter')||'all');st.page=1;return reload();},
+ search:(form)=>{const f=new FormData(form);st.q=String(f.get('q')||'');st.filter=String(f.get('filter')||'all');st.page=1;st.selected.clear();return reload();},
  bulk:(form)=>{
   const date=String(new FormData(form).get('date')||''),check=validateRequireFrom(date,{scope:'grandfathered'});
   if(!check.ok){say(form,check.error);return;}
@@ -403,10 +516,10 @@ export const FORMS={
    all(btn(T('Anuluj'),'close'),btn(T('Wymagaj płatności'),'bulk-go','primary',{'data-mem-date':date})));
  },
  create:(form)=>run(submitOf(form),async()=>{
-  const f=new FormData(form),body=createBody({email:f.get('email'),firstName:f.get('firstName'),lastName:f.get('lastName'),username:f.get('username'),country:f.get('country'),sports:f.getAll('sports'),reason:f.get('reason'),until:f.get('until')});
+  const f=new FormData(form),body=createBody({email:f.get('email'),firstName:f.get('firstName'),lastName:f.get('lastName'),username:f.get('username'),country:f.get('country'),sports:f.getAll('sports'),reason:f.get('reason'),until:f.get('until'),organizer:f.has('organizer')});
   if(!body.sports.length){say(form,T('Wybierz co najmniej jeden sport.'));return;}
   const r=await send(memberCall('create',body));
-  showSecret({email:body.email,password:r.temporaryPassword,created:true});reload();
+  showSecret({email:body.email,password:r.temporaryPassword,created:true});if(body.organizer)rolesChanged();else reload();
  }),
  email:(form)=>run(submitOf(form),async()=>{
   const email=String(new FormData(form).get('email')||'').trim();
@@ -442,6 +555,13 @@ function onSubmit(event){
 }
 function onChange(event){
  const el=event.target;
+ if(event.type==='change'&&el.matches?.('[data-mem-select]')){
+  const id=el.dataset.memSelect;
+  if(el.checked&&st.selected.size>=BULK_MAX){el.checked=false;toast(T('Zaznacz najwyżej 50 kont.'));return;}
+  if(el.checked)st.selected.add(id);else st.selected.delete(id);
+  const box=root()?.querySelector('[data-mem-results]');if(box){setHtml(box,resultsView(st));box.querySelector(`[data-mem-select="${CSS.escape(id)}"]`)?.focus();}
+  return;
+ }
  if(event.type==='input'&&el.name!=='mem-until')return;
  if(el.matches?.('[data-mem-check]')){const box=el.closest('.modal');const go=box?.querySelector('[data-mem-needs-check]');if(go)go.disabled=![...box.querySelectorAll('[data-mem-check]')].every(c=>c.checked);}
  const mount=el.closest?.('form')?.querySelector('[data-account-billing]');
