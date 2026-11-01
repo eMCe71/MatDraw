@@ -151,16 +151,17 @@ const submitOf=form=>document.querySelector('button[type=submit][form="'+form.id
 /** Runs a workspace command and re-renders (the page mounts again after 'painted'); errors go through ui.handleError (409 reloads). */
 /** The control that should hold the keyboard focus after a command re-renders the page: the same action of the same club or
  * tournament (a dialog form stands for the button that opened it), else another action of that row or card, else the selected
- * filter. Without it the focus fell to <body> after every verify, merge, hide or restore. */
+ * filter. An action without a club or tournament id (adopt-go of a pending name: the row leaves the list) goes to the selected
+ * filter. Without it the focus fell to <body> after every verify, merge, hide, restore or adopt. */
 const FORM_ACT={rename:'rename',merge:'merge',hide:'t-hide'};
 export function focusTarget(doc,{id,act}){
- const all=[...doc.querySelectorAll('[data-clb-act]')],same=all.filter(b=>b.dataset.clbId===id&&!b.disabled);
+ const same=id?[...doc.querySelectorAll('[data-clb-act]')].filter(b=>b.dataset.clbId===id&&!b.disabled):[];
  return same.find(b=>b.dataset.clbAct===act)||same[0]||doc.querySelector('[data-clb-filter][aria-pressed="true"]')||null;
 }
 // The page and the card tools mount again after 'painted' through a dynamic import (settings-boot.js): the target waits for that
 // mount (at most 3 s, so a later visit does not grab the focus).
 let focusAfter=null;
-const refocus=target=>{focusAfter=target?.id?{...target,until:Date.now()+3000}:null;};
+const refocus=target=>{focusAfter=target?{...target,until:Date.now()+3000}:null;};
 function applyFocus(){const t=focusAfter;if(!t||typeof document==='undefined')return;focusAfter=null;if(Date.now()>t.until)return;const el=focusTarget(document,t);if(el)el.focus();}
 async function command(el,type,payload,done){
  const form=el?.matches?.('form'),button=form?submitOf(el):el;if(button)button.disabled=true;

@@ -840,11 +840,14 @@ test('PHP build in a browser: sign-up with the roles, the athlete step, landing 
     assert.ok(visited.some(u=>u.includes('#guest?t='+tour+'&enter=1')),'the entry window is asked for: '+visited.join(' '));
     assert.equal(await page.evaluate(()=>sessionStorage.getItem('matdraw.signup.target')),null,'the target is used once');
     // F6: the paid member's preview opens the entry window once (enter=1 consumed) over the athlete's call to action.
-    await page.waitForSelector('#ath-entry-form',{timeout:20000});
     assert.equal(await page.evaluate(()=>location.hash),'#guest?t='+tour,'enter=1 is consumed');
     assert.match(await page.textContent('#modal-root .modal'),/Zosia Kowalska/);
     assert.equal(await page.locator(`[data-athlete-cta] [data-action="athlete-enter"][data-id="${tour}"]`).count(),1,'the call to action under the window');
     await page.click('#modal-root [data-action="close-modal"].btn');await page.waitForSelector('#ath-entry-form',{state:'detached'});
+    // Once: the closed window does not come back (the preview repaints after the workspace and the member data load).
+    await page.waitForTimeout(1500);
+    assert.equal(await page.locator('#ath-entry-form').count(),0,'the entry window does not open again');
+    assert.equal(await page.evaluate(()=>location.hash),'#guest?t='+tour,'enter=1 stays consumed');
    }else{await page.click('[data-acct-act="later"]');await page.waitForFunction(()=>location.hash.startsWith('#tournaments'),null,{timeout:20000});}
    // The "Role" tab of the new account.
    await page.goto(app+'#profile?tab=roles');await page.waitForSelector('.acct-role [data-acct-act="organizer-toggle"]',{timeout:20000});

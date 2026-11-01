@@ -5,7 +5,8 @@
 //    sign-up offer otherwise (the field is sparse: absent means no offer);
 //  - landing after an athlete's sign-up from the offer (F6): #guest?t=…&enter=1 opens the entry window and the entry is sent;
 //  - the keyboard focus after a save in the Administrator's panels: Ustawienia (the form's submit button), Członkowie (the same
-//    row's opposite action), Kluby (the same action of the same club, or the selected filter) instead of <body>;
+//    row's opposite action), Kluby (the same action of the same club, or the selected filter, also after adopting a pending
+//    club name) instead of <body>;
 //  - no console error, CSP violation or horizontal scroll at 390 px and on desktop, PL and EN.
 // Run: MATDRAW_BROWSER_TESTS=1 scripts/test-http.sh <port> <db> tests/qa-roles-browser.test.mjs (skipped otherwise).
 import test from 'node:test';
@@ -122,6 +123,14 @@ test('PHP build in a browser: organizer tools, guest offer (F2), entry window af
     await page.waitForSelector('#ath-entry-form',{state:'detached'});
     await page.waitForFunction(()=>/Zgłoszenie przyjęte/.test(document.querySelector('[data-athlete-cta]')?.textContent||''),null,{timeout:15000});
     await noOverflow(page,'member preview');await noCsp(page);await ctx.close();}
+  // A pending club name for Kluby (step 6): with the day's quota of new clubs used up, an athlete's new club stays a pending name.
+  const pendingName='UKS Oczekujący '+letters(6);
+  { const {ctx,page}=await open({width:1440,height:900,lang:'pl'});const filled=fixture('roles-clubs-fill');
+    try{const sent=page.waitForResponse(r=>route(r)==='signup'&&r.request().method()==='POST',{timeout:60000});
+     const email=await signup(page,{hash:'#signup?as=athlete',athlete:{club:'new',clubName:pendingName}});assert.equal((await sent).status(),200);
+     const u=fixture('roles-user',{email});assert.deepEqual([u.profiles[0].clubId,u.profiles[0].data.pendingClubName],['unaffiliated',pendingName]);}
+    finally{fixture('roles-clubs-remove',{ids:filled});}
+    await ctx.close();}
   // 5. Członkowie: confirm and take the organizer role by keyboard; the focus moves to the opposite action of the same row.
   { const {ctx,page}=await open({width:1440,height:900,lang:'pl'});await login(page,...ADMIN);
     await page.goto(app+'#members');await page.waitForSelector('.mem-toolbar select[name="filter"]',{timeout:20000});
@@ -148,6 +157,12 @@ test('PHP build in a browser: organizer tools, guest offer (F2), entry window af
     await page.waitForSelector('#clb-rename-form');await page.fill('#clb-rename-form [name="name"]',clubName+' Nowa');await page.keyboard.press('Enter');
     await page.waitForFunction(()=>/Nazwa klubu zmieniona/.test(document.querySelector('#toast')?.textContent||''));await sleep(300);
     assert.deepEqual([(await focused(page)).clb,(await focused(page)).clbId],['rename',cid]);
+    // Adopt: "Utwórz klub i przypisz" carries only the name key (the row leaves the list): the focus goes to the selected filter.
+    const adopt=page.locator('.clb-row-pending',{hasText:pendingName}).locator('[data-clb-act="adopt"]');await adopt.focus();await page.keyboard.press('Enter');
+    await page.waitForSelector('[data-clb-act="adopt-go"]');await page.focus('[data-clb-act="adopt-go"]');await page.keyboard.press('Enter');
+    await page.waitForFunction(()=>/Klub utworzony/.test(document.querySelector('#toast')?.textContent||''));await sleep(300);
+    assert.equal(await page.locator('.clb-row-pending',{hasText:pendingName}).count(),0,'the pending name was adopted');
+    assert.deepEqual([(await focused(page)).tag,(await focused(page)).filter],['BUTTON','all'],'after adopt');
     await noOverflow(page,'clubs');await noCsp(page);await ctx.close();}
   assert.deepEqual(problems,[]);
  }finally{
