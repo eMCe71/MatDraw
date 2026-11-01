@@ -1,7 +1,8 @@
 /* Community state of the signed-in person ("me", plan §4.3 and §8.5): profile, access, billing and feature flags.
  * API mode: GET me after 'ready' and 'login', after the tab becomes visible again (at most every 5 minutes) and after a payment
  * prompt (402). A server without the me route (404) means community features are off, without an error message.
- * Demo mode: the demo accounts are staff/free with complete fictional profiles; edits stay in localStorage.
+ * Demo mode: the demo accounts are staff/free with complete fictional profiles; members carry user.caps and athletes (client.js
+ * demoActor, mirror of the server's me); edits stay in localStorage.
  * Sign-out on a shared device: purgeSession() clears per-tab drafts and tells other tabs ('reset' on the BroadcastChannel). */
 import {registry} from './registry.js';
 import * as Client from './client.js';
@@ -16,7 +17,10 @@ function set(next){me=next;for(const fn of [...listeners]){try{fn(me);}catch(err
 const DEMO_PROFILES={
  'demo-admin':{publicId:'DemoAdmin001',username:'anna.demo',firstName:'Anna',lastName:'Demo',sports:['taekwondo'],clubText:'Klub Demo'},
  'demo-editor':{publicId:'DemoEditor01',username:'piotr.demo',firstName:'Piotr',lastName:'Nowak',sports:['taekwondo'],clubText:'Klub Demo'},
- 'demo-club':{publicId:'DemoClub0001',username:'ola.demo',firstName:'Ola',lastName:'Testowa',sports:['taekwondo','karate'],clubText:'Klub Demo'}
+ 'demo-club':{publicId:'DemoClub0001',username:'ola.demo',firstName:'Ola',lastName:'Testowa',sports:['taekwondo','karate'],clubText:'Klub Demo'},
+ // Community demo accounts (PLAN-REJESTRACJA-ROLE §10.7): an organizer and a parent whose account holds one child's athlete profile.
+ 'demo-organizer':{publicId:'DemoOrganize',username:'marek.demo',firstName:'Marek',lastName:'Organizator',sports:['taekwondo'],clubText:null},
+ 'demo-athlete':{publicId:'DemoAthlete1',username:'ewa.demo',firstName:'Ewa',lastName:'Rodzic',sports:['taekwondo'],clubText:null}
 };
 export const demoProfileKey=userId=>'matdraw.profile.demo.'+userId;
 function demoStored(userId){try{const raw=localStorage.getItem(demoProfileKey(userId));const value=raw?JSON.parse(raw):null;return value&&typeof value==='object'?value:{};}catch{return {};}}
@@ -24,9 +28,11 @@ function demoMe(user){
  if(!user)return null;
  const base={publicId:'Demo'+String(user.id).replace(/[^A-Za-z0-9]/g,'').slice(-8).padStart(8,'0'),username:'demo',firstName:'Demo',lastName:'Konto',sports:['taekwondo'],clubText:null,...DEMO_PROFILES[user.id]};
  const stored=demoStored(user.id),profile={country:'PL',showClub:false,nameDisplay:'initial',avatar:null,usernameChangeAt:null,mustChangePassword:false,...base,...stored,publicId:base.publicId,complete:true};
- return {user:{id:user.id,clubId:user.clubId??null,email:user.email,role:user.role,active:true},profile,
+ // Roles of a member as the server's me gives them (§4.4): user.caps and the account's athlete profiles; staff have neither.
+ const actor=user.role==='member'?Client.demoActor?.(user.id):null,roles=actor?{caps:actor.caps}:{};
+ return {user:{id:user.id,clubId:user.clubId??null,email:user.email,role:user.role,active:true,...roles},profile,...(actor?{athletes:actor.athletes}:{}),
   access:{full:true,state:user.role==='admin'?'staff':'free',until:null,canPost:true,block:null,mutedUntil:null},
-  billing:{enabled:false},features:{signup:false,avatars:'data-url',chat:true},demo:true};
+  billing:{enabled:false},features:{signup:false,avatars:'data-url',chat:true,selfEntry:true},demo:true};
 }
 /** Demo only: saves profile fields for the signed-in demo account and refreshes me. */
 export function saveDemoProfile(patch){

@@ -1,5 +1,5 @@
 /* Chat entry points (plan §8.1, §8.9, §12.10): small and static, app.js imports it; the interface itself (chat.js) loads lazily.
- * Pages: #chat for every signed-in role (global menu, unread badge), "Czat turnieju" in the tournament menu (staff), the public #chat
+ * Pages: #chat for every signed-in role (global menu, unread badge), "Czat turnieju" in the tournament menu (staff, organizers), the public #chat
  * for guests. After 'painted' it mounts [data-chat-mount=home|tournament|strip|page] (the home card only when it comes within 200 px of
  * the viewport) and fills [data-chat-tournament-link]; [data-chat-count] is filled after 'painted' and after 'upcoming-painted',
  * because the upcoming list arrives asynchronously and is refreshed. Nothing is mounted on #screen (no 'painted' there). */
@@ -17,7 +17,9 @@ const shell=(content,title,subtitle)=>ui()?.shell?ui().shell(content,title,subti
 
 registry.registerPage({id:'chat',icon:'chat',label:()=>T('Czat'),nav:'global',roles:['admin','editor','club','member'],order:10,title:()=>T('Czat'),
  render:()=>shell(h`<div class="chat-page-mount" data-chat-mount="page"></div>`,T('Czat'),T('Społeczność MatBravo'))});
-registry.registerPage({id:'event-chat',icon:'chat',label:()=>T('Czat turnieju'),nav:'event',roles:['admin','editor','club'],order:50,title:()=>T('Czat turnieju'),
+// A member reaches it only with a tournament in the workspace (an organizer, PLAN-REJESTRACJA-ROLE §10.4): event pages need one;
+// visible() keeps a member without the organizer role (athlete, chat only) out of it also on a typed #event-chat.
+registry.registerPage({id:'event-chat',icon:'chat',label:()=>T('Czat turnieju'),nav:'event',roles:['admin','editor','club','member'],order:50,title:()=>T('Czat turnieju'),visible:u=>!registry.communityOnly(u),
  render:()=>{const t=ui()?.getState?.()?.tournament;return shell(h`<div class="chat-page-mount" data-chat-mount="page" data-tournament="${t?.id||''}"></div>`,T('Czat turnieju'),t?.name||'');}});
 // Guests: the public full chat (#chat, #chat?c=<slug>, #chat?t=<tournamentId>) with the guest bar.
 registry.registerPublicPage({id:'chat',render:()=>{

@@ -2,8 +2,9 @@
  * (chat, moderation, accounts, members, PWA), so that they never edit app.js. No imports: app.js, client.js, me.js and every
  * feature module can import it without cycles.
  *
- * Pages:   registerPage({id,icon,label,nav:'global'|'event'|'admin'|null,roles:['admin','editor','club','member'],order,title,render})
- *          label/title may be strings or functions (called at render time, so they follow the current language);
+ * Pages:   registerPage({id,icon,label,nav:'global'|'event'|'admin'|null,roles:['admin','editor','club','member'],order,title,render,visible})
+ *          label/title may be strings or functions (called at render time, so they follow the current language); visible(user), when
+ *          given, further limits the page to some users of its roles (e.g. u=>!!u?.caps?.athlete), in allows() and navItems();
  *          render(params) returns SafeHtml synchronously (usually ui.shell(placeholder)); modules fill it after 'painted'.
  * Public:  registerPublicPage({id,render(params)}) – a page without a workspace (guest); it writes #app itself.
  * Actions: registerAction(name,handler(el,id,ctx),{public:false}) – the last rung of the data-action ladder in app.js.
@@ -12,8 +13,10 @@
  * Safe HTML (plan §5.9): h`…${x}…` escapes every interpolation unless it is SafeHtml from another h (arrays are joined);
  *          setHtml(el,safe) is the only innerHTML assignment and rejects plain strings.
  * Helpers: provide(name,value)/use(name); app.js provides 'ui' (T, esc, icon, button, badge, modal, closeModal, toast, navigate,
- *          shell, mascot, emptyMascot, render, commit, handleError, getWorkspace, getState, switchTournament, clubName).
- *          ui.icon/button/badge/mascot/emptyMascot/shell return SafeHtml; strings passed to them are escaped. */
+ *          shell, mascot, emptyMascot, render, commit, handleError, getWorkspace, getState, switchTournament, clubName, bracket).
+ *          ui.icon/button/badge/mascot/emptyMascot/shell/bracket return SafeHtml; strings passed to them are escaped.
+ * Roles (PLAN-REJESTRACJA-ROLE §10.4): a member with the organizer role (user.caps.organizer) works in the tournament workspace;
+ *          communityOnly(user) is a member without it (chat, profile and the athlete's pages only). */
 
 const TOKEN=Symbol('SafeHtml');
 export class SafeHtml{
@@ -64,12 +67,17 @@ export function registerAction(name,handler,{public:isPublic=false}={}){
 }
 export const page=id=>pages.get(id)||null;
 export const publicPage=id=>publicPages.get(id)||null;
-/** Whether a registered page may be shown to this role. */
-export const allows=(def,role)=>!!def&&(def.roles||ROLE_LIST).includes(role)&&(def.nav!=='admin'||role==='admin');
+/** A member without the organizer role: no tournament workspace (menu, #screen, redirects to the member's start page). */
+export const communityOnly=user=>user?.role==='member'&&!user?.caps?.organizer;
+/** A member with the organizer role (caps from me, bootstrap or Actors::of on the server). */
+export const organizerUser=user=>user?.role==='member'&&!!user?.caps?.organizer;
+const seen=(def,user)=>{if(typeof def.visible!=='function')return true;try{return !!def.visible(user??null);}catch{return false;}};
+/** Whether a registered page may be shown to this role (and, for a page with visible(user), to this user). */
+export const allows=(def,role,user)=>!!def&&(def.roles||ROLE_LIST).includes(role)&&(def.nav!=='admin'||role==='admin')&&seen(def,user);
 /** Menu items for a signed-in user: {id,icon,label,nav,badge}, ordered; 'admin' items only for the admin, 'event' only with a tournament. */
 export function navItems(user,{tournament}={}){
  const role=user?.role;
- return [...pages.values()].filter(p=>p.nav&&allows(p,role)&&(p.nav!=='event'||!!tournament?.id)).sort((a,b)=>a.order-b.order||String(a.id).localeCompare(String(b.id)))
+ return [...pages.values()].filter(p=>p.nav&&allows(p,role,user)&&(p.nav!=='event'||!!tournament?.id)).sort((a,b)=>a.order-b.order||String(a.id).localeCompare(String(b.id)))
   .map(p=>({id:p.id,icon:p.icon,label:text(p.label),nav:p.nav,badge:badges.get(p.id)||0}));
 }
 export const title=id=>{const p=pages.get(id);return p?text(p.title??p.label):'';};
@@ -79,11 +87,19 @@ export function handle(action,el,id,ctx={}){
  const a=actions.get(action);if(!a||(ctx.public&&!a.public))return false;
  return Promise.resolve(a.handler(el,id,ctx)).then(()=>true);
 }
-/** Landing page for a role: a member starts in the chat; other roles keep the tournaments page. */
-export function defaultPage(role){
- if(role!=='member')return 'tournaments';
- if(allows(pages.get('chat'),role))return 'chat';
- return [...pages.values()].filter(p=>allows(p,role)).sort((a,b)=>a.order-b.order)[0]?.id||'chat';
+/** The signed-in user of this role (app.js provides ui.getWorkspace), for callers that pass the role only. */
+function signedIn(role){try{const u=provided.get('ui')?.getWorkspace?.()?.user;return u&&u.role===role?u:null;}catch{return null;}}
+/** Landing page: staff and organizers keep the tournaments page, other members start in the chat. Without user the signed-in user of
+ * that role decides (app.js keeps calling defaultPage(role) in a few templates). */
+export function defaultPage(role,user=signedIn(role)){
+ if(role!=='member'||organizerUser(user))return 'tournaments';
+ if(allows(pages.get('chat'),role,user))return 'chat';
+ return [...pages.values()].filter(p=>allows(p,role,user)).sort((a,b)=>a.order-b.order)[0]?.id||'chat';
+}
+/** Copies text to the clipboard: true when copied, false when the browser refuses (no permission, no secure context, no API);
+ * the caller then shows the text selected in a field (the fallback). */
+export async function copyText(text,clipboard=globalThis.navigator?.clipboard){
+ try{if(typeof clipboard?.writeText!=='function')return false;await clipboard.writeText(String(text));return true;}catch{return false;}
 }
 
 /** Updates [data-nav-badge=id] without a render; the value is remembered for the next shell render. */
@@ -151,4 +167,4 @@ export function trapTab(event,root){
  event.preventDefault();target.focus();return true;
 }
 
-export const registry={SafeHtml,h,setHtml,trustedHtml,escapeHtml,tabbables,trapTab,registerPage,registerPublicPage,registerAction,page,publicPage,allows,navItems,title,handle,defaultPage,setBadge,badge,badgeText,on,emit,provide,use,parseRoute,routeHash};
+export const registry={SafeHtml,h,setHtml,trustedHtml,escapeHtml,tabbables,trapTab,registerPage,registerPublicPage,registerAction,page,publicPage,allows,navItems,title,handle,defaultPage,communityOnly,organizerUser,copyText,setBadge,badge,badgeText,on,emit,provide,use,parseRoute,routeHash};

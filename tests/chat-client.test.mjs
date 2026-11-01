@@ -65,6 +65,12 @@ test('notice and tournament title from the API are escaped in templates',()=>{
  assert.ok(!item.includes('<script')&&!item.includes('<svg'),item);assert.ok(item.includes('&lt;script&gt;alert(1)&lt;/script&gt;Puchar'));
  chat.purgeIdentity();
 });
+test('organizer badge: o:1 "Organizator", o:2 "Organizator (społeczność)" for a community organizer not yet confirmed (PS-12)',async()=>{
+ assert.equal(chat.orgLabel(1),'Organizator');assert.equal(chat.orgLabel(2),'Organizator (społeczność)');
+ assert.equal(chat.orgLabel(0),null);assert.equal(chat.orgLabel(undefined),null);
+ setLanguage('en',{persist:false});try{assert.equal(chat.orgLabel(2),'Organiser (community)');assert.equal(chat.orgLabel(1),'Organiser');}finally{setLanguage('pl',{persist:false});}
+ const {readFileSync}=await import('node:fs');assert.match(readFileSync(new URL('../dist/chat.js',import.meta.url),'utf8'),/if\(m\.o\)meta\.appendChild\(el\('span','chat-org',orgLabel\(m\.o\)\)\);/,'the message header uses it');
+});
 test('layout: grouping by cont, day separators, the "Nowe" divider and tombstones break groups',()=>{
  const day=Date.UTC(2026,9,30,10,0,0),m=(id,t,extra)=>({id,r:id,t,a:'A',c:1,b:'x',...extra});
  const list=[m(1,day,{c:0}),m(2,day+60000),m(3,day+120000,{a:'B'}),m(4,day+180000,{x:'mod',c:undefined}),m(5,day+200000),m(6,day+86400000*1.2),m(7,day+86400000*1.2+1000),m(8,day+86400000*1.2+2000)];

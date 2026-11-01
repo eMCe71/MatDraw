@@ -301,3 +301,50 @@
  .guest-section-head h2{font-size:18px}
 }
 @media print{.guest-bar,.access-card,.guest-tabs,.guest-chat,.home-centre,.home-skips{display:none!important}}
+/* Organizer in the tournament workspace (PLAN-REJESTRACJA-ROLE §10.4): tournament marks, links, filter, first-run card, club picker,
+   check-in marks, privacy notice, guardian consent, own slot in a read-only bracket (ui.bracket). */
+.tournament-marks{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px}.tournament-marks .badge,.entry-marks .badge{float:none}
+.tournament-hidden-note{display:flex;gap:8px;align-items:flex-start;margin-top:12px;padding:10px 12px;border-radius:7px;background:#fff6e5;color:#8c6c37;font-size:11px;line-height:1.6}.tournament-hidden-note .icon{width:15px;height:15px;flex-shrink:0;margin-top:2px}
+.tournament-card-links{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}.tournament-card-links:has(.copy-link),.tournament-card-links:has(.tournament-admin-mount:not(:empty)){padding-top:12px}
+.copy-link{font-size:11px;font-weight:600;color:#0063a4;padding:6px 0;min-height:32px}.copy-link .icon{width:15px;height:15px}.copy-link:hover{color:#00448a;text-decoration:underline}
+.tournament-admin-mount:empty{display:none}
+.tournament-filter{margin:0 0 22px;flex-wrap:wrap;row-gap:4px;max-width:100%}
+.tournament-section{margin:34px 0 16px}.tournament-section h2{font-size:18px;color:#19324f}.tournament-section p{font-size:12px;color:#647a93;margin-top:6px}
+.tournament-none{margin-bottom:12px}
+.first-run{padding:24px 26px;margin-bottom:24px;border-left:3px solid #00aeef}.first-run-head{display:flex;align-items:center;gap:16px;margin-bottom:18px}.first-run-head h2{font-size:20px;margin-top:4px}
+.first-run-head .first-run-mascot{width:72px;height:auto;flex-shrink:0}
+.first-run-steps{list-style:none;padding:0;margin:0;display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+.first-run-steps li{display:flex;gap:12px;align-items:flex-start;padding:14px;border:1px solid #e3ebf4;border-radius:9px;background:#fbfdff}
+.first-run-steps li.done{background:#eef8fd;border-color:#cfe8f6}.first-run-steps strong{font-size:13px;color:#19324f}.first-run-steps p{font-size:11px;line-height:1.7;color:#647a93;margin-top:5px}
+.first-run-icon{width:34px;height:34px;flex-shrink:0;display:grid;place-items:center;border-radius:9px;background:#eaf6fd;color:#0072bc}.first-run-icon .icon{width:18px;height:18px}.first-run-steps li.done .first-run-icon{background:#0072bc;color:#fff}
+.first-run-action{margin-top:18px}
+.entry-marks{display:flex;flex-wrap:wrap;gap:5px;margin-top:5px}
+.privacy-note,.check-hint{margin:18px 0 0;background:#f2f8fd;border-color:#d6eaf8;color:#2f5f88;align-items:flex-start}.privacy-note span,.check-hint span{font-size:11px;line-height:1.7;color:#2f5f88}.check-hint{margin:0 0 16px}
+.form-banner{margin:0 0 18px}.form-banner p{font-size:12px;line-height:1.7}
+.self-entry-field{align-items:flex-start!important;margin-top:16px;padding:12px 14px;border:1px solid #dfe8f2;border-radius:8px;background:#fbfdff}.self-entry-field input{margin-top:3px!important}.self-entry-field span{display:flex;flex-direction:column;gap:3px}.self-entry-field strong{font-size:12px;color:#29496b;font-weight:600}.self-entry-field small{font-size:11px;color:#6d819a;line-height:1.6}
+.consent-field{display:flex;flex-direction:column;gap:6px;padding:12px 14px;border:1px solid #eadfc9;border-radius:8px;background:#fffbf2}.consent-field[hidden]{display:none}.consent-field .checkbox-label{align-items:flex-start}.consent-field .checkbox-label input{margin-top:2px}.consent-field small{font-size:10px;color:#8c6c37}
+.club-impact[hidden]{display:none}.club-impact{background:#fff6e5;border-color:#eadfc9;color:#8c6c37}.club-impact p{color:#7d6230;margin:0}.club-impact p+p{margin-top:6px}
+/* Club picker (club-picker.js). */
+.club-picker{display:flex;flex-direction:column;gap:10px;min-width:0}.club-picker legend{margin-bottom:8px}
+.cp-modes{display:flex;flex-wrap:wrap;gap:8px}
+.cp-mode{display:flex;align-items:center;gap:8px;padding:9px 12px;border:1px solid #dfe8f2;border-radius:8px;background:#fff;font-size:12px;color:#365e84;cursor:pointer;min-height:40px}
+.cp-mode:has(input:checked){border-color:#0072bc;background:#eef7fd;color:#00448a}.cp-mode input{width:16px;height:16px;min-height:0;margin:0;accent-color:#0072bc}
+.cp-panel{display:flex;flex-direction:column;gap:7px}.cp-panel[hidden]{display:none}.cp-label{font-size:11px;color:#687e9b;font-weight:500}
+.cp-panel input,.cp-panel select{width:100%;font-size:14px;min-height:44px}
+.cp-hint{font-size:11px;line-height:1.6;color:#6d819a;margin:0}
+.cp-match{display:flex;flex-wrap:wrap;align-items:center;gap:8px;font-size:12px;color:#29496b;padding:9px 11px;border-radius:7px;background:#eef7fd;margin:0}.cp-match[hidden]{display:none}
+.cp-combo{position:relative}
+.cp-list{position:absolute;z-index:5;left:0;right:0;top:calc(100% + 4px);max-height:240px;overflow:auto;margin:0;padding:4px;list-style:none;background:#fff;border:1px solid #c9d9ea;border-radius:8px;box-shadow:0 10px 30px #00448a1f}.cp-list[hidden]{display:none}
+.cp-list [role="option"]{padding:9px 10px;border-radius:6px;font-size:13px;color:#29496b;cursor:pointer}.cp-list [role="option"] small{color:#8c6c37;font-size:10px}
+.cp-list [role="option"][aria-selected="true"],.cp-list [role="option"]:hover{background:#e6f3fc;color:#00448a}
+.cp-empty{padding:9px 10px;font-size:12px;color:#7a8ca2}
+/* Read-only bracket with the own slot (ui.bracket, "Moje starty"). */
+.fighter.is-own{background:#fff4d6;box-shadow:inset 3px 0 0 #e0a100}.fighter.is-own strong{color:#5c4300}
+.athlete-cta-mount:empty{display:none}
+@media(max-width:1000px){.first-run-steps{grid-template-columns:1fr}}
+@media(max-width:650px){
+ .bracket-static .round{display:block;margin-bottom:12px}.bracket-static .round-title{display:flex}
+ .first-run{padding:18px 16px}.first-run-head .first-run-mascot{width:52px}.first-run-head h2{font-size:18px}
+ .tournament-filter{gap:14px;flex-wrap:nowrap;overflow-x:auto;overflow-y:hidden;scrollbar-width:none}.tournament-filter button{flex-shrink:0}
+ .cp-mode{flex:1 1 100%}
+}
