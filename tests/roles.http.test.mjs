@@ -81,6 +81,15 @@ test('sign-up with roles: atomic, mass assignment ignored, no workspace lock, pe
  // The same club name again (another case): the existing club is reused, no second row.
  const same=signupBody();r=await (await begun()).req('signup',{...same,roles:{athlete:true},athlete:athleteBody({club:{name:club.toUpperCase()}})});assert.equal(r.status,200,JSON.stringify(r.data));
  const s2=fixture('roles-user',{email:same.email});assert.deepEqual([s2.profiles[0].clubId,s2.clubs.length,r.data.caps.organizer],[st.clubs[0].id,0,false],'the club of the same key is reused');
+ // A name equal only under the collation of clubs.name (utf8mb4_unicode_ci: ß = ss, MariaDB and MySQL 8.0 alike), not
+ // under Clubs::key: the plain INSERT gets 1062 and the profile takes the existing club, or the club it was merged into.
+ const ad=await admin(),tag=uniq('x'),clubOf=async name=>{const id=(await ad.cmd('profile.save',{...A,name:'Admin '+uniq('p'),clubName:name})).id;await ad.load();return ad.data.profiles.find(x=>x.id===id).clubId;};
+ const strasse=await clubOf('Strasse Testowa '+tag),merged=await clubOf('Strasse Druga '+tag),into=await clubOf('Klub Docelowy '+tag);
+ await ad.cmd('club.merge',{id:merged,into});
+ for(const [name,want] of [['Straße Testowa '+tag,strasse],['Straße Druga '+tag,into]]){
+  const b=signupBody();r=await (await begun()).req('signup',{...b,roles:{athlete:true},athlete:athleteBody({club:{name}})});assert.equal(r.status,200,JSON.stringify(r.data));
+  const sx=fixture('roles-user',{email:b.email});assert.deepEqual([sx.profiles[0].clubId,sx.clubs.length],[want,0],name);
+ }
  // No workspace lock: a sign-up with an athlete ends while another connection holds app_meta FOR UPDATE.
  const hold=holdLock(5);await hold.locked;const waiting=await begun();const t0=performance.now();
  r=await waiting.req('signup',{...signupBody(),roles:{athlete:true},athlete:athleteBody()});const took=performance.now()-t0;await hold.done;
@@ -227,6 +236,12 @@ test('revision isolation: an organizer at his limit and self-entries in A never 
  const full=await command(c,'checkin.save',{tournamentId:ta,id:pa,presence:'present',actualWeight:70});
  error(full,429,'Serwer jest teraz mocno obciążony. Spróbuj ponownie za chwilę.');assert.ok(Number(full.headers.get('retry-after'))>0&&full.data.retry>0);
  await ed.load();assert.equal((await command(ed,'checkin.save',{tournamentId:tb,id:pb,presence:'pending'})).status,200,'staff never wait for the member bucket');
+ // Commands refused with 402 (an organizer without a subscription) never take the global budget: it is counted after the 402.
+ fixture('reset-limits');fixture('roles-bucket',{scope:'member-tx',key:'all',attempts:119});
+ const unpaid=member('isonp',{organizer:true,exempt:false}),np=await signIn(unpaid.email);await np.load();
+ for(let i=0;i<3;i++)error(await command(np,'tournament.save',T({name:'Bez Subskrypcji'})),402,'Ta funkcja wymaga aktywnej subskrypcji.');
+ await c.load();assert.equal((await command(c,'checkin.save',{tournamentId:ta,id:pa,presence:'pending',actualWeight:70})).status,200,'the last unit of the bucket is still free');
+ error(await command(c,'checkin.save',{tournamentId:ta,id:pa,presence:'present',actualWeight:70}),429,'Serwer jest teraz mocno obciążony. Spróbuj ponownie za chwilę.');
  fixture('reset-limits');
 });
 
@@ -310,6 +325,9 @@ test('Administrator: confirm organizers, take the role with hidden tournaments, 
   await c.load();assert.equal(tour(c,t1).trusted,true);
   r=await adminMember(a,{action:'organizer-trust',userId:o.id,trusted:false});assert.equal(r.caps.organizerTrusted,false);
   error(await a.req('admin-member',{action:'organizer-trust',userId:o.id,trusted:'yes'}),400);
+  // A bad reason (over 200 characters) is refused before anything changes: no block, nothing hidden, nothing audited.
+  error(await a.req('admin-member',{action:'organizer',userId:o.id,blocked:true,hideTournaments:true,reason:'x'.repeat(201)}),422,'Sprawdź pole: powód.');
+  assert.deepEqual([fixture('domain-row',{table:'users',id:o.id}).organizer_blocked_at,fixture('domain-row',{table:'tournaments',id:t1}).hidden_by],[null,null]);
   // Take the role away and hide the upcoming tournaments; the self-entry is withdrawn with a tombstone.
   r=await adminMember(a,{action:'organizer',userId:o.id,blocked:true,hideTournaments:true,reason:'Podejrzany turniej'});
   assert.deepEqual(r,{id:o.id,caps:{organizer:false,organizerBlocked:true,organizerTrusted:false,athlete:false},hidden:2});
@@ -321,14 +339,23 @@ test('Administrator: confirm organizers, take the role with hidden tournaments, 
   r=await adminMember(a,{action:'organizer',userId:o.id,blocked:false});assert.equal(r.caps.organizer,true);assert.ok(!('hidden' in r));
   // Block the account with its tournaments (the existing active action).
   const o3=member('adm-act',{organizer:true}),c3=await signIn(o3.email);await c3.load();const t3=(await c3.cmd('tournament.save',T({name:'Konto Do Blokady'}))).id;
+  error(await a.req('admin-member',{action:'active',userId:o3.id,active:false,hideTournaments:true,reason:'y'.repeat(201)}),422,'Sprawdź pole: powód.');
+  assert.deepEqual([fixture('roles-user',{email:o3.email}).user.active,fixture('domain-row',{table:'tournaments',id:t3}).hidden_by],[1,null],'a bad reason leaves the account active');
   assert.deepEqual(await adminMember(a,{action:'active',userId:o3.id,active:false,hideTournaments:true}),{id:o3.id,active:false,hidden:1});
   assert.equal(fixture('domain-row',{table:'tournaments',id:t3}).hidden_by,adminId);
   // Bulk: block and hide for several accounts, one failure does not stop the others.
   const b1=member('bulk',{organizer:true}),b2=member('bulk',{organizer:true});
   const tb=fixture('tournament',{createdBy:b1.id,name:'Zbiorczy',date:day(10)}).id;
+  error(await a.req('admin-member',{action:'organizer-bulk',userIds:[b1.id,b2.id],block:true,hideTournaments:true,reason:'z'.repeat(201)}),422,'Sprawdź pole: powód.');
+  assert.equal(fixture('domain-row',{table:'users',id:b1.id}).organizer_blocked_at,null,'a bad reason blocks no account');
   r=await adminMember(a,{action:'organizer-bulk',userIds:[b1.id,b2.id,'nope',b1.id],block:true,hideTournaments:true});
   assert.deepEqual(r,{done:[b1.id,b2.id],failed:[{id:'nope',error:'Konto nie istnieje.'}]});
   assert.equal(fixture('domain-row',{table:'tournaments',id:tb}).hidden_by,adminId);assert.ok(fixture('domain-row',{table:'users',id:b2.id}).organizer_blocked_at>0);
+  // A server error for one account (a deadlock while blocking it) is logged without personal data and listed; the rest is done.
+  const f1=member('bulkf',{organizer:true}),f2=member('bulkf',{organizer:true}),fault=fixture('roles-bulk-fault',{adminId,userIds:[f1.id,f2.id],fault:f1.id});
+  assert.deepEqual(fault.result,{done:[f2.id],failed:[{id:f1.id,error:'Błąd serwera. Skontaktuj się z Administratorem.'}]});
+  assert.match(fault.log,/MatDraw organizer-bulk: PDOException \S+ SQLSTATE 40001 code 1213/);assert.ok(!fault.log.includes(f1.email)&&!fault.log.includes(f1.id),fault.log);
+  assert.deepEqual([fixture('domain-row',{table:'users',id:f1.id}).organizer_blocked_at,fixture('domain-row',{table:'users',id:f2.id}).organizer_blocked_at>0],[null,true]);
   error(await a.req('admin-member',{action:'organizer-bulk',userIds:Array.from({length:51},(_,i)=>'u'+i)}),400);error(await a.req('admin-member',{action:'organizer-bulk',userIds:[]}),400);
   // An account created by the Administrator while payments are not enforced is a free-signup account (sign-up off and
   // payments free: a combination config.php accepts before and after the settings panel).

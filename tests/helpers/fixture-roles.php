@@ -15,8 +15,18 @@
 //   roles-job {name,config?}                     runs one background job once with config overrides; returns its result
 //   roles-entries {tournamentId} / roles-withdrawals {tournamentId}  entries rows (snapshots) and withdrawal tombstones
 //   roles-audit {since,afterId?}                 account_audit rows from the epoch second `since` (and after the row id afterId)
+//   roles-bulk-fault {adminId,userIds,fault}     admin-member organizer-bulk (block) as Members runs it, with a deadlock (1213)
+//                     when the role of the account `fault` is blocked; returns {result, log} (log: the error_log lines)
 declare(strict_types=1);
-use MatDraw\{Actors,Clubs,Domain,Jobs,Repository,Settings};
+use MatDraw\{Actors,Clubs,Domain,Jobs,Members,Repository,RouteContext,Settings};
+/** A statement that fails like a deadlock (40001/1213) when it blocks the organizer role of one account (roles-bulk-fault). */
+final class FixtureRolesDeadlock extends PDOStatement {
+ protected function __construct(private string $userId){}
+ public function execute(?array $params=null):bool{
+  if(str_starts_with($this->queryString,'UPDATE users SET organizer_blocked_at')&&in_array($this->userId,$params??[],true)){$e=new PDOException('SQLSTATE[40001]: Serialization failure: 1213 Deadlock found when trying to get lock');$e->errorInfo=['40001',1213,'Deadlock found when trying to get lock'];throw $e;}
+  return parent::execute($params);
+ }
+}
 function fixture_roles_has(PDO $pdo,string $t):bool{$q=$pdo->prepare('SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=?');$q->execute([$t]);return (bool)$q->fetchColumn();}
 function fixture_roles_flags(PDO $pdo):array{return Settings::flags(Settings::effective($pdo,matdraw_config()));}
 return [
@@ -73,5 +83,12 @@ return [
  },
  'roles-entries'=>function(PDO $pdo,array $p):array{$q=$pdo->prepare('SELECT profile_id,club_id,snapshot FROM entries WHERE tournament_id=? ORDER BY profile_id');$q->execute([(string)($p['tournamentId']??'')]);return array_map(fn($r)=>['profileId'=>$r['profile_id'],'clubId'=>$r['club_id'],'snapshot'=>json_decode($r['snapshot'],true)],$q->fetchAll());},
  'roles-withdrawals'=>function(PDO $pdo,array $p):array{$q=$pdo->prepare('SELECT profile_id,tournament_id,by_kind FROM entry_withdrawals WHERE tournament_id=? ORDER BY profile_id');$q->execute([(string)($p['tournamentId']??'')]);return $q->fetchAll();},
+ 'roles-bulk-fault'=>function(PDO $pdo,array $p,array $c):array{
+  $ctx=new RouteContext('admin-member',[],$c);$ctx->pdo()->setAttribute(PDO::ATTR_STATEMENT_CLASS,[FixtureRolesDeadlock::class,[(string)($p['fault']??'')]]);
+  $log=tempnam(sys_get_temp_dir(),'mdr-log');$was=ini_set('error_log',$log);
+  try{$out=Members::adminAction($ctx,['id'=>(string)($p['adminId']??''),'role'=>'admin'],['action'=>'organizer-bulk','userIds'=>(array)($p['userIds']??[]),'block'=>true]);}
+  finally{ini_set('error_log',(string)$was);$text=(string)file_get_contents($log);unlink($log);}
+  return ['result'=>$out,'log'=>$text];
+ },
  'roles-audit'=>function(PDO $pdo,array $p):array{$q=$pdo->prepare('SELECT id,actor_id,action,target_user_id,note FROM account_audit WHERE created_at>=? AND id>? ORDER BY id');$q->execute([(int)($p['since']??0),(int)($p['afterId']??0)]);return array_map(fn($r)=>['id'=>(int)$r['id']]+$r,$q->fetchAll());},
 ];

@@ -387,14 +387,17 @@ final class Members {
   switch($action){
    case 'active':
     if(!is_bool($in['active']??null))throw new AppError('Niepoprawny formularz.',400);
+    // Blocking the account may hide the person's upcoming tournaments too (§5.5), in a second transaction; the reason is
+    // checked before the first one, so a bad reason changes nothing.
+    $hide=!$in['active']&&($in['hideTournaments']??false)===true;$reason=$hide?self::hideReason($in['reason']??null):'';
     self::setActive($pdo,$admin,$u['id'],$in['active']);
-    // Blocking the account may hide the person's upcoming tournaments too (§5.5), in a second transaction.
-    return ['id'=>$u['id'],'active'=>$in['active']]+(!$in['active']&&($in['hideTournaments']??false)===true?['hidden'=>self::hideTournaments($pdo,$admin,$u['id'],$in['reason']??null)]:[]);
+    return ['id'=>$u['id'],'active'=>$in['active']]+($hide?['hidden'=>self::hideTournaments($pdo,$admin,$u['id'],$reason)]:[]);
    case 'organizer':
     // Take the organizer role away or give it back (§5.5); the person cannot switch it on while blocked.
     if(!is_bool($in['blocked']??null))throw new AppError('Niepoprawny formularz.',400);
+    $hide=$in['blocked']&&($in['hideTournaments']??false)===true;$reason=$hide?self::hideReason($in['reason']??null):'';
     self::blockOrganizer($pdo,$admin,$u['id'],$in['blocked']);
-    $hidden=$in['blocked']&&($in['hideTournaments']??false)===true?['hidden'=>self::hideTournaments($pdo,$admin,$u['id'],$in['reason']??null)]:[];
+    $hidden=$hide?['hidden'=>self::hideTournaments($pdo,$admin,$u['id'],$reason)]:[];
     return ['id'=>$u['id'],'caps'=>Actors::of($pdo,$u)['caps']]+$hidden;
    case 'organizer-trust':
     // Confirm an organizer or take the confirmation back (R16): home page, chat lobby and self-entries of minors.
@@ -444,17 +447,20 @@ final class Members {
    self::audit($pdo,$admin['id'],$blocked?'organizer.block':'organizer.unblock',$userId);
   });
  }
+ /** The reason of the Administrator's tournament.hide, checked as Domain checks it (422) before the block or deactivation commits. */
+ private static function hideReason(mixed $v):string{$r=Text::clean($v??'');if($r===null||mb_strlen($r)>200)throw new AppError('Sprawdź pole: powód.');return $r;}
  /**
   * tournament.hide with withdrawSelf (§5.5) for every upcoming tournament (date ≥ today) of $userId that is not hidden yet,
   * in one workspace transaction as the Administrator, each audited like the command; returns how many were hidden.
+  * $reason is already checked (hideReason).
   */
- private static function hideTournaments(PDO $pdo,array $admin,string $userId,mixed $reason):int {
+ private static function hideTournaments(PDO $pdo,array $admin,string $userId,string $reason):int {
   $today=date('Y-m-d');
   return (new Repository($pdo))->transaction(function(array &$db)use($pdo,$admin,$userId,$reason,$today):int{
    $n=0;
    foreach($db['tournaments'] as $t){
     if($t['createdBy']!==$userId||$t['date']<$today||($t['hiddenBy']??null)!==null)continue;
-    Domain::execute($db,$admin['id'],'tournament.hide',['tournamentId'=>$t['id'],'hidden'=>true,'withdrawSelf'=>true,'reason'=>is_string($reason)?$reason:''],$db['revision']);
+    Domain::execute($db,$admin['id'],'tournament.hide',['tournamentId'=>$t['id'],'hidden'=>true,'withdrawSelf'=>true,'reason'=>$reason],$db['revision']);
     self::audit($pdo,$admin['id'],'tournament.hide',$userId,mb_substr('hidden '.$t['id'].' · '.$t['name'],0,200));$n++;
    }
    return $n;
@@ -463,18 +469,21 @@ final class Members {
  /**
   * organizer-bulk {userIds:[…≤50], block?:true, hideTournaments?:bool, deactivate?:bool} (§5.5): for each member account
   * the role block (or its removal with block:false), then its upcoming tournaments hidden and the account blocked when
-  * asked, each in its own transactions; one account failing never stops the others. {done:[ids], failed:[{id,error}]}.
+  * asked, each in its own transactions; one account failing never stops the others (a server error, e.g. a deadlock, is
+  * logged and listed like a refusal). The reason is checked once, before any account. {done:[ids], failed:[{id,error}]}.
   */
  private static function organizerBulk(PDO $pdo,array $admin,array $in):array {
   $ids=$in['userIds']??null;
   if(!is_array($ids)||!array_is_list($ids)||!$ids||count($ids)>self::BULK_MAX||array_filter($ids,fn($x)=>!is_string($x))||array_filter([$in['block']??true,$in['hideTournaments']??false,$in['deactivate']??false],fn($x)=>!is_bool($x)))throw new AppError('Niepoprawny formularz.',400);
   $block=($in['block']??true)===true;$hide=$block&&($in['hideTournaments']??false)===true;$deactivate=($in['deactivate']??false)===true;$done=[];$failed=[];
+  $reason=$hide?self::hideReason($in['reason']??null):'';
   foreach(array_values(array_unique($ids)) as $id){
    try{
     $deleted=false;$u=self::target($pdo,$id,$deleted);if($deleted)throw new AppError('Konto nie istnieje.',404);
-    self::blockOrganizer($pdo,$admin,$u['id'],$block);if($hide)self::hideTournaments($pdo,$admin,$u['id'],$in['reason']??null);if($deactivate)self::setActive($pdo,$admin,$u['id'],false);
+    self::blockOrganizer($pdo,$admin,$u['id'],$block);if($hide)self::hideTournaments($pdo,$admin,$u['id'],$reason);if($deactivate)self::setActive($pdo,$admin,$u['id'],false);
     $done[]=$u['id'];
    }catch(AppError $e){$failed[]=['id'=>$id,'error'=>$e->getMessage()];}
+   catch(\Throwable $e){Routes::logThrowable($e,'MatDraw organizer-bulk');$failed[]=['id'=>$id,'error'=>'Błąd serwera. Skontaktuj się z Administratorem.'];}
   }
   return ['done'=>$done,'failed'=>$failed];
  }
