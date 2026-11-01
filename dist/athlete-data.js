@@ -90,9 +90,10 @@ export const entryItem=(view,id,profileId)=>(view?.entries||[]).find(x=>x?.tourn
  * a profile is entered; {kind:'enter',profileId} when the open list allows it; {kind:'blocked',reason:'minor-untrusted'};
  * {kind:'unavailable'} otherwise (the caller explains it from the tournament status). selfEntry false (features.selfEntry) and a
  * member without a profile outside the open list give null: no call to action at all. */
-export function ctaFor(view,id,{athlete=false,selfEntry=true}={}){
+export function ctaFor(view,id,{athlete=false,selfEntry=true,rolesOpen=true}={}){
  if(selfEntry===false)return null;
- if(!athlete)return openItem(view,id)?{kind:'add'}:null;
+ // Without an athlete profile the member is asked for one only while roles are open (me.features.rolesOpen).
+ if(!athlete)return rolesOpen&&openItem(view,id)?{kind:'add'}:null;
  const entered=entryItem(view,id);if(entered)return {kind:'entered',profileId:entered.profileId,canEdit:!!entered.canEdit};
  const t=openItem(view,id);if(!t)return {kind:'unavailable'};
  const rows=(t.profiles||[]).filter(p=>!p.entered),free=rows.find(p=>!p.blocked);

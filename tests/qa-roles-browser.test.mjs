@@ -91,7 +91,7 @@ test('PHP build in a browser: organizer tools, guest offer (F2), entry window af
     await page.waitForSelector('#modal-root .modal',{state:'detached'});await page.goto(app+'#tournaments');
     await page.waitForSelector('[data-action="copy-link"]',{timeout:15000});
     tid=await page.getAttribute('[data-action="copy-link"]','data-id');assert.ok(tid);
-    assert.equal(await page.evaluate(id=>{const card=document.querySelector(`[data-action="copy-link"][data-id="${id}"]`),others=document.querySelector('.tournament-section');return !others||!(others.compareDocumentPosition(card)&4);},tid),true,'the own tournament is not listed among other organisers\' ones');
+    assert.equal(await page.evaluate(id=>{const card=document.querySelector(`[data-action="copy-link"][data-id="${id}"]`),others=document.querySelector('.tournament-section');return !others||!(others.compareDocumentPosition(card)&4);},tid),true,'the own tournament is not listed among other organizers\' ones');
     assert.equal(await page.textContent('.workspace-summary div:first-child strong'),'1','one own tournament');
     assert.equal(await page.locator('.first-run-steps li.done').count(),1,'"Create tournament" is done');
     await noOverflow(page,'organizer tournaments 390');await noCsp(page);await ctx.close();}

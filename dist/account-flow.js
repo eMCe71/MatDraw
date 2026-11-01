@@ -18,12 +18,12 @@
  * Every value from the API reaches the DOM through h`…`/setHtml or textContent (plan §5.9). Form ids carry the acct- prefix. */
 import {registry,h,setHtml} from './registry.js';
 import * as Client from './client.js';
-import {getMe,loadMe,saveDemoProfile,purgeSession} from './me.js';
+import {getMe,loadMe,saveDemoProfile,purgeSession,rolesOpen} from './me.js';
 import {t as T,getLanguage,translateMessage} from './i18n.js';
 import {COUNTRIES,SPORTS,SPORTS_MAX,CLUB_MAX,validateUsername,normalizeUsername,validateName,suggestUsernames,slugName,cleanText} from './profile-data.js';
 import {openCrop} from './avatar-crop.js';
 import {flowStart,flowEnd,readReturn,clearReturn,formatPrice,formatDate,publicConfig,takePaymentMessage,avatarSrc,KNOWN_DEVICE,NOTICE_KEY,SIGNUP_NOTICE,TOURNAMENT_ID,parseTarget,saveTarget,readTarget,clearTarget} from './account-boot.js';
-import {newAthlete,athleteBody,athleteError,athleteFieldsHtml,readAthlete,syncAthlete,accountName} from './athlete-form.js';
+import {newAthlete,athleteBody,athleteProblems,markAthleteProblems,athleteFieldsHtml,readAthlete,syncAthlete,accountName} from './athlete-form.js';
 import {warsawToday} from './guest-view.js';
 import {ATHLETES_PER_ACCOUNT} from './workspace.js';
 
@@ -173,11 +173,15 @@ export function roleName(me){
  return T('Członek');
 }
 /** The state of the "Role" tab (§10.2, §17) from me: organizer {on, blocked}, the account's athlete profiles and whether another
- * one may be added (one profile per account: only while there is none, archived ones included). */
+ * one may be added (one profile per account: only while there is none, archived ones included). open: members may gain roles now
+ * (features.rolesOpen, the cross-group contract (a)); while it is false nothing new is turned on (no organizer role, no first athlete
+ * profile), what the account has stays manageable. hasRole: the organizer role (also a blocked one) or an athlete profile. */
 export function rolesState(me){
- const caps=me?.user?.caps||{},athletes=Array.isArray(me?.athletes)?me.athletes.filter(a=>a&&typeof a.profileId==='string'):[];
- return {organizer:{on:!!caps.organizer,blocked:!!caps.organizerBlocked},athletes,canAdd:athletes.length<ATHLETES_PER_ACCOUNT};
+ const caps=me?.user?.caps||{},athletes=Array.isArray(me?.athletes)?me.athletes.filter(a=>a&&typeof a.profileId==='string'):[],open=rolesOpen(me);
+ return {organizer:{on:!!caps.organizer,blocked:!!caps.organizerBlocked},athletes,open,hasRole:!!caps.organizer||!!caps.organizerBlocked||athletes.length>0,canAdd:open&&athletes.length<ATHLETES_PER_ACCOUNT};
 }
+/** The "Role" tab is shown to members while roles are open, and always to a member who already has a role. */
+export const showsRoles=me=>{if(me?.user?.role!=='member')return false;const r=rolesState(me);return r.open||r.hasRole;};
 
 // ---- State ----
 const ui=()=>registry.use('ui');
@@ -368,7 +372,7 @@ function repaintAthlete(){
  renderPublic();if(name)document.querySelector(`#acct-signup-3 [name="${CSS.escape(name)}"]`)?.focus();
 }
 async function submitAthlete(form){
- const s=S.signup;readAthlete(form,s.athlete);const problem=athleteError(s.athlete,warsawToday());if(problem)throw problem;
+ const s=S.signup;readAthlete(form,s.athlete);const problems=athleteProblems(s.athlete,warsawToday());if(problems.length)throw new Error(markAthleteProblems(form,problems));
  return submitSignup();
 }
 async function submitSignup(){
@@ -472,7 +476,7 @@ async function openStripe(button,route,origin){
 
 // ---- Profile page ----
 function ensureDraft(m){if(!S.draft||S.draftFor!==m.user?.id){S.draft=newFields(m.profile,languages());S.draftFor=m.user?.id;}}
-const TABS=m=>['profile',...(m?.user?.role==='member'?['roles']:[]),'subscription','security'];
+const TABS=m=>['profile',...(showsRoles(m)?['roles']:[]),'subscription','security'];
 const tabOf=m=>{if(m.profile?.mustChangePassword)return 'security';const t=registry.parseRoute(location.hash).params.get('tab');return TABS(m).includes(t)?t:'profile';};
 function profileTab(m){
  const f=S.draft,mode=m.features?.avatars;
@@ -485,7 +489,7 @@ function securityView(m){
 <form id="acct-password-form" class="acct-form acct-block" novalidate><h2>${T('Zmień hasło')}</h2><label class="field-label">${must?T('Hasło tymczasowe'):T('Obecne hasło')}<input name="currentPassword" type="password" required autocomplete="current-password"></label>${passwordField({name:'password',id:'acct-new-pw',label:T('Nowe hasło'),autocomplete:'new-password',meter:true})}<p class="acct-hint">${T('Pozostałe sesje zostaną wylogowane.')}</p><div class="form-error" role="alert"></div><div class="acct-actions"><button type="submit" class="btn primary">${T('Zmień hasło')}</button></div></form>
 ${member&&!must?h`<form id="acct-email-form" class="acct-form acct-block" novalidate><h2>${T('Adres e-mail')}</h2><p class="acct-lead">${T('Obecny adres:')} <strong>${m.user?.email||''}</strong></p><label class="field-label">${T('Nowy adres e-mail')}<input name="email" type="email" inputmode="email" autocomplete="email" autocapitalize="none" spellcheck="false" required maxlength="254"></label><label class="field-label">${T('Obecne hasło')}<input name="currentPassword" type="password" required autocomplete="current-password"></label><p class="acct-hint">${T('Po zmianie adresu inne urządzenia zostaną wylogowane.')}</p><div class="form-error" role="alert"></div><div class="acct-actions"><button type="submit" class="btn secondary">${T('Zapisz adres e-mail')}</button></div></form>`:''}
 ${standalone||install?h`<section class="acct-block acct-install"><h2>${T('Aplikacja MatBravo')}</h2>${standalone?h`<p class="acct-lead">${icon('check')} ${T('MatBravo działa na tym urządzeniu jako aplikacja.')}</p>`:h`<p class="acct-lead">${T('Drabinki i czat jednym stuknięciem, z ekranu głównego.')}</p><div class="acct-actions"><button type="button" class="btn secondary" data-acct-act="install">${icon('download')} ${T('Zainstaluj aplikację')}</button></div>`}</section>`:''}
-${member&&!must?h`<section class="acct-block acct-danger"><h2>${T('Usuń konto')}</h2><p class="acct-lead">${T('Usunięcie jest nieodwracalne. Profil i zdjęcie znikną, a Twoje wiadomości zostaną zastąpione informacją o usunięciu. Trwająca subskrypcja zakończy się od razu.')}</p><div class="acct-actions"><button type="button" class="btn acct-danger-btn" data-acct-act="delete-open">${T('Usuń konto…')}</button></div></section>`:''}`;
+${member&&!must?h`<section class="acct-block acct-danger"><h2>${T('Usuń konto')}</h2><p class="acct-lead">${T('Usunięcie jest nieodwracalne. Profil i zdjęcie znikną, a Twoje wiadomości zostaną zastąpione informacją o usunięciu. Trwająca subskrypcja zakończy się od razu.')}</p>${rolesState(m).athletes.length?h`<p class="acct-hint acct-delete-athlete">${icon('info')} ${KEPT_NAME()} ${T('W oknie usuwania konta możesz zostawić w nich tylko inicjały.')}</p>`:''}<div class="acct-actions"><button type="button" class="btn acct-danger-btn" data-acct-act="delete-open">${T('Usuń konto…')}</button></div></section>`:''}`;
 }
 function profileView(m){
  const tab=tabOf(m),p=m.profile||{},f=S.draft,must=!!p.mustChangePassword,src=avatarSrc(p,64),name=[p.firstName,p.lastName].filter(Boolean).join(' ');
@@ -502,12 +506,13 @@ export function rolesView(m,st=newRoles()){
  const r=rolesState(m),support=supportAddress(),org=r.organizer;
  const orgBlock=h`<section class="acct-block acct-role" aria-labelledby="acct-role-org"><h2 id="acct-role-org">${T('Organizator turnieju')}</h2><p class="acct-lead">${T('Tworzysz własne turnieje, dodajesz zawodników i prowadzisz kontrolę startową. Widzisz tylko swoje turnieje.')}</p>
 ${org.blocked?h`<div class="notice acct-role-blocked" role="status">${icon('lock')}<p>${T('Administrator wyłączył tę rolę.')} ${support?h`${T('Napisz na')} <a class="acct-link" href="mailto:${support}">${support}</a>.`:''}</p></div>`
- :h`<p class="acct-role-state"><span class="badge ${org.on?'success':'neutral'}">${org.on?T('Rola włączona'):T('Rola wyłączona')}</span></p><div class="form-error" role="alert"></div><div class="acct-actions"><button type="button" class="btn ${org.on?'secondary':'primary'}" data-acct-act="organizer-toggle" data-on="${org.on?'false':'true'}">${org.on?T('Wyłącz rolę organizatora'):T('Włącz rolę organizatora')}</button></div>${org.on?'':h`<p class="acct-hint">${T('Po włączeniu strona odświeży się i pojawią się narzędzia organizatora.')}</p>`}`}</section>`;
+ :h`<p class="acct-role-state"><span class="badge ${org.on?'success':'neutral'}">${org.on?T('Rola włączona'):T('Rola wyłączona')}</span></p><div class="form-error" role="alert"></div><div class="acct-actions"><button type="button" class="btn ${org.on?'secondary':'primary'}" data-acct-act="organizer-toggle" data-on="${org.on?'false':'true'}"${!org.on&&!r.open?h` disabled aria-describedby="acct-roles-closed-org"`:''}>${org.on?T('Wyłącz rolę organizatora'):T('Włącz rolę organizatora')}</button></div>${org.on?'':r.open?h`<p class="acct-hint">${T('Po włączeniu strona odświeży się i pojawią się narzędzia organizatora.')}</p>`:h`<p class="acct-hint" id="acct-roles-closed-org">${T('Role są dostępne po otwarciu rejestracji.')}</p>`}`}</section>`;
  let body;
  if(st.mode==='edit'&&st.f){
   body=h`<form id="acct-athlete-form" class="acct-form" novalidate data-acct-athlete>${athleteFieldsHtml(st.f,{id:'acct-ra',clubs:clubList()})}<div class="form-error" role="alert">${st.error}</div><div class="acct-actions"><button type="button" class="btn secondary" data-acct-act="athlete-cancel">${T('Anuluj')}</button><button type="submit" class="btn primary">${T('Zapisz dane zawodnika')}</button></div></form>`;
  }else if(!r.athletes.length){
-  body=h`<p class="acct-lead">${T('Nie masz jeszcze profilu zawodnika. Dodaj go, aby zgłaszać siebie albo swoje dziecko do turniejów.')}</p>${st.error?h`<div class="form-error" role="alert">${st.error}</div>`:h`<div class="form-error" role="alert"></div>`}<div class="acct-actions"><button type="button" class="btn primary" data-acct-act="athlete-add">${icon('plus')} ${T('Uzupełnij dane zawodnika')}</button></div>`;
+  body=!r.open?h`<p class="acct-lead">${T('Nie masz jeszcze profilu zawodnika.')}</p><p class="acct-hint">${T('Role są dostępne po otwarciu rejestracji.')}</p>`
+   :h`<p class="acct-lead">${T('Nie masz jeszcze profilu zawodnika. Dodaj go, aby zgłaszać siebie albo swoje dziecko do turniejów.')}</p>${st.error?h`<div class="form-error" role="alert">${st.error}</div>`:h`<div class="form-error" role="alert"></div>`}<div class="acct-actions"><button type="button" class="btn primary" data-acct-act="athlete-add">${icon('plus')} ${T('Uzupełnij dane zawodnika')}</button></div>`;
  }else{
   body=h`<ul class="acct-athletes">${r.athletes.map(a=>h`<li class="acct-athlete"><span class="acct-avatar">${icon('user')}</span><div class="acct-athlete-text"><strong>${a.name}</strong><span>${relationName(a.relation)}${a.archived?h` · <span class="badge neutral">${T('Zarchiwizowany')}</span>`:''}</span></div><div class="acct-athlete-actions"><button type="button" class="btn secondary" data-acct-act="athlete-edit" data-id="${a.profileId}"${st.loading?h` disabled`:''}>${T('Edytuj dane zawodnika')}</button><button type="button" class="btn secondary" data-acct-act="athlete-archive" data-id="${a.profileId}" data-archived="${a.archived?'false':'true'}">${a.archived?T('Przywróć profil zawodnika'):T('Archiwizuj profil zawodnika')}</button><button type="button" class="btn acct-danger-btn" data-acct-act="athlete-forget" data-id="${a.profileId}">${T('Usuń dane zawodnika')}</button></div></li>`)}</ul><div class="form-error" role="alert">${st.error}</div>${m.user?.caps?.athlete&&registry.page('starts')?h`<p><a class="acct-link" href="#starts" data-page="starts">${T('Zobacz moje starty')} ${icon('arrow')}</a></p>`:''}`;
  }
@@ -546,7 +551,7 @@ async function afterRoles(r,{reload=false,message=''}={}){
  if(message)ui()?.toast?.(message);
 }
 async function saveAthlete(form){
- const st=S.roles;readAthlete(form,st.f);const problem=athleteError(st.f,warsawToday());if(problem)throw problem;
+ const st=S.roles;readAthlete(form,st.f);const problems=athleteProblems(st.f,warsawToday());if(problems.length)throw new Error(markAthleteProblems(form,problems));
  const r=await athleteApi('athlete-save',{...(st.f.id?{id:st.f.id}:{}),...athleteBody(st.f)});
  const then=registry.parseRoute(location.hash).params.get('then');
  if(r?.notice==='club-pending')ui()?.toast?.(clubPending());
@@ -603,15 +608,35 @@ async function saveEmail(form){
  await Client.request('member-email',{method:'POST',body:{currentPassword:el.currentPassword.value,email}});
  await loadMe({force:true});form.removeAttribute('data-dirty');repaint();ui()?.toast?.(T('Zapisano nowy adres e-mail. Inne urządzenia zostały wylogowane.'));
 }
+// Owner decision O7: deleting the account keeps the athlete's full name in kept results; the dialog says so and offers (ticked) to erase
+// the athlete data first with the same password (athlete-forget: initials in kept results), final review F2.
+const KEPT_NAME=()=>T('Wyniki zawodnika z zakończonych turniejów i kategorii po losowaniu zostaną z imieniem i nazwiskiem, widocznym dla organizatora i Administratora.');
+/** The athlete part of the delete dialog for the account's athlete profiles (none: nothing). */
+export function deleteAthleteView(athletes,{forgotten=false}={}){
+ if(!athletes?.length)return h``;
+ if(forgotten)return h`<p class="notice acct-delete-athlete">${T('Dane zawodnika są już usunięte, w zachowanych wynikach zostały inicjały.')}</p>`;
+ return h`<div class="acct-delete-athlete"><p class="acct-hint">${KEPT_NAME()}</p><label class="checkbox-label"><input type="checkbox" name="athleteInitials" checked> <span>${T('Zostaw w zachowanych wynikach tylko inicjały zawodnika')}</span></label></div>`;
+}
 function openDelete(){
- S.del={password:'',confirmEnd:false};
- ui().modal(T('Usunąć konto?'),h`<form id="acct-delete-form" novalidate><p class="modal-lead">${T('Tej operacji nie można cofnąć. Wpisz hasło, aby potwierdzić.')}</p><label class="field-label acct-del-pw">${T('Hasło')}<input name="password" type="password" required autocomplete="current-password"></label><div class="notice acct-delete-end" hidden></div><div class="form-error" role="alert"></div></form>`,h`${ui().button(T('Anuluj'),'close-modal')}<button type="submit" class="btn acct-danger-btn" form="acct-delete-form">${T('Usuń konto')}</button>`);
+ S.del={password:'',confirmEnd:false,forgotten:false};
+ ui().modal(T('Usunąć konto?'),h`<form id="acct-delete-form" novalidate><p class="modal-lead">${T('Tej operacji nie można cofnąć. Wpisz hasło, aby potwierdzić.')}</p><label class="field-label acct-del-pw">${T('Hasło')}<input name="password" type="password" required autocomplete="current-password"></label><div data-acct-delete-athlete>${deleteAthleteView(rolesState(getMe()).athletes)}</div><div class="notice acct-delete-end" hidden></div><div class="form-error" role="alert"></div></form>`,h`${ui().button(T('Anuluj'),'close-modal')}<button type="submit" class="btn acct-danger-btn" form="acct-delete-form">${T('Usuń konto')}</button>`);
 }
 async function deleteAccount(form){
- const d=S.del||(S.del={password:'',confirmEnd:false}),field=form.elements.password,password=field.value||d.password;
+ const d=S.del||(S.del={password:'',confirmEnd:false,forgotten:false}),field=form.elements.password,password=field.value||d.password;
  if(!password)throw new Error('Nieprawidłowe obecne hasło.');
+ // The athlete data first (the box ticked): a refusal here changes nothing; once erased, the account deletion is retried alone.
+ if(form.elements.athleteInitials?.checked&&!d.forgotten){
+  for(const a of rolesState(getMe()).athletes)await athleteApi('athlete-forget',{profileId:a.profileId,password});
+  d.forgotten=true;d.password=password;
+  const part=form.querySelector('[data-acct-delete-athlete]');if(part)setHtml(part,deleteAthleteView([{}],{forgotten:true}));
+ }
  try{await Client.request('account-delete',{method:'POST',body:d.confirmEnd?{password,endSubscription:true}:{password}});}
  catch(error){
+  if(d.forgotten&&!(error?.status===409&&error.data?.confirmEnd)){
+   loadMe({force:true});
+   const box=form.querySelector('.form-error');if(box)box.textContent=T('Dane zawodnika są już usunięte, w zachowanych wynikach zostały inicjały. Konta nie usunięto: {error}',{error:message(error)});
+   return;
+  }
   if(error?.status===409&&error.data?.confirmEnd){
    d.password=password;d.confirmEnd=true;const box=form.querySelector('.acct-delete-end');box.hidden=false;box.setAttribute('role','alert');
    setHtml(box,h`${icon('alert')}<p><strong>${message(error)}</strong> ${T('Potwierdź jeszcze raz, aby usunąć konto i zakończyć subskrypcję.')}</p>`);

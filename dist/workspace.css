@@ -351,3 +351,6 @@
  .tournament-filter{gap:14px;flex-wrap:nowrap;overflow-x:auto;overflow-y:hidden;scrollbar-width:none}.tournament-filter button{flex-shrink:0}
  .cp-mode{flex:1 1 100%}
 }
+/* Erased athlete records (Domain::forgetProfile): the tournaments that keep their results, read-only (final review F1) */
+.erased-kept{display:block;margin-top:3px;font-size:11px;line-height:1.5;color:#5b6d84;overflow-wrap:anywhere}
+.erased-list{margin:0 0 6px;padding-left:18px;font-size:13px;line-height:1.7;color:#29496b}

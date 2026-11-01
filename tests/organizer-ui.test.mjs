@@ -31,6 +31,12 @@ test('communityOnly, defaultPage(role,user) and visible(user): an organizer work
  assert.ok(registry.allows(registry.page('qa-starts'),'member',athlete)&&!registry.allows(registry.page('qa-starts'),'member',org)&&!registry.allows(registry.page('qa-starts'),'admin',{role:'admin',caps:{athlete:true}}));
 });
 
+test('final review F9: the tournament summary labels do not depend on the count (no genitive plural after 1)',()=>{
+ const summary=app.slice(app.indexOf('<div class="workspace-summary">'),app.indexOf('${firstRun}'));
+ assert.ok(summary.length>0);
+ for(const bad of ['Moich turniejów','Turniejów','Zawodników klubu','Moich zawodników','Otwartych zapisów'])assert.ok(!summary.includes("T('"+bad+"')"),bad);
+ for(const good of ['Moje turnieje','Turnieje','Zawodnicy klubu','Moi zawodnicy','W bazie zawodników','Otwarte zapisy'])assert.ok(summary.includes("T('"+good+"')"),good);
+});
 test('app.js uses the roles: communityOnly in the shell, render, the hall screen polling and rerenderLanguage; mount points for wave 3',()=>{
  const shell=app.slice(app.indexOf('function shell('),app.indexOf('function roundName('));
  assert.match(shell,/member=communityOnly\(user\)/);assert.match(shell,/home=registry\.defaultPage\(user\.role,user\)/);
@@ -190,6 +196,9 @@ test('demo in a browser: organizer and editor defaults, copy link with its fallb
    await page.fill('#tournament-form [name=name]','Puchar Organizatora');await page.fill('#tournament-form [name=date]','2027-03-14');await page.fill('#tournament-form [name=city]','Opole');
    await page.click('button[form="tournament-form"]');await page.waitForSelector('[data-action="copy-link"]');
    const id=await page.locator('[data-action="copy-link"]').first().getAttribute('data-id');
+   // Final review F9: the summary labels are headings in the nominative, right for any count ("1 Moich turniejów" was wrong).
+   assert.deepEqual(await page.locator('.workspace-summary span').allInnerTexts(),['Moje turnieje','Moi zawodnicy','Otwarte zapisy']);
+   assert.equal(await page.locator('.workspace-summary strong').first().innerText(),'1');
    await page.click('[data-action="copy-link"]');await page.waitForSelector('#copy-link-field');
    assert.deepEqual(await page.evaluate(()=>{const f=document.querySelector('#copy-link-field');return [f.value,f.readOnly,f.selectionStart,f.selectionEnd===f.value.length];}),[url+'#guest?t='+id,true,0,true],'fallback: the address selected in a read-only field');
    await page.keyboard.press('Escape');await ctx.close();
@@ -260,6 +269,49 @@ test('API mode in a browser: a reauth at start-up asks for the password, a wrong
  }finally{await browser.close();server.close();}
 });
 
+test('final review F1, demo in a browser (390 and 1440): the Administrator erases an account-owned athlete profile; an erased record is read-only',{skip:!chromium&&'MATDRAW_BROWSER_TESTS=1 and Playwright needed',timeout:180000},async()=>{
+ const {server,url}=await serve(),browser=await chromium.launch().catch(e=>{server.close();throw e;}),problems=[];
+ try{
+  for(const [w,hh] of [[390,844],[1440,900]]){
+   const ctx=await browser.newContext({viewport:{width:w,height:hh},locale:'pl-PL',serviceWorkers:'block'}),page=await ctx.newPage();
+   page.on('pageerror',e=>problems.push(e.message));page.on('console',m=>{if(m.type()==='error')problems.push(m.text().slice(0,200));});
+   await page.goto(url);await page.click('[data-action="demo-login"][data-role="admin"]');await page.waitForSelector('.app-shell');
+   // The parent's child (an athlete account's profile) has an entry in a tournament that then finishes: the result is kept.
+   await page.evaluate(async()=>{
+    const W=await import('./workspace.js');let db=JSON.parse(localStorage.getItem('matdraw.workspace.v2'));
+    db=W.execute(db,'demo-admin','entry.save',{tournamentId:'t-autumn-2026',profileId:'demo-athlete-child',weight:42,height:152,gradeType:'cup',grade:7,events:['forms']}).db;
+    db.tournaments.find(t=>t.id==='t-autumn-2026').status='finished';localStorage.setItem('matdraw.workspace.v2',JSON.stringify(db));
+   });
+   await page.goto(url+'#database');await page.reload();await page.waitForSelector('.roster-table');
+   const row=page.locator('.roster-table tbody tr').filter({hasText:'Zuzanna Demo'});
+   assert.match(await row.innerText(),/Konto zawodnika/);
+   await row.locator('[data-action="edit-profile"]').click();await page.waitForSelector('#profile-form');
+   // The Administrator sees the erase action on an account's profile, with the text for an owned profile.
+   await page.click('.modal [data-action="forget-profile"]');await page.waitForSelector('.modal [data-action="confirm-forget-profile"]');
+   assert.match(await page.locator('.modal').innerText(),/Konto zostaje, ale jego profil zawodnika zniknie\..*w zachowanych wynikach zostaną tylko inicjały/s);
+   await page.click('.modal [data-action="confirm-forget-profile"]');await page.waitForFunction(()=>/Dane zawodnika usunięte/.test(document.querySelector('#toast')?.textContent||''));
+   const db=await page.evaluate(()=>JSON.parse(localStorage.getItem('matdraw.workspace.v2')));
+   const kept=db.profiles.find(p=>p.id==='demo-athlete-child');
+   assert.deepEqual([kept.name,kept.ownerId,kept.birthDate,kept.archived],['Dane usunięte',null,null,true],'anonymised: the result is kept');
+   assert.equal(db.tournaments.find(t=>t.id==='t-autumn-2026').entries.find(e=>e.profileId==='demo-athlete-child').name,'Z. D.','the kept result shows initials');
+   // The erased record in the archive: read-only, no date prompt, no entry, no edit; the tournament that keeps it; only further erasure.
+   await page.check('[data-control="archive"]');await page.waitForSelector('.roster-table tbody tr:has-text("Dane usunięte")');
+   const erased=page.locator('.roster-table tbody tr').filter({hasText:'Dane usunięte'});
+   const text=await erased.innerText();
+   assert.ok(!/Uzupełnij datę/.test(text),'no date prompt');assert.match(text,/Puchar/,'the tournament that keeps the result');
+   assert.equal(await erased.locator('[data-action="edit-profile"],[data-action="register-profile"],[data-action="archive-profile"]').count(),0);
+   assert.equal(await erased.locator('[data-action="forget-profile"]').count(),1);
+   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth-document.documentElement.clientWidth),0,'no horizontal scroll');
+   // Opened any other way, the record's card has no fields and no restore.
+   await page.evaluate(()=>{const b=document.createElement('button');b.dataset.action='edit-profile';b.dataset.id='demo-athlete-child';b.id='qa-open-erased';document.querySelector('#main').append(b);});
+   await page.click('#qa-open-erased');await page.waitForSelector('.modal .erased-list');
+   assert.equal(await page.locator('.modal input,.modal select').count(),0,'read-only');assert.equal(await page.locator('.modal [data-action="archive-profile"]').count(),0,'no restore');
+   assert.equal(await page.locator('.modal [data-action="forget-profile"]').count(),1);
+   await ctx.close();
+  }
+  assert.deepEqual(problems,[]);
+ }finally{await browser.close();server.close();}
+});
 test('demo in a browser: a page with visible(user) renders for its user, #event-chat stays closed to an athlete, an edited unaffiliated profile keeps its pending club name',{skip:!chromium&&'MATDRAW_BROWSER_TESTS=1 and Playwright needed',timeout:180000},async()=>{
  const {server,url}=await serve(),browser=await chromium.launch().catch(e=>{server.close();throw e;}),problems=[];
  const ctx=await browser.newContext({viewport:{width:1440,height:900},locale:'pl-PL',serviceWorkers:'block'}),page=await ctx.newPage();page.on('pageerror',e=>problems.push(e.message));page.on('console',m=>{if(m.type()==='error')problems.push(m.text().slice(0,200));});

@@ -2,7 +2,9 @@
  * Sections: sign-up of new accounts (three modes, plus the payments of existing accounts while sign-up is off), Stripe (state and check),
  * the help address, accounts of the free period (groups A and B, bulk "require payment from"), organizers (publishing on or paused, the
  * switch "require confirmation of organizers" = organizers.trustRequired, the confirmation queue) and the history of changes.
- * Routes: GET admin-settings, POST admin-settings-save {version,…} (409 stale | stripe_not_ready | test_mode | free_period_decision),
+ * Routes: GET admin-settings (with stripeCheck {ok, stale, checkedAt, mode}: contract (b), a stale or failed check pauses paid sign-up
+ * and payment enforcement until a fresh check passes), POST admin-settings-save {version,…} (409 stale | stripe_not_ready | test_mode
+ * (also any 409 with confirmTestMode:true, contract (c): the answer is resent with allowTestMode:true) | free_period_decision),
  * POST admin-stripe-check, POST admin-billing-action {action:'requireFrom',scope:'free-signup',date}. Decision and test-mode dialogs use
  * ui.modal; their buttons carry data-set-act (not data-action), handled here. Every API value reaches the DOM through h`…`.
  * The plain functions up to "Page" are pure and tested in tests/settings-ui.test.mjs. */
@@ -37,9 +39,21 @@ export function paidAvailable(view){
 }
 /** Whether the change stops requiring payments (paid -> free): subscriptions keep renewing, so the panel warns first (§3.4). */
 export const stopsPayments=(view,fields)=>view?.payments==='paid'&&fields?.payments==='free';
-/** Body of admin-settings-save: the loaded version, the changed fields and the answers of the dialogs (confirmTestMode, freePeriod). */
-export function saveBody(view,fields,{confirmTestMode=false,freePeriod=null}={}){
- return {version:Number.isInteger(view?.version)?view.version:0,...fields,...(confirmTestMode?{confirmTestMode:true}:{}),...(freePeriod?{freePeriod}:{})};
+/** Body of admin-settings-save: the loaded version, the changed fields and the answers of the dialogs (allowTestMode, freePeriod).
+ * An allowed test mode is sent as allowTestMode (contract (c)) and as confirmTestMode, the field of servers before that contract. */
+export function saveBody(view,fields,{allowTestMode=false,confirmTestMode=false,freePeriod=null}={}){
+ const test=allowTestMode||confirmTestMode;
+ return {version:Number.isInteger(view?.version)?view.version:0,...fields,...(test?{allowTestMode:true,confirmTestMode:true}:{}),...(freePeriod?{freePeriod}:{})};
+}
+/** The Stripe check state of a view (contract (b)): stale (the Stripe configuration changed since the last check) and paused (payments
+ * are required by the settings, but paid sign-up and enforcement wait for a fresh passing check). A view without stripeCheck: neither.
+ * Paused follows the server's own signal, effective.degraded 'stripe-check' (Settings::effective); without effective, a check that was
+ * made (checkedAt) and failed or went stale. A check that never ran pauses nothing: the server enforces payments then (R1.2). */
+export function stripeState(v){
+ const c=v?.stripeCheck;if(!c||typeof c!=='object')return {stale:false,paused:false};
+ const stale=c.stale===true,e=v?.effective;
+ const paused=e&&typeof e==='object'&&'degraded' in e?e.degraded==='stripe-check':v?.payments==='paid'&&c.checkedAt!=null&&(stale||c.ok!==true);
+ return {stale,paused};
 }
 /** The decision about accounts of the free period (§3.4 point 5): keep, or require payment from a date at least 14 days ahead. */
 export function decisionBody(choice,date,today=warsawToday()){
@@ -51,7 +65,7 @@ export function decisionBody(choice,date,today=warsawToday()){
 /** What a refused save asks for next: {kind:'test_mode'|'decision'|'stale'|'stripe'|'error', counts?, message}. */
 export function outcome(error){
  const code=error?.code||error?.data?.code,message=translateMessage(error?.message||T('Nie udało się wykonać operacji.'));
- if(error?.status===409&&code==='test_mode')return {kind:'test_mode',message};
+ if(error?.status===409&&(code==='test_mode'||error?.data?.confirmTestMode===true))return {kind:'test_mode',message};
  if(error?.status===409&&code==='free_period_decision'){const c=error.data?.counts||{};return {kind:'decision',counts:{a:Math.max(0,Number(c.a)||0),b:Math.max(0,Number(c.b)||0)},message};}
  if(error?.status===409&&code==='stale')return {kind:'stale',message};
  if(error?.status===409&&code==='stripe_not_ready')return {kind:'stripe',message};
@@ -119,15 +133,18 @@ function signupSection(v){
    ${paid.ok?'':h`<p class="muted small" id="set-paid-why">${paid.reason}</p>`}
    <label class="set-switch" data-set-payments${off?'':' hidden'}><input type="checkbox" name="payments" value="paid"${payOn?' checked':''}${!paid.ok&&!payOn?' disabled':''}><span><strong>${T('Płatności istniejących kont')}</strong><small>${T('Włączone: konta bez darmowego planu muszą mieć subskrypcję, aby pisać na czacie i zgłaszać się do turniejów.')}</small></span></label>
    ${v.effective&&v.effective.mode!==mode?h`<p class="small set-effective">${T('Obowiązuje teraz: {mode}',{mode:modeName(v.effective.mode)})}</p>`:''}
+   ${stripeState(v).paused?h`<p class="notice set-warn">${PAUSED()}</p>`:''}
    <div class="form-error" role="alert"></div><button class="btn primary" type="submit">${T('Zapisz tryb rejestracji')}</button></form></section>`;
 }
+const PAUSED=()=>T('Płatna rejestracja i wymaganie płatności są wstrzymane, dopóki nowa kontrola Stripe nie przejdzie.');
 function stripeSection(v){
- const s=v.stripe||{},c=s.check;
+ const s=v.stripe||{},c=s.check,state=stripeState(v);
  const prices=c?.prices?['pln','usd'].map(k=>k.toUpperCase()+': '+(c.prices[k]?T('jest'):T('brak'))).join(' · '):'';
  return h`<section class="panel set-section" aria-labelledby="set-h-stripe"><h2 id="set-h-stripe">${T('Stripe')}</h2>
   <dl class="set-facts"><div><dt>${T('Konfiguracja')}</dt><dd>${s.enabled?T('Klucze Stripe są w config.php'):T('Brak (płatności wyłączone w config.php)')}</dd></div>
    <div><dt>${T('Tryb Stripe')}</dt><dd>${s.mode==='live'?h`<span class="badge success">${T('Produkcyjny (live)')}</span>`:h`<span class="badge warning">${T('Testowy (test)')}</span>`}</dd></div>
    <div><dt>${T('Ostatnia kontrola')}</dt><dd data-set-check>${c?h`${fmtTime(c.at)} · ${c.ok?h`<span class="badge success">${T('Działa')}</span>`:h`<span class="badge warning">${T('Problem')}</span> ${checkError(c.error)}`}${prices?h`<br><span class="muted small">${T('Ceny planu')}: ${prices}</span>`:''}`:T('jeszcze nie było')}</dd></div></dl>
+  ${state.stale?h`<div class="set-alert" role="alert"><strong>${T('Konfiguracja Stripe zmieniła się od ostatniego sprawdzenia — sprawdź ponownie')}</strong>${state.paused?h` ${PAUSED()}`:''}</div>`:state.paused?h`<p class="notice set-warn">${PAUSED()}</p>`:''}
   <div class="set-row">${btn(T('Sprawdź Stripe'),'stripe-check','secondary',{disabled:!s.enabled})}<span class="muted small">${T('Najwyżej 6 kontroli na godzinę.')}</span></div></section>`;
 }
 function supportSection(v){
@@ -237,8 +254,8 @@ export async function save(el,fields,extra={},done=T('Zapisano ustawienia.')){
  const r=await attempt(st.view,fields,extra);
  if(r.ok){pending=null;st.view=r.view;closeIfOpen();paint();refocus(origin);toast(done);if(touchesPending(fields))io.refreshMe();return;}
  pending={fields,extra,done,origin};
- if(r.kind==='test_mode'){openModal(T('Stripe w trybie testowym'),h`<p class="modal-lead">${r.message}</p><p class="muted small">${T('W trybie testowym karty testowe przechodzą, a prawdziwe płatności nie. Przełącz Stripe na tryb live w config.php przed prawdziwym otwarciem płatności.')}</p><div class="form-error" role="alert"></div>`,
-  all(btn(T('Anuluj'),'close'),btn(T('Potwierdzam tryb testowy'),'test-go','primary')));return;}
+ if(r.kind==='test_mode'){openModal(T('Stripe w trybie testowym'),h`<p class="modal-lead">${T('Stripe działa w trybie testowym — każdy dostanie pełny dostęp kartą testową. Otworzyć mimo to?')}</p><p class="muted small">${T('W trybie testowym karty testowe przechodzą, a prawdziwe płatności nie. Przełącz Stripe na tryb live w config.php przed prawdziwym otwarciem płatności.')}</p><div class="form-error" role="alert"></div>`,
+  all(btn(T('Anuluj'),'close'),btn(T('Otwórz mimo to'),'test-go','primary')));return;}
  if(r.kind==='decision'){openModal(T('Konta z okresu bezpłatnego'),decisionView(r.counts),all(btn(T('Anuluj'),'close'),h`<button class="btn primary" type="submit" form="set-decision-form">${T('Zapisz decyzję')}</button>`),true);return;}
  const plan=refusalPlan(r.kind,{dialog:dialogOpen()});pending=plan.keep?{fields,extra,done,origin}:null;
  if(plan.close)closeIfOpen();
@@ -256,18 +273,28 @@ const ACTS={
  close:()=>{pending=null;closeModal();},
  retry:()=>load(),
  pending:()=>ui().navigate('members',{filter:'organizers-pending'}),
- 'test-go':el=>busy(el,()=>pending&&save(el,pending.fields,{...pending.extra,confirmTestMode:true},pending.done)),
- 'stripe-check':el=>busy(el,async()=>{
-  let check=null;
-  try{check=(await io.request('admin-stripe-check',{method:'POST',body:{}}))?.stripeCheck||null;}
-  catch(error){check=error?.data?.stripeCheck||null;if(!check){toast(translateMessage(error.message));return;}}
-  if(st.view)st.view={...st.view,stripe:{...st.view.stripe,check}};paint();toast(check?.ok?T('Stripe działa.'):checkError(check?.error)||T('Stripe zwrócił błąd.'));
- }),
+ 'test-go':el=>busy(el,()=>pending&&save(el,pending.fields,{...pending.extra,allowTestMode:true},pending.done)),
+ 'stripe-check':el=>checkStripe(el),
  'bulk-go':el=>busy(el,async()=>{
   const r=await io.request('admin-billing-action',{method:'POST',body:bulkBody(el.dataset.setDate)});
   closeModal();toast(T('Zmieniono konta: {n}',{n:r?.count??0}));await load();
  })
 };
+/** The Stripe check button: admin-stripe-check, the result at once, then the server's view again. */
+export const checkStripe=el=>busy(el,async()=>{
+  let check=null;
+  try{check=(await io.request('admin-stripe-check',{method:'POST',body:{}}))?.stripeCheck||null;}
+  catch(error){
+   check=error?.data?.stripeCheck||null;
+   // A server error (503 stripe_unavailable) comes after the failed check was saved, so the server view changed (paused, degraded): load it again (R2.1).
+   // A refusal that saved nothing (429, 409 without stripeCheck, 401/403) keeps the view.
+   if(!check){toast(translateMessage(error.message));if(Number(error?.status)>=500)await load();return;}
+  }
+  // The result at once; then the server's view again, so stale, effective and degraded match what applies now (R1.2).
+  if(st.view)st.view={...st.view,stripe:{...st.view.stripe,check}};
+  paint();toast(check?.ok?T('Stripe działa.'):checkError(check?.error)||T('Stripe zwrócił błąd.'));
+  await load();root()?.querySelector('[data-set-act="stripe-check"]')?.focus?.();
+});
 const FORMS={
  mode:(form)=>{
   const f=new FormData(form),fields=changedFields(st.view,modeFields(String(f.get('mode')||modeOf(st.view)),{paymentsOn:f.get('payments')==='paid'}));

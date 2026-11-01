@@ -408,6 +408,25 @@ test('role filters and the ownerOf filter of a tournament card reach admin-membe
  assert.match(pageView({q:'',filter:'all',page:1,data:null,error:''}).html,/<option value="organizers-pending">Organizatorzy do potwierdzenia<\/option>/);
 });
 
+test('final review F1, F2: the athlete profile of a member row can be erased; the delete dialog warns and offers the initials only with a profile',async()=>{
+ const ws={profiles:[{id:'p1',name:'Zosia <b>K</b>',ownerId:'u1'},{id:'p2',name:'Dane usunięte',ownerId:'u1'},{id:'p3',name:'Inny',ownerId:'u9'},{id:'p4',name:'Bez konta',ownerId:null}]};
+ assert.deepEqual(members.ownedProfiles('u1',ws).map(p=>p.id),['p1'],'own profiles only, an erased record does not count');
+ assert.deepEqual(members.ownedProfiles('u1',null),[]);
+ const row=memberRow({id:'u1',email:'a@b.pl',active:true,billing:null,caps:{athlete:true}},{profiles:members.ownedProfiles('u1',ws)}).html;
+ assert.match(row,/<button type="button" class="btn small-btn danger-text" data-action="forget-profile" data-id="p1" aria-label="Usuń dane zawodnika: Zosia &lt;b&gt;K&lt;\/b&gt;">Usuń dane zawodnika<\/button>/);
+ assert.ok(!/forget-profile/.test(memberRow({id:'u2',email:'b@b.pl',active:true,billing:null}).html),'no erase button without a profile');
+ const note=members.deleteAthleteNote(members.ownedProfiles('u1',ws)).html;
+ assert.match(note,/Konto ma profil zawodnika \(Zosia &lt;b&gt;K&lt;\/b&gt;\)\. Wyniki z zakończonych turniejów i kategorii po losowaniu zostaną z imieniem i nazwiskiem/);
+ assert.match(note,/<input type="checkbox" data-mem-initials checked> Zostaw w zachowanych wynikach tylko inicjały zawodnika/,'ticked by default');
+ assert.equal(String(members.deleteAthleteNote([]).html??members.deleteAthleteNote([])),'','nothing without a profile');
+ assert.match(members.deleteAthleteNote([{id:'p1',name:'Z'}],{forgotten:true}).html,/Dane zawodnika są już usunięte/);
+ // The order: the athlete data (profile.forget through the workspace) before the account deletion; a refusal after it says so.
+ const {readFileSync}=await import('node:fs'),src=readFileSync(new URL('../dist/admin-members.js',import.meta.url),'utf8');
+ const go=src.slice(src.indexOf("'delete-go':"),src.indexOf("'bulk-go':"));
+ assert.ok(go.indexOf("ui().commit('profile.forget',{id:p.id})")>0&&go.indexOf("ui().commit('profile.forget'")<go.indexOf("memberCall('delete'"),'profile.forget first');
+ assert.match(go,/if\(forgotten\)\{say\(el,T\('Dane zawodnika są już usunięte, w zachowanych wynikach zostały inicjały\. Konta nie usunięto: \{error\}'/);
+ assert.match(go,/initials&&!forgotten/,'never erased twice');
+});
 test('role badges and organizer actions from the sparse fields caps, trusted and freeSignup',()=>{
  const {roleBadges,organizerActions}=members,texts=m=>roleBadges(m).map(b=>b.text);
  assert.deepEqual(texts({}),[],'a member without roles has no badges');
@@ -422,7 +441,7 @@ test('role badges and organizer actions from the sparse fields caps, trusted and
  assert.match(row,/data-mem-act="org-trust"/);assert.match(row,/data-mem-act="org-block"/);assert.match(row,/data-mem-select="u1"/);assert.ok(!/ checked/.test(row));
  assert.match(memberRow({id:'u1',email:'a@b.pl',active:true,billing:null},{selected:true}).html,/data-mem-select="u1" checked/);
  assert.ok(!/org-/.test(memberRow({id:'u2',email:'b@b.pl',active:true,billing:null}).html),'no organizer actions without the role');
- setLanguage('en',{persist:false});try{assert.deepEqual(texts({caps:{organizer:true,organizerTrusted:true}}),['Organiser — confirmed']);}finally{setLanguage('pl',{persist:false});}
+ setLanguage('en',{persist:false});try{assert.deepEqual(texts({caps:{organizer:true,organizerTrusted:true}}),['Organizer — confirmed']);}finally{setLanguage('pl',{persist:false});}
 });
 
 test('trust, untrust, block and restore of the organizer role, the account block with hidden tournaments, create with the role',()=>{

@@ -21,7 +21,7 @@
 .mem-user{font-size:11px;color:var(--chat-meta,#5b6f89)}
 .mem-email{font-size:11px;color:#5c708a}
 .mem-plan{display:flex;flex-wrap:wrap;gap:5px;align-items:center}
-.mem-plan .badge{font-size:10px;padding:4px 8px}
+.mem-plan .badge{font-size:11px;padding:4px 8px}
 .mem-muted{text-decoration:none}
 .mem-muted:hover{text-decoration:underline}
 .mem-meta{font-size:11px;color:var(--chat-meta,#5b6f89);line-height:1.6}
