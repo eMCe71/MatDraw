@@ -74,6 +74,12 @@ Po wdrożeniu aplikacja na telefonie pokaże pasek „Dostępna jest nowa wersja
 - Każde polecenie turniejowe nadal ładuje cały zbiór danych pod jedną blokadą (wcześniejsze ograniczenie); dlatego zgłoszenia samodzielne mają wspólny limit 120 operacji na minutę dla wszystkich członków razem. Przy bardzo dużym ruchu zawodnik może zobaczyć „Serwer jest teraz mocno obciążony. Spróbuj ponownie za chwilę.”.
 - To, co da się sprawdzić tylko na prawdziwym serwerze i telefonie (rejestracja z telefonu, lądowanie po płatności w Stripe, wydajność przy wielu zgłoszeniach naraz), jest wypisane w `VALIDATION.md`.
 
+### 0.9 Następne wydanie (zaplanowane) — nie wchodzi do tego wdrożenia
+
+- **Twoja decyzja z 2026-11-01 (zmiana O7):** po usunięciu konta we **wszystkich** zachowanych wynikach zostaną tylko inicjały zawodnika. Usunięcie konta zadziała wtedy jak „Usuń dane zawodnika” dla każdego profilu na koncie, także w turniejach, które już się odbyły. **W tym wydaniu jeszcze tak nie jest:** zgłoszenia do nadchodzących turniejów są wycofywane (a gdy losowanie kategorii jest już zapisane, zostają w nich inicjały), ale w wynikach turniejów, które się odbyły, zostaje pełne imię i nazwisko (widzą je organizator turnieju i MatBravo, goście tylko inicjały). Pole „Zostaw w zachowanych wynikach tylko inicjały zawodnika” w oknie usuwania konta (zaznaczone domyślnie) daje inicjały wszędzie już teraz. Plan: `docs/plan/PLAN-REJESTRACJA-ROLE.md` §17.
+
+**Domknięte przed tym wdrożeniem** (plan §18.3): R1.3 (`min_client_api` zostaje `1`, karty sprzed wdrożenia zatrzymuje `rev_floor`), R1.4 (przy zamkniętej rejestracji serwer odmawia roli i nowego profilu zawodnika komunikatem „Role są dostępne po otwarciu rejestracji.”), R1.5 (po scaleniu klubów konto klubu ma przyciski „Edytuj”/„Wycofaj” przy zgłoszeniach dawnego klubu) i pozostałości R1.6/R2.1 (w turnieju zablokowanego albo dezaktywowanego organizatora aplikacja nie proponuje nowych zgłoszeń, tylko pisze „Zapisy do tego turnieju są zamknięte.”; poprawki i wycofania działają) oraz treść ostrzeżenia przy usuwaniu konta (jak wyżej).
+
 ## 1. Stan na dziś
 
 **Gotowe (w gałęzi integracyjnej `claude/quirky-einstein-sgelzm`):**
