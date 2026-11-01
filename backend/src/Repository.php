@@ -90,10 +90,11 @@ final class Repository {
  /**
   * The workspace part an organizer may see (B2, DR-6), for bootstrap of a member organizer: staff accounts, every club,
   * own tournaments with all entries and draws, other tournaments that are open for self-entries or hold his entries with
-  * only his entries and no draws, his own profiles, organizers and revisions. Entries of other people outside his
-  * tournaments never reach the memory of the request; self-entries of his tournaments hidden by the Administrator are
-  * dropped too. Domain::publicData() of this snapshot equals publicData() of load() for this organizer (tests/
-  * domain.http.test.mjs). $today is accepted for the plan's signature; the selection has no date rule, like publicData.
+  * only his entries, no draws and no log, his own profiles, organizers and revisions. Entries and logs of other people's
+  * tournaments never reach the memory of the request; self-entries and the log of his tournaments hidden by the
+  * Administrator are dropped too. Domain::publicData() of this snapshot equals publicData() of load() for this
+  * organizer (tests/domain.http.test.mjs). $today is accepted for the plan's signature; the selection has no date rule,
+  * like publicData.
   */
  public function organizerSnapshot(string $userId,?string $today=null):array {
   $this->pdo->beginTransaction();
@@ -101,8 +102,9 @@ final class Repository {
    [$revision,$staffRev]=$this->meta();$own="SELECT id FROM profiles WHERE created_by=? OR owner_user_id=?";
    $db=['schemaVersion'=>2,'revision'=>$revision,'staffRev'=>$staffRev,'clubs'=>$this->clubs(),'users'=>$this->staff(),'profiles'=>[],'tournaments'=>[],'organizers'=>$this->organizers(),'withdrawals'=>[]];
    $q=$this->pdo->prepare('SELECT * FROM profiles WHERE created_by=? OR owner_user_id=? ORDER BY id');$q->execute([$userId,$userId]);foreach($q->fetchAll() as $a)$db['profiles'][]=self::profile($a);
-   $q=$this->pdo->prepare("SELECT * FROM tournaments WHERE created_by=? OR (status='open' AND self_entry=1 AND hidden_by IS NULL) OR id IN (SELECT tournament_id FROM entries WHERE profile_id IN ($own)) ORDER BY event_date,id");
-   $q->execute([$userId,$userId,$userId]);$index=[];
+   // The log (it names athletes) and the hide reason only of his own tournaments, the log not of the hidden ones: publicData shows nothing more.
+   $q=$this->pdo->prepare("SELECT id,created_by,created_at,name,city,event_date,mat,status,self_entry,rev,hidden_by,hidden_from,CASE WHEN created_by=? THEN hide_reason END AS hide_reason,CASE WHEN created_by=? AND hidden_by IS NULL THEN activity ELSE '[]' END AS activity FROM tournaments WHERE created_by=? OR (status='open' AND self_entry=1 AND hidden_by IS NULL) OR id IN (SELECT tournament_id FROM entries WHERE profile_id IN ($own)) ORDER BY event_date,id");
+   $q->execute([$userId,$userId,$userId,$userId,$userId]);$index=[];
    foreach($q->fetchAll() as $t){$index[$t['id']]=count($db['tournaments']);$db['tournaments'][]=self::tournament($t);}
    $q=$this->pdo->prepare("SELECT e.* FROM entries e JOIN tournaments t ON t.id=e.tournament_id WHERE t.created_by=? OR e.profile_id IN ($own) ORDER BY e.tournament_id,e.profile_id");$q->execute([$userId,$userId,$userId]);
    foreach($q->fetchAll() as $e){if(!isset($index[$e['tournament_id']]))continue;$t=&$db['tournaments'][$index[$e['tournament_id']]];$s=self::decode($e['snapshot']);if($t['createdBy']!==$userId||$t['hiddenBy']===null||empty($s['self']))$t['entries'][]=$s;unset($t);}

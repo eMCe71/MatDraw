@@ -16,12 +16,17 @@ const A={sex:'M',birthDate:'1995-04-04',weight:70,height:175,gradeType:'cup',gra
 const run=(actor,type,payload,extra={})=>fixture('domain-run',{actor,type,payload,...extra});
 before(()=>fixture('reset-limits'));
 
-test('migrate.php twice exits 0; --rollback-floor is 7 with community data and lower without',{skip},()=>{
+test('migrate.php twice exits 0; --rollback-floor is 7 with each kind of community data and lower without',{skip},()=>{
  for(let i=0;i<2;i++){const r=migrate([]);assert.equal(r.code,0,r.err);assert.match(r.out,/^Schemat aktualny/);}
  const floor=()=>{const r=migrate(['--rollback-floor']);assert.equal(r.code,0,r.err);return Number(r.out.split('\n').pop());};
  const owner=fixture('member',{email:'floor.owner@domain.test'}),before=floor();assert.ok(before>=1&&before<7,String(before));
- const p=fixture('domain-owned-profile',{userId:owner.id});assert.equal(floor(),7,'an owned profile needs code from 0007 on');
- fixture('domain-owned-profile',{id:p.id,remove:true});assert.equal(floor(),before);
+ // Every branch of the floor query on the real database: an owned profile, a member's profile, tournament and club, a hidden
+ // tournament, a merged club; a club created by staff (the demo clubs of seed-athletes) does not block.
+ for(const kind of ['owned-profile','member-profile','member-tournament','hidden-tournament','member-club','merged-club']){
+  fixture('domain-floor',{kind,userId:owner.id});assert.equal(floor(),7,kind+' needs code from 0007 on');
+  fixture('domain-floor',{kind,remove:true});assert.equal(floor(),before,kind+' removed');
+ }
+ fixture('domain-floor',{kind:'staff-club'});assert.equal(floor(),before,'a staff club does not block');fixture('domain-floor',{kind:'staff-club',remove:true});
  assert.deepEqual(fixture('domain-row',{table:'clubs',id:'unaffiliated'}),{id:'unaffiliated',name:'Niezrzeszony',verified:1,created_by:null,created_at:null,merged_into:null},'Clubs::ensure created the row in the first workspace transaction');
 });
 
@@ -97,9 +102,23 @@ test('member commands through Repository::transaction with the actor; organizerS
  const admin=new Client();await admin.login(...ADMIN);const draft=(await admin.cmd('tournament.save',{name:'Roboczy Domeny',city:'Opole',date:day(710),mat:'Mata 1',status:'draft'})).id;
  const a=run(org.id,'entry.save',{...E,tournamentId:draft,profileId:p}),b=run(org.id,'entry.save',{...E,tournamentId:'missing-id',profileId:p});
  assert.deepEqual([a.status,a.error],[404,'Turniej nie jest dostępny.']);assert.deepEqual(a,b);
- // The organizer's snapshot holds no other people's data and gives the same view as the full workspace.
+ // The organizer's snapshot holds no other people's data and gives the same view as the full workspace: he also entered his
+ // athlete into a staff tournament open for self-entries that holds staff entries (O19), and one of his tournaments with a
+ // self-entry is hidden by the Administrator (PS-16).
+ const ts=(await admin.cmd('tournament.save',{name:'Personel z Zapisami',city:'Opole',date:day(705),mat:'Mata 1',status:'open',selfEntry:true})).id,staffIds=[];
+ for(const name of ['Personel Obcy Jeden','Personel Obca Dwa'])staffIds.push((await admin.cmd('profile.save',{...A,name,clubId:admin.data.user.clubId,registration:{...E,tournamentId:ts}})).id);
+ assert.equal(run(org.id,'entry.save',{...E,tournamentId:ts,profileId:p}).status,200);
+ const t2=run(org.id,'tournament.save',{name:'Ukryty Społeczności Domeny',city:'Opole',date:day(706),mat:'Mata 1',status:'open'}).result.id;
+ assert.equal(run(ath.id,'entry.self',{tournamentId:t2,profileId:ar.result.id,events:['forms']}).status,200);
+ await admin.load();await admin.cmd('tournament.hide',{tournamentId:t2,hidden:true,reason:'Sprawdzamy'});
  const snap=fixture('domain-snapshot',{userId:org.id});assert.deepEqual(snap.snapshot,snap.full);assert.ok(snap.profiles<snap.allProfiles,`${snap.profiles} of ${snap.allProfiles} profiles`);
  const mine=snap.snapshot.tournaments.find(x=>x.id===t);assert.deepEqual(mine.entries.map(e=>e.name).sort(),['Samodzielna Zawodniczka','Zawodnik Organizatora']);
+ assert.deepEqual(snap.snapshot.tournaments.find(x=>x.id===ts).entries.map(e=>e.profileId),[p],'only his entry in the staff tournament');
+ const hid=snap.snapshot.tournaments.find(x=>x.id===t2);assert.deepEqual([hid.hidden,hid.entries,hid.activity],[true,[],[]]);
+ const raw=JSON.stringify(snap.raw),rawT=id=>snap.raw.tournaments.find(x=>x.id===id);
+ for(const x of [...staffIds,'Personel Obcy Jeden','Personel Obca Dwa'])assert.ok(!raw.includes(x),'not in the request memory: '+x);
+ assert.deepEqual([rawT(ts).activity,rawT(ts).draws,rawT(t2).activity,rawT(t2).entries],[[],[],[],[]],'no foreign log, no log or self-entries of the hidden tournament');
+ assert.ok(rawT(t).activity.length>0,'his own log is there');
  // Staff: the Admin sees the community tournament, an editor does not while the organizer is unconfirmed.
  await admin.load();assert.equal(admin.data.tournaments.find(x=>x.id===t).community,true);assert.ok(!JSON.stringify(admin.data.users).includes(org.email));
  const pub=async q=>{const r=await fetch(base+'?'+q);return {status:r.status,data:await r.json()};};
@@ -108,7 +127,7 @@ test('member commands through Repository::transaction with the actor; organizerS
  assert.equal(view.data.summary.clubs,1,'unaffiliated is not a club; the unverified club is');
  fixture('domain-organizer',{userId:org.id,trusted:true});const trusted=await pub('route=public-tournament&id='+t);assert.equal(trusted.data.tournament.trusted,true);
  // Cleanup for the next files: hidden by the Administrator (status draft, out of every public list).
- await admin.load();await admin.cmd('tournament.hide',{tournamentId:t,hidden:true,reason:'Koniec testu'});
+ await admin.load();await admin.cmd('tournament.hide',{tournamentId:t,hidden:true,reason:'Koniec testu'});await admin.cmd('tournament.hide',{tournamentId:ts,hidden:true});
  const row=fixture('domain-row',{table:'tournaments',id:t});assert.deepEqual([row.status,row.hidden_from,row.hidden_by],['draft','open',admin.data.user.id]);
  assert.equal((await pub('route=public-tournament&id='+t)).status,404);
 });

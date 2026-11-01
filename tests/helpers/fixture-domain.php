@@ -43,18 +43,26 @@ return [
   try{(new Repository($pdo))->transaction(function(array &$db)use($id){$db['profiles']=array_values(array_filter($db['profiles'],fn($a)=>$a['id']!==$id));$db['revision']++;});return ['error'=>null];}
   catch(Throwable $e){return ['error'=>$e->getMessage(),'class'=>get_class($e)];}
  },
- // publicData of the organizer snapshot and of the full workspace for the same actor (they must be equal, B2).
+ // publicData of the organizer snapshot and of the full workspace for the same actor (they must be equal, B2); raw: the
+ // tournaments and profiles of the snapshot itself (what reaches the memory of the request), without staff accounts.
  'domain-snapshot'=>function(PDO $pdo,array $p):array{
   $actor=Actors::of($pdo,['id'=>(string)($p['userId']??'')]);$repo=new Repository($pdo);
   $full=$repo->snapshot();$full['users'][]=$actor;$part=$repo->organizerSnapshot($actor['id'],date('Y-m-d'));
-  return ['snapshot'=>Domain::publicData($part,$actor),'full'=>Domain::publicData($full,$actor),'profiles'=>count($part['profiles']),'allProfiles'=>count($full['profiles'])];
+  return ['snapshot'=>Domain::publicData($part,$actor),'full'=>Domain::publicData($full,$actor),'profiles'=>count($part['profiles']),'allProfiles'=>count($full['profiles']),'raw'=>['tournaments'=>$part['tournaments'],'profiles'=>$part['profiles']]];
  },
- // A profile owned by an account, written directly (the floor of 0007); remove deletes it again.
- 'domain-owned-profile'=>function(PDO $pdo,array $p):array{
-  $id=(string)($p['id']??Domain::id());
-  if(!empty($p['remove'])){$pdo->prepare('DELETE FROM profiles WHERE id=?')->execute([$id]);return ['id'=>$id];}
-  $user=(string)$p['userId'];$data=['id'=>$id,'name'=>'Profil Właściciela','clubId'=>'unaffiliated','sex'=>'F','birthDate'=>'2000-01-01','weight'=>60,'height'=>165,'gradeType'=>'cup','grade'=>5,'events'=>['forms'],'champion'=>false,'createdBy'=>$user,'ownerId'=>$user,'relation'=>'self','archived'=>false];
-  $pdo->prepare('INSERT INTO profiles (id,club_id,created_by,archived,data,owner_user_id) VALUES (?,?,?,?,?,?)')->execute([$id,'unaffiliated',$user,0,json_encode($data,JSON_UNESCAPED_UNICODE),$user]);
+ // One row of each kind that the floor of 0007 looks for (or, kind staff-club, a demo-like club that it ignores), written
+ // directly with the id 'floor-<kind>'; remove deletes it again. userId: the member account of the member kinds.
+ 'domain-floor'=>function(PDO $pdo,array $p):array{
+  $kind=(string)($p['kind']??'');$id='floor-'.$kind;$user=(string)($p['userId']??'');
+  $table=['owned-profile'=>'profiles','member-profile'=>'profiles','member-tournament'=>'tournaments','hidden-tournament'=>'tournaments','member-club'=>'clubs','merged-club'=>'clubs','staff-club'=>'clubs'][$kind]??throw new RuntimeException('domain-floor: kind');
+  if(!empty($p['remove'])){$pdo->prepare("DELETE FROM $table WHERE id=?")->execute([$id]);return ['id'=>$id];}
+  $admin=(string)$pdo->query("SELECT id FROM users WHERE role='admin' ORDER BY id LIMIT 1")->fetchColumn();
+  if($table==='profiles'){
+   // Each kind meets one branch only: the owned profile is written as created by the Administrator.
+   [$owner,$by]=$kind==='owned-profile'?[$user,$admin]:[null,$user];$data=['id'=>$id,'name'=>'Profil Podłogi','clubId'=>'unaffiliated','sex'=>'F','birthDate'=>'2000-01-01','weight'=>60,'height'=>165,'gradeType'=>'cup','grade'=>5,'events'=>['forms'],'champion'=>false,'createdBy'=>$by,'ownerId'=>$owner,'archived'=>false];
+   $pdo->prepare('INSERT INTO profiles (id,club_id,created_by,archived,data,owner_user_id) VALUES (?,?,?,?,?,?)')->execute([$id,'unaffiliated',$by,0,json_encode($data,JSON_UNESCAPED_UNICODE),$owner]);
+  }elseif($table==='tournaments')$pdo->prepare("INSERT INTO tournaments (id,created_by,name,city,event_date,mat,status,activity,hidden_by,hidden_from) VALUES (?,?,'Turniej Podłogi','Opole','2030-01-01','Mata 1',?,'[]',?,?)")->execute($kind==='hidden-tournament'?[$id,$admin,'draft',$admin,'open']:[$id,$user,'open',null,null]);
+  else $pdo->prepare('INSERT INTO clubs (id,name,verified,created_by,created_at,merged_into) VALUES (?,?,0,?,?,?)')->execute([$id,'Klub Podłogi '.$kind,$kind==='member-club'?$user:$admin,time(),$kind==='merged-club'?'unaffiliated':null]);
   return ['id'=>$id];
  },
 ];
