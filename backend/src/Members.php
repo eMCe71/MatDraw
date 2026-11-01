@@ -74,10 +74,11 @@ final class Members {
  /**
   * Sign-up is open (signup_enabled) or, while it is off and payments are enforced, the request carries the invite token
   * (the owner's test window of the paid sign-up, ≥ 24 characters; PLAN-REJESTRACJA-ROLE §3.3: never a way around a
-  * closed free sign-up).
+  * closed free sign-up). signup_force_off closes both (B6; Settings::effective also drops the token under it).
   */
  public static function signupOpen(array $c,mixed $invite):bool {
-  if(!empty($c['signup_enabled']))return true;$t=$c['signup_invite_token'];
+  if(!empty($c['signup_force_off']))return false;
+  if(!empty($c['signup_enabled']))return true;$t=$c['signup_invite_token']??null;
   return !empty($c['billing_enforce'])&&is_string($t)&&strlen($t)>=24&&is_string($invite)&&hash_equals($t,$invite);
  }
  /** signup-begin {invite?}: 60 per hour per address; stores the server-side start time of the form. */
@@ -105,21 +106,29 @@ final class Members {
   if(!in_array($in['website']??null,[null,''],true)||$age<self::SIGNUP_MIN_SECONDS||$age>self::SIGNUP_MAX_SECONDS)throw new AppError('Nie udało się założyć konta. Spróbuj ponownie.',400);
   // Roles (§4.5): only the two booleans roles.organizer and roles.athlete; every other field of the body is ignored.
   $roles=is_array($in['roles']??null)?$in['roles']:[];$organizer=($roles['organizer']??null)===true;$athlete=($roles['athlete']??null)===true;
-  if($organizer&&($s=RateLimit::peek($pdo,$c['app_key'],'organizer-enable-ip-day',$ip,self::ORGANIZERS_IP_DAY,86400)))self::tooManyOrganizers($s);
-  $email=self::email($in['email']??null);$hash=Domain::password(is_string($in['password']??null)?$in['password']:'');$profile=Profiles::validate($in);
-  // The athlete is validated in full before any transaction and without the workspace lock (R19).
-  $id=Domain::id();$now=time();$a=$athlete?self::athleteProfile($pdo,$id,is_array($in['athlete']??null)?$in['athlete']:[],$now):null;
-  self::create($pdo,$email,$hash,$profile,self::freeSignup($c,$now),$now,null,false,['id'=>$id,'organizer'=>$organizer,
-   'also'=>$a?static function()use($pdo,$a){self::insertAthlete($pdo,$a);}:null,
-   'duplicateEmail'=>static fn()=>RateLimit::hit($pdo,$c['app_key'],'signup-dup-ip',$ip,self::DUPLICATE_EMAILS_IP_HOUR,3600)]);
+  // The organizer place of this network is reserved before the account is written and given back when the sign-up fails
+  // (B14: parallel sign-ups could all pass a peek and exceed 3 per day).
+  if($organizer)self::reserveOrganizer($pdo,$c,$ip);
+  try{
+   $email=self::email($in['email']??null);$hash=Domain::password(is_string($in['password']??null)?$in['password']:'');$profile=Profiles::validate($in);
+   // The athlete is validated in full before any transaction and without the workspace lock (R19).
+   $id=Domain::id();$now=time();$a=$athlete?self::athleteProfile($pdo,$id,is_array($in['athlete']??null)?$in['athlete']:[],$now):null;
+   self::create($pdo,$email,$hash,$profile,self::freeSignup($c,$now),$now,null,false,['id'=>$id,'organizer'=>$organizer,
+    'also'=>$a?static function()use($pdo,$a){self::insertAthlete($pdo,$a);}:null,
+    // Counted when it happens, and over the limit the answer is 429 instead of the 409 (B14: parallel duplicates past a peek learn nothing).
+    'duplicateEmail'=>static function()use($pdo,$c,$ip){if($s=RateLimit::hit($pdo,$c['app_key'],'signup-dup-ip',$ip,self::DUPLICATE_EMAILS_IP_HOUR,3600))self::tooManySignups($s);}]);
+  }catch(\Throwable $e){if($organizer)RateLimit::refund($pdo,$c['app_key'],'organizer-enable-ip-day',$ip);throw $e;}
   if($global>0)RateLimit::hit($pdo,$c['app_key'],'signup-global','all',$global,3600);
-  if($organizer)RateLimit::hit($pdo,$c['app_key'],'organizer-enable-ip-day',$ip,self::ORGANIZERS_IP_DAY,86400);
   unset($_SESSION['signup_at']);$u=Accounts::find($pdo,$id);Auth::enter($u,$c);
   $caps=Accounts::sparseCaps(Actors::build($u,$organizer,null,null,$a?[['id'=>$a['profile']['id'],'archived'=>false,'relation'=>$a['profile']['relation']]]:[]));
   return ['user'=>Accounts::safe($u),'csrf'=>$_SESSION['csrf']]+($caps?['caps'=>$caps]:[])+(isset($a['notice'])?['notice'=>$a['notice']]:[]);
  }
  private static function tooManySignups(int $s):never{Routes::retryAfter($s);throw new ApiError('Zbyt wiele prób zakładania konta. Spróbuj ponownie później.',429,['retry'=>$s]);}
  private static function tooManyOrganizers(int $s):never{Routes::retryAfter($s);throw new ApiError('Zbyt wiele nowych kont organizatorów z tej sieci. Spróbuj ponownie jutro.',429,['retry'=>$s]);}
+ /** One of the ORGANIZERS_IP_DAY places of network $ip, taken atomically (RateLimit::hit) or 429 (the refused attempt is given back). */
+ private static function reserveOrganizer(PDO $pdo,array $c,string $ip):void {
+  if($s=RateLimit::hit($pdo,$c['app_key'],'organizer-enable-ip-day',$ip,self::ORGANIZERS_IP_DAY,86400)){RateLimit::refund($pdo,$c['app_key'],'organizer-enable-ip-day',$ip);self::tooManyOrganizers($s);}
+ }
  /** billing_accounts of a new account (§3.4): free-signup while payments are not enforced, so the switch to paid later decides about it. */
  private static function freeSignup(array $c,int $now):array{return empty($c['billing_enforce'])?['billing_exempt'=>1,'exempt_reason'=>'free-signup','exempt_at'=>$now]:['billing_exempt'=>0];}
  /**
@@ -504,10 +513,12 @@ final class Members {
   $actor=Actors::of($pdo,$u);$on=$in['organizer'];
   if($on&&$actor['caps']['organizerBlocked'])throw new AppError('Administrator wyłączył Ci rolę organizatora.',403);
   if($on===$actor['organizer'])return ['caps'=>$actor['caps']];
+  // B10: the role is gained only while sign-up is open (Settings::rolesOpen); switching it off always works.
+  if($on&&!Settings::rolesOpen($c))throw new AppError('Rejestracja jest chwilowo wyłączona.',403);
   if($on){
-   $ip=ClientIp::bucket($c);if($s=RateLimit::peek($pdo,$c['app_key'],'organizer-enable-ip-day',$ip,self::ORGANIZERS_IP_DAY,86400))self::tooManyOrganizers($s);
-   self::tx($pdo,function()use($pdo,$u){$pdo->prepare("UPDATE users SET organizer=1 WHERE id=? AND role='member' AND organizer_blocked_at IS NULL")->execute([$u['id']]);self::audit($pdo,'self','self.organizer',$u['id'],'on');});
-   RateLimit::hit($pdo,$c['app_key'],'organizer-enable-ip-day',$ip,self::ORGANIZERS_IP_DAY,86400);
+   $ip=ClientIp::bucket($c);self::reserveOrganizer($pdo,$c,$ip);
+   try{self::tx($pdo,function()use($pdo,$u){$pdo->prepare("UPDATE users SET organizer=1 WHERE id=? AND role='member' AND organizer_blocked_at IS NULL")->execute([$u['id']]);self::audit($pdo,'self','self.organizer',$u['id'],'on');});}
+   catch(\Throwable $e){RateLimit::refund($pdo,$c['app_key'],'organizer-enable-ip-day',$ip);throw $e;}
   }else self::tx($pdo,function()use($pdo,$u){
    $pdo->query('SELECT revision FROM app_meta WHERE id=1 FOR UPDATE')->fetchAll();
    $q=$pdo->prepare("SELECT 1 FROM tournaments WHERE created_by=? AND status IN ('open','closed') LIMIT 1");$q->execute([$u['id']]);$running=$q->fetchColumn()!==false;$q->closeCursor();

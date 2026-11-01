@@ -1,6 +1,6 @@
 <?php
 declare(strict_types=1);
-use MatDraw\{Access,Accounts,Actors,ApiError,AppError,Auth,Domain,GuestView,Members,RateLimit,Repository,Routes,Settings};
+use MatDraw\{Access,Accounts,Actors,ApiError,AppError,Auth,Domain,GuestView,MemberTx,Members,RateLimit,Repository,Routes,Settings};
 ini_set('display_errors','0');ini_set('log_errors','1');
 // In the release: public/api/index.php and backend/ are siblings of public/.
 require dirname(__DIR__,2).'/backend/bootstrap.php';
@@ -100,21 +100,23 @@ try {
  if($u['role']==='member'){
   // A member organizer (§4.4, §3.7, R12): only ORGANIZER_TYPES (never account.password: members have member-password),
   // the step-up, 60 per minute and 1200 per hour per account, full access except to remove data (entry.remove,
-  // profile.forget), then the global bucket of all member transactions (120 per minute; staff never count; after the
-  // 402, so commands refused for want of a subscription cannot use it up) and the transaction with the actor and the
-  // flags of the effective configuration.
+  // profile.forget), then the budget of member transactions (MemberTx, final review B2: the global bucket of committed
+  // member writes, 120 per minute, checked before the lock and charged only after the command committed, and 30
+  // transactions per minute per account; staff never count; removing data is never refused by it) and the transaction
+  // with the actor and the flags of the effective configuration.
   $actor=Actors::of($pdo,$u);
   if(!$actor['caps']['organizer']||!in_array($p['type'],Domain::ORGANIZER_TYPES,true))throw new AppError('Brak uprawnień.',403);
   Auth::stepUp($config);
   organizer_limit($pdo,$config,'organizer-command-minute',$u['id'],60,60);organizer_limit($pdo,$config,'organizer-command-hour',$u['id'],1200,3600);
   if(!in_array($p['type'],['entry.remove','profile.forget'],true)&&!Access::of($pdo,$u,$config)['full'])throw new ApiError('Ta funkcja wymaga aktywnej subskrypcji.',402);
-  if($s=RateLimit::hit($pdo,$config['app_key'],'member-tx','all',120,60)){Routes::retryAfter($s);throw new ApiError('Serwer jest teraz mocno obciążony. Spróbuj ponownie za chwilę.',429,['retry'=>$s]);}
+  $budget=!MemberTx::exempt($p['type']);if($budget)MemberTx::check($pdo,$config,$u['id']);
   $out=(new Repository($pdo))->transaction(function(array &$db)use($pdo,$p,$u){
    // The role again under the workspace lock: a block by the Administrator or the person's own switch-off committed since Actors::of above wins.
    $now=Actors::of($pdo,$u);if(!$now['caps']['organizer'])throw new AppError('Brak uprawnień.',403);
    $result=Domain::execute($db,$u['id'],$p['type'],$p['payload'],$p['expectedRevision']);
    return ['workspace'=>array_replace(Domain::publicData($db,$now),['user'=>Accounts::withCaps($u,$now)]),'result'=>$result];
   },$actor,$flags);
+  if($budget)MemberTx::count($pdo,$config);
   Routes::respond($out);
  }
  // Staff without full access only change their own password (402 otherwise).

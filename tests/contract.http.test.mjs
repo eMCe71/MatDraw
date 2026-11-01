@@ -10,7 +10,7 @@ import {Client,base,fixture} from './helpers/http-client.mjs';
 const skip=!base,ADMIN=['admin@test.example','AdminForTests2026!'],PASSWORD='ContractPassword2026!';
 let seq=0;const uniq=p=>`${p}${Date.now().toString(36)}${(seq++).toString(36)}`;
 const NO_CAPS={organizer:false,organizerBlocked:false,organizerTrusted:false,athlete:false};
-const FEATURES=['signup','avatars','chat','signupMode','selfEntry'];
+const FEATURES=['signup','avatars','chat','signupMode','selfEntry','rolesOpen'];
 /** A GET without cookies: {status, headers, data}. */
 async function guest(route){const r=await fetch(base+'?route='+route,{headers:{'X-MatBravo-Client':'1'}});return {status:r.status,headers:r.headers,data:await r.json()};}
 async function signIn(email,password=PASSWORD){const c=new Client();await c.req('session');const r=await c.req('login',{email,password});assert.equal(r.status,200,JSON.stringify(r.data));return c;}
@@ -41,11 +41,11 @@ test('signupMode of me and public-config comes from Settings::effective; public-
   for(const [row,mode,signup,billing] of cases){
    if(row)fixture('settings-set',{data:row});else fixture('settings-reset');
    const label=JSON.stringify(row);
-   for(const c of [admin,m]){const f=(await me(c)).features;assert.deepEqual([f.signupMode,f.signup],[mode,signup],label);}
+   for(const c of [admin,m]){const f=(await me(c)).features;assert.deepEqual([f.signupMode,f.signup,f.rolesOpen],[mode,signup,mode!=='off'],label);}
    const pc=await guest('public-config');assert.equal(pc.status,200);
    assert.equal(pc.headers.get('cache-control'),'public, max-age=60');assert.equal(pc.headers.get('set-cookie'),null);assert.doesNotMatch(pc.headers.get('vary')||'',/cookie/i);
-   assert.deepEqual(Object.keys(pc.data),['signup','signupMode','billing','amounts','avatars','support','roles'],label);
-   assert.deepEqual([pc.data.signupMode,pc.data.signup,pc.data.billing,pc.data.roles],[mode,signup,billing,true],label);
+   assert.deepEqual(Object.keys(pc.data),['signup','signupMode','billing','amounts','avatars','support','roles','rolesOpen'],label);
+   assert.deepEqual([pc.data.signupMode,pc.data.signup,pc.data.billing,pc.data.roles,pc.data.rolesOpen],[mode,signup,billing,true,mode!=='off'],label);
    // No personal data: the only e-mail is the support address, and no account e-mail or id appears.
    const text=JSON.stringify(pc.data);assert.deepEqual(text.match(/[^"@\s]+@[^"\s]+/g)||[],pc.data.support?[pc.data.support]:[]);
    assert.ok(!text.includes(ADMIN[0])&&!text.includes(adminId),label);

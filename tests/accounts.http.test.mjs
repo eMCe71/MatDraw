@@ -41,8 +41,9 @@ const sid=c=>c.cookie.split('=')[1];
 const KEYS={user:['id','clubId','email','role','active'],profile:['publicId','username','firstName','lastName','country','sports','clubText','showClub','nameDisplay','avatar','complete','usernameChangeAt','mustChangePassword'],
  access:['full','state','until','canPost','block','mutedUntil'],billing:['enabled','enforce','mode','currency','amounts','exempt','hasCustomer','pending'],features:['signup','avatars','chat']};
 // me adds the role contract (PLAN-REJESTRACJA-ROLE §4.4, §8.1, §8.2): user.caps always, athletes always (a list),
-// features.signupMode and features.selfEntry, and features.pendingOrganizers for the Administrator only.
-const ME_KEYS={...KEYS,user:[...KEYS.user,'caps'],features:[...KEYS.features,'signupMode','selfEntry']},CAPS=['organizer','organizerBlocked','organizerTrusted','athlete'];
+// features.signupMode, features.selfEntry and features.rolesOpen (final review B10), and features.pendingOrganizers for the
+// Administrator only.
+const ME_KEYS={...KEYS,user:[...KEYS.user,'caps'],features:[...KEYS.features,'signupMode','selfEntry','rolesOpen']},CAPS=['organizer','organizerBlocked','organizerTrusted','athlete'];
 const NO_CAPS={organizer:false,organizerBlocked:false,organizerTrusted:false,athlete:false};
 async function me(c){
  const r=await raw('me',{cookie:c.cookie});assert.equal(r.status,200,JSON.stringify(r.data));
@@ -52,7 +53,7 @@ async function me(c){
  for(const [k,keys] of Object.entries(ME_KEYS))assert.deepEqual(Object.keys(r.data[k]),k==='features'&&admin?[...keys,'pendingOrganizers']:keys,k);
  assert.deepEqual(Object.keys(r.data.user.caps),CAPS);assert.ok(Object.values(r.data.user.caps).every(v=>typeof v==='boolean'));
  assert.ok(['off','free','paid'].includes(r.data.features.signupMode));assert.equal(r.data.features.signupMode==='off',!r.data.features.signup);
- assert.equal(r.data.features.selfEntry,true);if(admin)assert.ok(Number.isInteger(r.data.features.pendingOrganizers)&&r.data.features.pendingOrganizers>=0);
+ assert.equal(r.data.features.selfEntry,true);assert.equal(r.data.features.rolesOpen,r.data.features.signupMode!=='off');if(admin)assert.ok(Number.isInteger(r.data.features.pendingOrganizers)&&r.data.features.pendingOrganizers>=0);
  assert.ok(Array.isArray(r.data.athletes));
  // The composer block follows the documented order; with the chat not installed or off, only 'off' remains.
  const {access:a,features:f}=r.data;assert.equal(a.canPost,a.block===null);
@@ -178,7 +179,7 @@ test('me returns the §4.3 shape for admin, staff and members; public-config for
  for(const cookie of [undefined,admin.cookie]){
   const pc=await raw('public-config',{cookie});assert.equal(pc.status,200);assert.equal(pc.headers.get('set-cookie'),null);
   assert.equal(pc.headers.get('cache-control'),'public, max-age=60');assert.doesNotMatch(pc.headers.get('vary')||'',/cookie/i);
-  assert.deepEqual(pc.data,{signup:true,signupMode:'paid',billing:true,amounts:{pln:899,usd:299},avatars:pc.data.avatars,support:'pomoc@example.test',roles:true});assert.equal(typeof pc.data.avatars,'boolean');
+  assert.deepEqual(pc.data,{signup:true,signupMode:'paid',billing:true,amounts:{pln:899,usd:299},avatars:pc.data.avatars,support:'pomoc@example.test',roles:true,rolesOpen:true});assert.equal(typeof pc.data.avatars,'boolean');
  }
  const pcPost=await raw('public-config',{method:'POST',body:{}});assert.equal(pcPost.status,405);assert.equal(pcPost.headers.get('allow'),'GET');
 });

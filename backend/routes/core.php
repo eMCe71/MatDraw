@@ -16,6 +16,8 @@
 // login, session and the member bootstrap keep their sparse caps (Accounts::withCaps): only me carries the full contract.
 // public-config is flagged 'settings' (the central overlay of Routes::dispatch computes the effective config for it) and
 // adds signupMode (the same value as me) and roles:true (this server has the member roles, §8.1).
+// features.rolesOpen (me) and rolesOpen (public-config): members may gain roles now, i.e. switch the organizer role on or
+// create an athlete profile (Settings::rolesOpen: sign-up is open; final review B10). Existing roles keep working.
 declare(strict_types=1);
 use MatDraw\{Access,Accounts,Actors,Billing,BillingSync,Capabilities,Chat,ChatModeration,Jobs,Members,RouteContext,Routes,Settings};
 
@@ -65,7 +67,7 @@ return [
     'avatar'=>is_string($p['avatar'])&&$p['avatar']!==''?substr($p['avatar'],0,12):null,'complete'=>$complete,'usernameChangeAt'=>$changeAt,'mustChangePassword'=>$mustChange],
    'access'=>$access+['canPost'=>$block===null,'block'=>$block,'mutedUntil'=>$mutedUntil],
    'billing'=>$billing,
-   'features'=>['signup'=>!empty($c['signup_enabled']),'avatars'=>$avatarMode($c),'chat'=>$chat,'signupMode'=>$signupMode($c),'selfEntry'=>true]+($admin?['pendingOrganizers'=>$pending]:[]),
+   'features'=>['signup'=>!empty($c['signup_enabled']),'avatars'=>$avatarMode($c),'chat'=>$chat,'signupMode'=>$signupMode($c),'selfEntry'=>true,'rolesOpen'=>Settings::rolesOpen($c)]+($admin?['pendingOrganizers'=>$pending]:[]),
    'athletes'=>$athletes];
  }],
  // Switches for the guest pages (§4.3, §6.10): signup is false in invite-only mode; billing means a price is shown
@@ -73,6 +75,6 @@ return [
  'public-config'=>['method'=>'GET','auth'=>'public','settings'=>true,'handler'=>function(RouteContext $ctx)use($avatarMode,$signupMode):array{
   $c=$ctx->config;header('Cache-Control: public, max-age=60');
   return ['signup'=>!empty($c['signup_enabled']),'signupMode'=>$signupMode($c),'billing'=>!empty($c['billing_enabled'])&&!empty($c['billing_enforce']),'amounts'=>$c['billing_amounts'],
-   'avatars'=>$avatarMode($c)!=='off','support'=>is_string($c['support_email'])&&$c['support_email']!==''?$c['support_email']:null,'roles'=>true];
+   'avatars'=>$avatarMode($c)!=='off','support'=>is_string($c['support_email'])&&$c['support_email']!==''?$c['support_email']:null,'roles'=>true,'rolesOpen'=>Settings::rolesOpen($c)];
  }],
 ];

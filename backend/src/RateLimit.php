@@ -24,6 +24,13 @@ final class RateLimit {
   if(!$row||(int)$row['window_start']<=$now-$window||(int)$row['attempts']<$limit)return 0;
   return max(1,(int)$row['window_start']+$window-$now);
  }
+ /**
+  * Gives back one attempt of a bucket (never below 0): hit() used as an atomic reservation whose action then did not happen
+  * (Members: the organizer places of a network, final review B14). A window that started in between loses one attempt.
+  */
+ public static function refund(PDO $pdo,string $appKey,string $scope,string $key):void {
+  $pdo->prepare('UPDATE login_limits SET attempts=attempts-1 WHERE bucket=? AND attempts>0')->execute([hash_hmac('sha256',$scope.'|'.$key,$appKey)]);
+ }
  /** Counts one attempt; returns 0 while at most $limit attempts fall in the current window, else seconds until it ends (≥ 1). */
  public static function hit(PDO $pdo,string $appKey,string $scope,string $key,int $limit,int $window,?int $now=null):int {
   $now??=time();$cut=$now-$window;$bucket=hash_hmac('sha256',$scope.'|'.$key,$appKey);

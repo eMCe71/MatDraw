@@ -228,8 +228,9 @@ test('revision isolation: an organizer at his limit and self-entries in A never 
   if(i%7===0){const k=i/7,x=athletes[k%2],enter=Math.floor(k/2)%2===0;const r2=fixture('domain-run',{actor:x.id,type:enter?'entry.self':'entry.remove',payload:enter?{tournamentId:ta,profileId:x.profileId,events:['forms']}:{tournamentId:ta,id:x.profileId}});assert.equal(r2.status,200,JSON.stringify(r2));c.data.revision=r2.revision;}
   if(i%5===0){const before=ed.data.revision;await ed.cmd('checkin.save',{tournamentId:tb,id:pb,presence:checks%2?'pending':'present',actualWeight:71});checks++;assert.ok(ed.data.revision>before);}
  }
- assert.ok(limited,'the organizer reached 60 commands per minute');error(limited,429,'Zbyt wiele operacji. Spróbuj ponownie za chwilę.');assert.ok(Number(limited.headers.get('retry-after'))>0);
- assert.ok(checks>=10,'the editor checked in '+checks+' times');
+ // The organizer's own budget of transactions (30 per minute, MemberTx, final review B2) ends the loop before 60 commands per minute.
+ assert.ok(limited,'the organizer reached his budget of transactions');error(limited,429,'Zbyt wiele operacji. Spróbuj ponownie za chwilę.');assert.ok(Number(limited.headers.get('retry-after'))>0);
+ assert.ok(checks>=5,'the editor checked in '+checks+' times');
  // The editor's revision is older than the global one after the organizer's commands, and B did not change: no 409.
  const rev=ed.data.revision,moved=fixture('domain-run',{actor:athletes[1].id,type:'athlete.save',payload:{id:athletes[1].profileId,...athleteBody({sex:'M',birthDate:'1995-04-04',name:'Zmienione Imię',weight:71})}});
  assert.equal(moved.status,200,JSON.stringify(moved));assert.ok(moved.revision>rev);

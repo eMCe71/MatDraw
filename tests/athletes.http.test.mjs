@@ -212,7 +212,7 @@ test('paid mode: athlete-entry 402; withdraw, save, archive, forget and the view
  ok(await m.req('athlete-forget',{profileId:own,password:PASSWORD}));assert.equal(fixture('athlete-row',{id:own}),null);
 });
 
-test('limits: athlete-forget 5/h, the global bucket of member transactions 429 with Retry-After, athlete-entry over 4 KB 413',{skip},async()=>{
+test('limits: athlete-forget 5/h, the global bucket of member transactions 429 with Retry-After (never for withdrawing), athlete-entry over 4 KB 413',{skip},async()=>{
  fixture('reset-limits');
  try{
   const m=await member('limits');const own=ok(await m.req('athlete-save',SELF)).profile.id;
@@ -220,12 +220,15 @@ test('limits: athlete-forget 5/h, the global bucket of member transactions 429 w
   const sixth=await m.req('athlete-forget',{profileId:own,password:PASSWORD});assert.equal(sixth.status,429,JSON.stringify(sixth.data));
   assert.equal(sixth.data.error,'Zbyt wiele prób. Spróbuj ponownie później.');assert.ok(sixth.data.retry>0);assert.equal(sixth.headers.get('retry-after'),String(sixth.data.retry));
   assert.ok(fixture('athlete-row',{id:own}),'the profile stays');
-  const a=await admin(),t=await tournament(a,'Limity Atletów');
+  const a=await admin(),t=await tournament(a,'Limity Atletów'),entered=await tournament(a,'Limity Atletów Wycofanie');
+  ok(await m.req('athlete-entry',{tournamentId:entered,profileId:own,...ENTRY}));
   fixture('athlete-member-tx',{attempts:120});
-  for(const [route,body] of [['athlete-entry',{tournamentId:t,profileId:own,...ENTRY}],['athlete-save',{...SELF,id:own,weight:71}],['athlete-withdraw',{tournamentId:t,profileId:own}]]){
+  for(const [route,body] of [['athlete-entry',{tournamentId:t,profileId:own,...ENTRY}],['athlete-save',{...SELF,id:own,weight:71}]]){
    const r=await m.req(route,body);assert.equal(r.status,429,route+' '+JSON.stringify(r.data));assert.equal(r.data.error,'Serwer jest teraz mocno obciążony. Spróbuj ponownie za chwilę.');
    assert.ok(r.data.retry>0&&r.data.retry<=60,route);assert.equal(r.headers.get('retry-after'),String(r.data.retry));
   }
+  // Final review B2: withdrawing an own entry never waits for the global bucket (R12); its own limit per account stays.
+  ok(await m.req('athlete-withdraw',{tournamentId:entered,profileId:own}));
   assert.ok(!ok(await m.req('athlete')).entries.length,'nothing entered');
   fixture('reset-limits');
   const big=await m.req('athlete-entry',{tournamentId:t,profileId:own,...ENTRY,note:'x'.repeat(4200)});assert.equal(big.status,413);assert.equal(big.data.error,'Żądanie jest zbyt duże.');

@@ -4,27 +4,32 @@
 //   athlete           GET peek, member: AthleteView::build (no workspace, no lock); ?t=<tournament id> keeps that tournament in
 //                     the open list when it takes self-entries, also beyond OPEN_LIMIT (the guest preview's "enter" link)
 //   athlete-save      POST session, member: athlete.save (§6.1)                       20/h per account (with athlete-archive)
+//                     without id (a new profile) only while sign-up is open: 403 'Rejestracja jest chwilowo wyłączona.' (B10)
 //   athlete-archive   POST session, member: athlete.archive {profileId, archived}      20/h (shared)
 //   athlete-forget    POST session, member: athlete.forget {profileId, password}       5/h, password with the login limits
 //   athlete-entry     POST session, member, 4 KB: entry.self (§7.2); 402 without full access in paid mode   30/h (with withdraw)
 //                     except a correction (update:true) of an own entry without new events (R12: correcting own data)
 //   athlete-withdraw  POST session, member: entry.remove {tournamentId, id=profileId} of an own profile (§7.3)   30/h (shared)
 // Every write is one Repository::transaction with the member actor (Actors::of) and Domain::execute at the current revision
-// (scoped revisions, §5.8), after the account's own limit and the global bucket of member transactions (member-tx, 120 per
-// minute for all members together; staff never wait for it, §3.7). Withdrawing, correcting and deleting own data and the
-// view never need full access (R12). Only the listed body fields reach Domain (closed field lists, §6.1, §11).
+// (scoped revisions, §5.8), after the account's own limit and the budget of member transactions (MemberTx, §3.7, final
+// review B2: the global bucket member-tx, 120 committed writes per minute for all members together, checked before the
+// lock and charged after the commit; 30 transactions per minute per account; staff never wait for it). Withdrawing and
+// deleting own data never wait for that budget, and withdrawing, correcting and deleting own data and the view never need
+// full access (R12). A new athlete profile only while sign-up is open (Settings::rolesOpen, B10: after the deploy nothing
+// changes until the Administrator opens it); editing, archiving and deleting an existing one always work. Only the listed
+// body fields reach Domain (closed field lists, §6.1, §11).
 // Settings::effective is idempotent: the routes call it so the switches are the effective ones also before the central
 // overlay (settings-backend); Settings::flags gives Domain's trust rule (§17).
 declare(strict_types=1);
-use MatDraw\{Access,Actors,ApiError,AppError,AthleteView,Auth,Domain,RateLimit,Repository,RouteContext,Routes,Settings};
+use MatDraw\{Access,Actors,ApiError,AppError,AthleteView,Auth,Domain,MemberTx,RateLimit,Repository,RouteContext,Routes,Settings};
 
 $config=static fn(RouteContext $ctx):array=>Settings::effective($ctx->pdo(),$ctx->config);
 $fields=static fn(array $body,array $keys):array=>array_intersect_key($body,array_flip($keys));
-/** One member transaction: the global bucket, then Domain::execute under the workspace lock with the member actor. */
+/** One member transaction: the budget (MemberTx, never for removals), then Domain::execute under the workspace lock with the member actor. */
 $run=static function(RouteContext $ctx,array $c,array $actor,string $type,array $payload):array{
- $pdo=$ctx->pdo();
- if($s=RateLimit::hit($pdo,$c['app_key'],'member-tx','all',120,60))throw new ApiError('Serwer jest teraz mocno obciążony. Spróbuj ponownie za chwilę.',429,['retry'=>Routes::retryAfter($s)]);
- return (new Repository($pdo))->transaction(fn(array &$db)=>Domain::execute($db,$actor['id'],$type,$payload,(int)$db['revision']),$actor,Settings::flags($c));
+ $pdo=$ctx->pdo();$budget=!MemberTx::exempt($type);if($budget)MemberTx::check($pdo,$c,$actor['id']);
+ $out=(new Repository($pdo))->transaction(fn(array &$db)=>Domain::execute($db,$actor['id'],$type,$payload,(int)$db['revision']),$actor,Settings::flags($c));
+ if($budget)MemberTx::count($pdo,$c);return $out;
 };
 $saveLimit=static function(RouteContext $ctx,array $c):void{if($s=RateLimit::hit($ctx->pdo(),$c['app_key'],'athlete-save',$ctx->user()['id'],20,3600))throw new ApiError('Zbyt wiele zmian danych zawodnika. Spróbuj ponownie później.',429,['retry'=>Routes::retryAfter($s)]);};
 $entryLimit=static function(RouteContext $ctx,array $c):void{if($s=RateLimit::hit($ctx->pdo(),$c['app_key'],'athlete-entry',$ctx->user()['id'],30,3600))throw new ApiError('Zbyt wiele zmian zgłoszeń. Spróbuj ponownie później.',429,['retry'=>Routes::retryAfter($s)]);};
@@ -47,7 +52,7 @@ return [
  }],
  'athlete'=>['method'=>'GET','auth'=>'peek','user'=>'member','handler'=>fn(RouteContext $ctx):array=>$view($ctx,$config($ctx),$include($ctx))],
  'athlete-save'=>['method'=>'POST','auth'=>'session','user'=>'member','handler'=>function(RouteContext $ctx)use($config,$fields,$run,$saveLimit,$view,$caps):array{
-  $c=$config($ctx);$saveLimit($ctx,$c);
+  $c=$config($ctx);if($ctx->input('id')===null&&!Settings::rolesOpen($c))throw new AppError('Rejestracja jest chwilowo wyłączona.',403);$saveLimit($ctx,$c);
   $r=$run($ctx,$c,Actors::of($ctx->pdo(),$ctx->user()),'athlete.save',$fields($ctx->body,['id','name','birthDate','sex','weight','height','gradeType','grade','club','relation']));
   $profile=null;foreach($view($ctx,$c)['profiles'] as $p)if($p['id']===$r['id'])$profile=$p;
   return ['profile'=>$profile,'caps'=>$caps($ctx)]+(isset($r['notice'])?['notice'=>$r['notice']]:[]);
