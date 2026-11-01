@@ -1057,6 +1057,11 @@ Przegląd z 2026-11-01 zgłosił 55 ustaleń w trzech soczewkach. Każde sprawdz
   - **`organizers.trustRequired` ma domyślnie `false`**, czyli pełną automatykę (D2). Przełącznik w panelu zostaje na wypadek nadużyć.
   - **Jeden profil zawodnika na konto (`ATHLETES_PER_ACCOUNT = 1`).** Rodzaj profilu to nadal „ja” albo „moje dziecko/podopieczny”, dlatego pytanie „Kogo zgłaszasz?” zostaje, a komunikat dla osób poniżej 16 lat zakładających profil „ja” także. Interfejs nie pokazuje dodawania kolejnych profili. Kod może zachować model wielu profili, ale stała i walidacja serwera pilnują limitu 1.
 
+- **Ustalenia z fali 2:**
+  - **Korekta własnego zgłoszenia (R12).** `athlete-entry` z `update:true` dla istniejącego zgłoszenia własnego profilu, bez nowych konkurencji, działa bez pełnego dostępu. Nowa konkurencja albo nowy turniej to zgłoszenie, które w trybie płatnym daje 402.
+  - **Pola kontraktu `me` i `public-config` (§4.4, §8.1)** są dostarczane zgodnie z planem. Asercje dokładnego zestawu kluczy w `tests/accounts.http.test.mjs` zaktualizowano świadomie (opcja A).
+  - **Grupa B przy przejściu na płatne (§3.4)** nie obejmuje kont z subskrypcją bieżącego trybu ani kont, które Admin sam oznaczył jako płatne. Gdy płatność jest już wymagana, grupa B jest pusta.
+
 ## Załącznik A. Nowe ustawienia
 
 **`config.php` (opcjonalne, w `Config::DEFAULTS`):**
