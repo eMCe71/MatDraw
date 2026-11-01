@@ -10,7 +10,11 @@ use PDO;
  *  data       signup 'off'|'on' (config signup_enabled), payments 'free'|'paid' (config billing_enforce), organizers
  *             'on'|'paused' (config organizers, default 'on'), trustRequired bool (config organizers_trust_required,
  *             default false: full automation, §17), supportEmail (config support_email ?: hello@matbravo.com, D4),
- *             stripeCheck null|{at, ok, mode, prices:{pln,usd}, error: null|code} (codes only, never Stripe's text).
+ *             stripeCheck null|{at, ok, mode, prices:{pln,usd}, error: null|code, fp} (codes only, never Stripe's text),
+ *             armed null|{fp, mode, at}: the Stripe configuration payments were last confirmed for (R1.2), written only by
+ *             the save gate of admin-settings-save (fresh check, test-mode confirmation, free-period decision); a check never
+ *             arms. {fp:null, mode:null}: none is confirmed (a check, while payments are 'paid' and nothing is armed, of
+ *             another configuration than the stored check's one): only the save gate resumes payments.
  *             normalize() replaces every invalid value by its default; unknown keys of a later release stay in the JSON.
  *  effective(PDO|null, config): the configuration every route reads (§3.2, computed in one place: Routes::dispatch for
  *             session, upload and peek-with-cookie routes and routes flagged 'settings'; index.php; the jobs). One query
@@ -21,8 +25,11 @@ use PDO;
  *                     settings_degraded 'billing-missing' (registration fails closed, access fails open, R2)
  *                     A stored Stripe check that failed or was made against another Stripe configuration (fingerprint():
  *                     billing_mode, the key's hash, price keys, advertised amounts) does the same with settings_degraded
- *                     'stripe-check' until a fresh check passes (final review B4); without any stored check the payments
- *                     switch works as before (config.php alone, the release a67ad42)
+ *                     'stripe-check' (final review B4), and so does a configuration other than the armed one (R1.2): a
+ *                     passing manual check alone resumes payments only for the armed configuration; another one (test →
+ *                     live keys) waits for the save gate, with its test-mode confirmation and free-period decision.
+ *                     Without any stored check or armed configuration the payments switch works as before (config.php
+ *                     alone, the release a67ad42)
  *   settings_degraded 'billing-missing' | 'stripe-check' | 'force-off' (signup 'on', or an invite token for the paid test
  *                     window, under signup_force_off)
  *   signup_invite_token null under signup_force_off: the emergency ceiling closes the invite path too (B6)
@@ -31,15 +38,17 @@ use PDO;
  *  rolesOpen(effective): members may gain roles (switch the organizer role on, create an athlete profile) only while
  *             sign-up is open (signup_mode not 'off', B10): after the deploy nothing changes until the Administrator opens it.
  *  flags(effective) gives Domain's read-only $db['flags'] {organizers, trustRequired}; the JS mirror reads db.flags the same way.
- *  save()     admin-settings-save (§3.4): version check (409 stale); starting payments (free → paid) or opening the paid
- *             sign-up (mode → 'paid') only with billing_enabled, a fresh Stripe check outside any transaction (resolvePrice
- *             of every currency, amounts compared with billing_amounts), in Stripe test mode the explicit confirmation
- *             (allowTestMode or confirmTestMode; 409 code test_mode, confirmTestMode:true, B5) and, while payments are not
- *             effectively enforced yet, the decision about accounts of the free period (Billing::freePeriodSet, groups A and
- *             B); then one transaction with the free-period action, the row (version+1) and account_audit (settings.save,
- *             settings.support old -> new).
- *  view()     admin-settings (§8.2), with stripeCheck {ok, stale, checkedAt, mode} of the last check (stale: the Stripe
- *             configuration of config.php changed since).
+ *  save()     admin-settings-save (§3.4): version check (409 stale); starting payments (free → paid), opening the paid
+ *             sign-up (mode → 'paid') or resuming paused payments (an unchanged save while payments are 'paid' and
+ *             effective() pauses them, 'stripe-check', R1.2) only with billing_enabled, a fresh Stripe check outside any
+ *             transaction (resolvePrice of every currency, amounts compared with billing_amounts), in Stripe test mode the
+ *             explicit confirmation (allowTestMode or confirmTestMode; 409 code test_mode, confirmTestMode:true, B5) and,
+ *             while payments are not effectively enforced yet or no configuration was ever armed (config.php alone), the
+ *             decision about accounts of the free period (Billing::freePeriodSet, groups A and B); then one transaction with
+ *             the free-period action, the row (version+1, armed) and account_audit (settings.save, settings.support old -> new).
+ *  view()     admin-settings (§8.2), with stripeCheck {ok, stale, checkedAt, mode, rearm} of the last check (stale: the
+ *             Stripe configuration of config.php changed since; rearm: the check passed but payments stay paused until the
+ *             paid mode is saved again, R1.2).
  */
 final class Settings {
  public const SUPPORT_DEFAULT='hello@matbravo.com';
@@ -58,7 +67,7 @@ final class Settings {
  /** Starting values from config.php (§3.1): what applies while the row or a field is missing. */
  public static function defaults(array $c):array {
   return ['signup'=>!empty($c['signup_enabled'])?'on':'off','payments'=>!empty($c['billing_enforce'])?'paid':'free','organizers'=>($c['organizers']??null)==='paused'?'paused':'on',
-   'trustRequired'=>($c['organizers_trust_required']??false)===true,'supportEmail'=>self::email($c['support_email']??null)??self::SUPPORT_DEFAULT,'stripeCheck'=>null];
+   'trustRequired'=>($c['organizers_trust_required']??false)===true,'supportEmail'=>self::email($c['support_email']??null)??self::SUPPORT_DEFAULT,'stripeCheck'=>null,'armed'=>null];
  }
  /** A lower-case e-mail of at most 254 characters, or null. */
  public static function email(mixed $v):?string{$e=is_string($v)?mb_strtolower(trim($v)):'';return $e!==''&&strlen($e)<=254&&filter_var($e,FILTER_VALIDATE_EMAIL)?$e:null;}
@@ -69,6 +78,8 @@ final class Settings {
   if(is_bool($d['trustRequired']??null))$o['trustRequired']=$d['trustRequired'];
   if(($e=self::email($d['supportEmail']??null))!==null)$o['supportEmail']=$e;
   $o['stripeCheck']=self::check($d['stripeCheck']??null);
+  $a=$d['armed']??null;
+  if(is_array($a)&&is_int($a['at']??null)&&(is_string($a['fp']??null)&&preg_match('/^[0-9a-f]{16}$/D',$a['fp'])&&in_array($a['mode']??null,['test','live'],true)||($a['fp']??null)===null&&($a['mode']??null)===null))$o['armed']=['fp'=>$a['fp'],'mode'=>$a['mode'],'at'=>$a['at']];
   return $o;
  }
  /** A valid stripeCheck object or null; fp (the fingerprint() it was made against) is kept only in its exact shape. */
@@ -93,6 +104,13 @@ final class Settings {
  }
  /** Whether a stored check $k passed against the current Stripe configuration of $c (false without a check). */
  private static function verified(?array $k,array $c):bool{$fp=self::fingerprint($c);return $k!==null&&$k['ok']&&$fp!==null&&$k['fp']===$fp;}
+ /**
+  * Whether 'paid' payments of normalized data $s run under the Stripe configuration of $c: nothing stored, config.php alone
+  * (a67ad42); a stored check must have passed against it (B4) and an armed configuration must be this one (R1.2).
+  */
+ private static function running(array $s,array $c):bool{return ($s['stripeCheck']===null||self::verified($s['stripeCheck'],$c))&&($s['armed']===null||$s['armed']['fp']===self::fingerprint($c));}
+ /** {fp, mode, at} of the Stripe configuration of $c, as data.armed stores it. */
+ private static function arm(array $c,int $now):array{return ['fp'=>self::fingerprint($c),'mode'=>($c['billing_mode']??'test')==='live'?'live':'test','at'=>$now];}
  /** Members may gain roles (the organizer role switched on, a new athlete profile) only while sign-up is open (B10). */
  public static function rolesOpen(array $eff):bool{return in_array($eff['signup_mode']??null,['free','paid'],true);}
 
@@ -117,9 +135,10 @@ final class Settings {
   $eff['signup_enabled']=$s['signup']==='on'&&empty($c['signup_force_off']);
   $eff['billing_enforce']=$s['payments']==='paid';
   if($eff['billing_enforce']&&empty($c['billing_enabled'])){$eff['billing_enforce']=false;$eff['signup_enabled']=false;$eff['settings_degraded']='billing-missing';}
-  // B4: payments run only against the Stripe configuration a check passed for; a failed check or a changed config.php
-  // (test → live keys, prices, amounts) closes the sign-up and lifts enforcement (fail closed / fail open, as above).
-  elseif($eff['billing_enforce']&&$s['stripeCheck']!==null&&!self::verified($s['stripeCheck'],$c)){$eff['billing_enforce']=false;$eff['signup_enabled']=false;$eff['settings_degraded']='stripe-check';}
+  // B4, R1.2: payments run only against the Stripe configuration a check passed for and the save gate armed; a failed check or
+  // a changed config.php (test → live keys, prices, amounts) closes the sign-up and lifts enforcement (fail closed / fail
+  // open, as above) until the check passes again for the armed configuration, or the save gate arms the new one.
+  elseif($eff['billing_enforce']&&!self::running($s,$c)){$eff['billing_enforce']=false;$eff['signup_enabled']=false;$eff['settings_degraded']='stripe-check';}
   // B6: signup_force_off is the ceiling over every self sign-up path, the invite token of the paid test window included.
   $token=is_string($c['signup_invite_token']??null)&&$c['signup_invite_token']!=='';
   if(!empty($c['signup_force_off'])){if($s['signup']==='on'||$token&&$eff['billing_enforce'])$eff['settings_degraded']??='force-off';$eff['signup_invite_token']=null;}
@@ -149,7 +168,8 @@ final class Settings {
    'effective'=>['mode'=>$eff['signup_mode'],'degraded'=>$eff['settings_degraded']??null],
    'support'=>['email'=>$d['supportEmail'],'source'=>self::email($s['stored']['supportEmail']??null)!==null?'db':(self::email($file['support_email']??null)!==null?'config':'default')],
    'stripe'=>['enabled'=>Billing::enabled($file),'mode'=>($file['billing_mode']??'test')==='live'?'live':'test','check'=>$k===null?null:array_diff_key($k,['fp'=>1])],
-   'stripeCheck'=>['ok'=>$k!==null&&$k['ok'],'stale'=>$k!==null&&($fp=self::fingerprint($file))!==null&&$k['fp']!==$fp,'checkedAt'=>$k===null?null:gmdate('c',$k['at']),'mode'=>$k['mode']??null],
+   'stripeCheck'=>['ok'=>$k!==null&&$k['ok'],'stale'=>$k!==null&&($fp=self::fingerprint($file))!==null&&$k['fp']!==$fp,'checkedAt'=>$k===null?null:gmdate('c',$k['at']),'mode'=>$k['mode']??null,
+    'rearm'=>($eff['settings_degraded']??null)==='stripe-check'&&self::verified($k,$file)],
    'freeSignups'=>['a'=>count($set['a']),'b'=>count($set['b']),'scheduled'=>$set['scheduled']],
    'organizersPending'=>$pending,
    'limits'=>['organizerDay'=>Domain::ORGANIZER_DAY,'organizerActive'=>Domain::ORGANIZER_ACTIVE,'communityDayGlobal'=>Domain::COMMUNITY_DAY_GLOBAL,'organizerProfilesDay'=>Domain::ORGANIZER_PROFILES_DAY,
@@ -177,9 +197,13 @@ final class Settings {
   * every currency of stripe_prices, outside any transaction (the caller released the session); the amount of each price
   * must equal billing_amounts, which guests see (B16: error amount_mismatch). The result, with the fingerprint() of the
   * configuration it was made against, is stored in data.stripeCheck without a version change (it is not a setting) and
-  * returned without the fingerprint; a failed check replaces a passed one, so effective() stops the paid mode (B4). A
-  * missing price or another amount: 409 stripe_not_ready; any other Stripe failure is rethrown (the route answers 503
-  * through Billing::guard).
+  * returned without the fingerprint; a definitive failure (auth, price_missing, amount_mismatch) replaces a passed one, so
+  * effective() stops the paid mode (B4). A failure that says nothing about the configuration (Stripe unavailable, another
+  * error) is not stored over a check that passed against the current configuration, nor where none is stored: it never
+  * stops payments that run (R1.2). A check never arms a configuration: while payments are 'paid' and nothing is armed
+  * (config.php alone), a check of another configuration than the stored check's one stores armed {fp:null}, so a passing
+  * manual check after a change of keys never resumes payments without the save gate (R1.2). A missing price or another
+  * amount: 409 stripe_not_ready; any other Stripe failure is rethrown (the route answers 503 through Billing::guard).
   */
  public static function stripeCheck(PDO $pdo,array $file,int $now):array {
   if(!Billing::enabled($file))self::notReady();
@@ -196,7 +220,15 @@ final class Settings {
   }catch(StripeError $e){$fail=$e;}
   $code=$fail?($fail->unavailable()?'unavailable':(in_array($fail->status,[401,403],true)?'auth':'error')):($missing?'price_missing':($amount?'amount_mismatch':null));
   $check=['at'=>$now,'ok'=>$code===null,'mode'=>$mode,'prices'=>$prices,'error'=>$code];
-  self::write($pdo,fn(array $raw,int $v)=>[$v,['stripeCheck'=>$check+['fp'=>self::fingerprint($file)]]+$raw,false],$now,null);
+  self::write($pdo,function(array $raw,int $v)use($file,$check,$code,$now):array{
+   $s=self::normalize($raw,$file);
+   if(in_array($code,['unavailable','error'],true)&&($s['stripeCheck']===null||self::verified($s['stripeCheck'],$file)))return [$v,$raw,false];
+   $set=['stripeCheck'=>$check+['fp'=>self::fingerprint($file)]];
+   // Nothing armed yet (config.php alone): a check of another configuration than the stored check's one (test → live keys
+   // after a check) records that none is confirmed, so only the save gate resumes payments (R1.2).
+   if($s['payments']==='paid'&&$s['armed']===null&&$s['stripeCheck']!==null&&$s['stripeCheck']['fp']!==self::fingerprint($file))$set['armed']=['fp'=>null,'mode'=>null,'at'=>$now];
+   return [$v,$set+$raw,false];
+  },$now,null);
   if($fail)throw $fail;
   if($missing||$amount)self::notReady(['stripeCheck'=>$check]);
   return $check;
@@ -227,10 +259,12 @@ final class Settings {
  /**
   * admin-settings-save {version, signup?, payments?, organizers?, trustRequired?, supportEmail?, freePeriod?,
   * allowTestMode? (confirmTestMode? is the same)} for the raw config.php $file (§3.4, §3.6, §17); returns view().
-  * Starting payments (free → paid) and opening the paid sign-up (mode → 'paid', also off → on while payments are already
-  * 'paid', B5) are the transitions with conditions: a fresh Stripe check, the test-mode confirmation and, while payments
-  * are not effectively enforced (also when effective() lifted them after a failed or outdated check, B4), the free-period
-  * decision. 'paid' → 'free' is always allowed; saving other fields while Stripe is missing or not verified keeps the
+  * Starting payments (free → paid), opening the paid sign-up (mode → 'paid', also off → on while payments are already
+  * 'paid', B5) and resuming payments that effective() paused ('stripe-check': a failed or outdated check, another Stripe
+  * configuration than the armed one) by saving without changes (R1.2) are the transitions with conditions (the gate): a
+  * fresh Stripe check, the test-mode confirmation and, while payments are not effectively enforced (also when effective()
+  * lifted them, B4) or were never armed (config.php alone), the free-period decision; the gate arms the configuration
+  * (data.armed). 'paid' → 'free' is always allowed; saving other fields while Stripe is missing or not verified keeps the
   * degraded state of effective().
   */
  public static function save(PDO $pdo,array $file,array $admin,array $in,int $now):array {
@@ -247,14 +281,18 @@ final class Settings {
   }
   $cur=self::get($pdo,$file);if($version!==$cur['version'])self::stale();
   $apply=function(array $d)use($in,$email):array{foreach(['signup','payments','organizers','trustRequired'] as $k)if(array_key_exists($k,$in))$d[$k]=$in[$k];if($email!==null)$d['supportEmail']=$email;return $d;};
-  $next=$apply($cur['data']);
-  if(array_intersect_key($next,array_flip(self::FIELDS))==array_intersect_key($cur['data'],array_flip(self::FIELDS)))return self::view($pdo,$file,$now);
+  $next=$apply($cur['data']);$eff=self::effective($pdo,$file);
+  $same=array_intersect_key($next,array_flip(self::FIELDS))==array_intersect_key($cur['data'],array_flip(self::FIELDS));
+  // R1.2: an unchanged save while 'paid' payments are paused ('stripe-check') resumes them through the gate below.
+  $resume=$same&&$cur['data']['payments']==='paid'&&($eff['settings_degraded']??null)==='stripe-check';
+  if($same&&!$resume)return self::view($pdo,$file,$now);
   // Payments start (free → paid) or the paid sign-up opens to everybody (B5: also off → on while payments are 'paid').
-  $toPaid=$next['payments']==='paid'&&($cur['data']['payments']!=='paid'||self::mode($next)==='paid'&&self::mode($cur['data'])!=='paid');$test=false;
+  $toPaid=$resume||$next['payments']==='paid'&&($cur['data']['payments']!=='paid'||self::mode($next)==='paid'&&self::mode($cur['data'])!=='paid');$test=false;
   // The free-period decision whenever enforcement is not effective yet (free, or lifted by effective() after a failed or
-  // outdated Stripe check: test subscribers would lose access on the switch to live keys, B4); its set is the one of the
-  // current state, where payments are not required yet (group B: who would lose access).
-  $decide=$toPaid&&empty(self::effective($pdo,$file)['billing_enforce']);
+  // outdated Stripe check: test subscribers would lose access on the switch to live keys, B4) or no configuration was ever
+  // armed (payments from config.php alone, the test window of variant A: R1.2); its set is the one of the current state,
+  // where payments are not required yet (group B: who would lose access).
+  $decide=$toPaid&&(empty($eff['billing_enforce'])||$cur['data']['armed']===null);
   $free=['billing_enforce'=>false]+$file;
   if($toPaid){
    if(!Billing::enabled($file))self::notReady();
@@ -266,7 +304,7 @@ final class Settings {
   $pdo->beginTransaction();
   try{
    $counts=null;
-   $saved=self::write($pdo,function(array $raw,int $v)use($pdo,$version,$file,$free,$apply,$decide,$decision,$from,$admin,$now,&$counts):array{
+   $saved=self::write($pdo,function(array $raw,int $v)use($pdo,$version,$file,$free,$apply,$toPaid,$decide,$decision,$from,$admin,$now,&$counts):array{
     if($v!==$version)self::stale();
     if($decide){
      // The set again under the lock: an account created since the check above is decided as well, never silently cut off.
@@ -274,11 +312,12 @@ final class Settings {
      if(($set['a']||$set['b'])&&$decision===null)self::decide($set);
      $counts=$decision===null?['a'=>0,'b'=>0]:Billing::freePeriodApply($pdo,$admin['id'],$set,$from,$now);
     }
-    return [$v+1,array_intersect_key($apply(self::normalize($raw,$file)),array_flip(self::FIELDS))+$raw,true];
+    // The gate passed: this Stripe configuration is the armed one (R1.2).
+    return [$v+1,array_intersect_key($apply(self::normalize($raw,$file)),array_flip(self::FIELDS))+($toPaid?['armed'=>self::arm($file,$now)]:[])+$raw,true];
    },$now,$admin['id']);
    $s=self::normalize($saved,$file);
    $note='signup='.$s['signup'].' payments='.$s['payments'].' organizers='.$s['organizers'].' trustRequired='.($s['trustRequired']?1:0);
-   if($toPaid)$note.=($decision===null||!$decide?'':' '.($from===null?'keep':'requireFrom:'.date('Y-m-d',$from))).($decide?' a='.$counts['a'].' b='.$counts['b']:'').($test?' test':'');
+   if($toPaid)$note.=($resume?' resume':'').($decision===null||!$decide?'':' '.($from===null?'keep':'requireFrom:'.date('Y-m-d',$from))).($decide?' a='.$counts['a'].' b='.$counts['b']:'').($test?' test':'');
    Members::audit($pdo,$admin['id'],'settings.save',null,mb_substr($note,0,200));
    if($s['supportEmail']!==$cur['data']['supportEmail'])Members::audit($pdo,$admin['id'],'settings.support',null,mb_substr($cur['data']['supportEmail'],0,self::NOTE_VALUE).' -> '.mb_substr($s['supportEmail'],0,self::NOTE_VALUE));
    $pdo->commit();

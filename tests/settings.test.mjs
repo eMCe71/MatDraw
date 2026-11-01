@@ -77,6 +77,18 @@ test('Settings::effective: the stored Stripe check must have passed against the 
  ];
  const out=bridge({job:'effective',cases:cases.map(([,c,row])=>({config:{...FILE,...c},row}))});
  cases.forEach(([label,,,want],i)=>{const o=out[i];assert.equal(o.status,200,label+': '+JSON.stringify(o));assert.deepEqual(Object.values(pick(o.result.effective)),want,label);assert.ok(o.result.again&&o.result.twice,label+': idempotent');});
+ // R1.2: the armed configuration (the save gate's confirmation): a passing check of another configuration does not resume.
+ const armed=(f,mode='test')=>({fp:f,mode,at:1});
+ const more=[
+  ['armed and checked for this configuration',stripe,{...paid,stripeCheck:check(),armed:armed(fp)}],
+  ['live keys checked, but the test configuration is the armed one: paused until the save gate',live,{...paid,stripeCheck:check({mode:'live',fp:fpLive}),armed:armed(fp)}],
+  ['the same in the test window (sign-up off, enforcement)',live,{...window,stripeCheck:check({mode:'live',fp:fpLive}),armed:armed(fp)}],
+  ['paused with nothing confirmed ({fp:null}): only the save gate resumes',stripe,{...paid,stripeCheck:check(),armed:{fp:null,mode:null,at:1}}],
+  ['armed for live after the gate',live,{...paid,stripeCheck:check({mode:'live',fp:fpLive}),armed:armed(fpLive,'live')}],
+  ['payments free: the armed configuration changes nothing',live,{signup:'on',payments:'free',stripeCheck:check(),armed:armed(fp)}],
+ ];
+ const res=bridge({job:'effective',cases:more.map(([,c,row])=>({config:{...FILE,...c},row}))});
+ assert.deepEqual(res.map(o=>Object.values(pick(o.result.effective))),[[true,true,'paid',null,false],[false,false,'off','stripe-check',true],[false,false,'off','stripe-check',true],[false,false,'off','stripe-check',true],[true,true,'paid',null,false],[true,false,'free',null,true]],more.map(m=>m[0]).join(' / '));
 });
 // Final review B6: signup_force_off closes every self sign-up path, the invite token of the paid test window included.
 test('signup_force_off closes the invite path too: no token in the effective config, signupOpen false, the banner shows (B6)',{skip},()=>{
@@ -104,9 +116,12 @@ test('Settings::normalize and defaults: closed values, lower-case e-mail, stripe
  const check={at:1,ok:false,mode:'test',prices:{pln:true,usd:false,eur:true},error:'price_missing'};
  const [n1,n2,n3,n4]=bridge({job:'normalize',cases:[{data:{signup:'on',payments:'paid',organizers:'paused',trustRequired:true,supportEmail:'A@B.PL',stripeCheck:check,future:1},config:FILE},
   {data:{stripeCheck:{...check,error:'Stripe said: card <b>'}},config:FILE},{data:{stripeCheck:{...check,mode:'prod'}},config:FILE},{data:null,config:{...FILE,signup_enabled:true,billing_enforce:true}}]});
- assert.deepEqual(n1,{signup:'on',payments:'paid',organizers:'paused',trustRequired:true,supportEmail:'a@b.pl',stripeCheck:{at:1,ok:false,mode:'test',prices:{pln:true,usd:false},error:'price_missing',fp:null}});
+ assert.deepEqual(n1,{signup:'on',payments:'paid',organizers:'paused',trustRequired:true,supportEmail:'a@b.pl',stripeCheck:{at:1,ok:false,mode:'test',prices:{pln:true,usd:false},error:'price_missing',fp:null},armed:null});
  assert.equal(n2.stripeCheck,null,'free text never stored as an error code');assert.equal(n3.stripeCheck,null);
- assert.deepEqual(n4,{signup:'on',payments:'paid',organizers:'on',trustRequired:false,supportEmail:'hello@matbravo.com',stripeCheck:null});
+ assert.deepEqual(n4,{signup:'on',payments:'paid',organizers:'on',trustRequired:false,supportEmail:'hello@matbravo.com',stripeCheck:null,armed:null});
+ // armed (R1.2): {fp, mode, at} in its exact shape, or {fp:null, mode:null, at} (paused, nothing confirmed); anything else is null.
+ const armed=bridge({job:'normalize',cases:[{fp:'0123456789abcdef',mode:'live',at:5},{fp:null,mode:null,at:5},{fp:'0123456789abcdef',mode:null,at:5},{fp:'XYZ',mode:'test',at:5},{fp:'0123456789abcdef',mode:'test'},'x'].map(a=>({data:{armed:a},config:FILE}))}).map(n=>n.armed);
+ assert.deepEqual(armed,[{fp:'0123456789abcdef',mode:'live',at:5},{fp:null,mode:null,at:5},null,null,null,null]);
  assert.deepEqual(bridge({job:'defaults',cases:[{},{support_email:'zły'},{organizers_trust_required:'yes'}]}).map(d=>[d.signup,d.payments,d.supportEmail,d.trustRequired]),
   [['off','free','hello@matbravo.com',false],['off','free','hello@matbravo.com',false],['off','free','hello@matbravo.com',false]]);
  assert.deepEqual(bridge({job:'mode',cases:[{signup:'off',payments:'paid'},{signup:'on',payments:'free'},{signup:'on',payments:'paid'}]}),['off','free','paid']);
