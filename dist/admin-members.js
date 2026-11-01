@@ -390,8 +390,10 @@ function profileDialog(m){
    <label class="checkbox-label span-two"><input type="checkbox" name="clearClub"> ${T('Wyczyść tekst klubu')}</label></div>
   <div class="form-error" role="alert"></div></form>`,all(btn(T('Anuluj'),'close'),h`<button class="btn primary" type="submit" form="mem-profile-form">${T('Zapisz profil')}</button>`));
 }
-/** "Hide also the person's tournaments" with the reason the organizer sees (§5.5); only for an account that created tournaments. */
-const hideFields=(m,checked=true)=>Number(m.tournaments)>0?h`<label class="checkbox-label"><input type="checkbox" data-mem-hide${checked?' checked':''}> ${T('Ukryj też jego turnieje ({n})',{n:Number(m.tournaments)})}</label>
+/** "Hide also the person's upcoming tournaments" with the reason the organizer sees (§5.5); only for an account that created tournaments.
+ * m.tournaments counts every tournament of the person (past and hidden ones too) while Members::hideTournaments hides only the upcoming
+ * ones not hidden yet, so the number is labelled as the total and the result toast gives the hidden count. */
+export const hideFields=(m,checked=true)=>Number(m.tournaments)>0?h`<label class="checkbox-label"><input type="checkbox" data-mem-hide${checked?' checked':''}> ${T('Ukryj też jego nadchodzące turnieje (wszystkie jego turnieje: {n})',{n:Number(m.tournaments)})}</label>
   <label class="field-label mem-reason">${T('Powód ukrycia (widzi go organizator)')}<textarea data-mem-reason maxlength="200" rows="2"></textarea></label><p class="muted small">${T('Ukryte zostaną nadchodzące turnieje tej osoby razem ze zgłoszeniami samych zawodników.')}</p>`:'';
 function activeDialog(m){
  const live=hasLiveSubscription(m.billing);

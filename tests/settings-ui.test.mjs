@@ -169,6 +169,42 @@ test('tournament card tools: hide (community), restore, show and confirm the org
  assert.equal(C.toolsView(t,{role:'club'}).html,'');
 });
 
+test('a refused resend from a dialog: stale closes the dialog and reloads; stripe and error keep the dialog able to try again',async()=>{
+ assert.deepEqual(S.refusalPlan('stale',{dialog:true}),{close:true,reload:true,keep:false});
+ assert.deepEqual(S.refusalPlan('stripe',{dialog:true}),{close:false,reload:false,keep:true});
+ assert.deepEqual(S.refusalPlan('error',{dialog:false}),{close:false,reload:false,keep:false},'a page form keeps nothing pending');
+ const log=[],box={textContent:''};let open=false,meRefreshed=0;const replies=[];
+ registry.provide('ui',{modal:title=>{open=true;log.push('modal:'+title);},closeModal:()=>{open=false;log.push('close');},toast:m=>log.push('toast:'+m)});
+ globalThis.document={querySelector:sel=>sel==='#modal-root .modal'?(open?{}:null):sel==='#modal-root .form-error'?(open?box:null):null};
+ const io={...S.io};S.io.request=async(route,o)=>{log.push(route);const r=replies.shift();if(r instanceof Error)throw r;return r;};S.io.refreshMe=()=>{meRefreshed++;};
+ const el={closest:()=>null};
+ try{
+  S.state.view=VIEW();
+  replies.push(conflict('test_mode'),conflict('stripe_not_ready'),conflict('test_mode'),conflict('stale'),VIEW({version:4}));
+  await S.save(el,{signup:'on',payments:'paid'});assert.equal(open,true);assert.deepEqual(S.pendingSave().fields,{signup:'on',payments:'paid'});
+  const p=S.pendingSave();await S.save(el,p.fields,{...p.extra,confirmTestMode:true},p.done);
+  assert.equal(open,true,'the test-mode dialog stays');assert.equal(box.textContent,'x');assert.ok(S.pendingSave(),'its confirm button can send again');
+  assert.deepEqual(S.pendingSave().extra,{confirmTestMode:true});
+  // Another Administrator saved meanwhile: the dialog closes and the page reloads the new version.
+  box.textContent='';await S.save(el,{signup:'on',payments:'paid'});const q=S.pendingSave();await S.save(el,q.fields,{...q.extra,confirmTestMode:true},q.done);
+  assert.equal(open,false);assert.equal(S.pendingSave(),null);assert.equal(S.state.view.version,4);assert.equal(log.at(-1),'toast:x');assert.equal(log.at(-2),'admin-settings');
+  assert.equal(meRefreshed,0,'nothing saved, nothing to refresh');
+  // A saved change of the organizer confirmation refreshes me (the nav badge of #members); the help address does not.
+  replies.push(VIEW({version:5,trustRequired:true}),VIEW({version:6,trustRequired:true,support:{email:'a@b.pl',source:'db'}}));
+  await S.save(el,{trustRequired:true});assert.equal(meRefreshed,1);
+  await S.save(el,{supportEmail:'a@b.pl'});assert.equal(meRefreshed,1);
+  assert.equal(S.touchesPending({organizers:'paused'}),true);assert.equal(S.touchesPending({signup:'on'}),false);assert.equal(S.touchesPending(null),false);
+ }finally{Object.assign(S.io,io);delete globalThis.document;S.state.view=null;}
+});
+
+test('confirm organizer on a tournament card: a blocked organizer is reported, not confirmed',()=>{
+ assert.deepEqual(C.trustOutcome({id:'m',caps:{organizer:true,organizerTrusted:true}}),{ok:true,message:'Organizator potwierdzony.'});
+ const blocked=C.trustOutcome({id:'m',caps:{organizer:false,organizerBlocked:true,organizerTrusted:true}});
+ assert.equal(blocked.ok,false);assert.match(blocked.message,/rola organizatora tej osoby jest odebrana/);assert.match(blocked.message,/panelu Członkowie/);
+ assert.equal(C.trustOutcome(null).ok,true);
+ english(()=>assert.match(C.trustOutcome({caps:{organizerBlocked:true}}).message,/organiser role is taken away/));
+});
+
 test('the members nav badge counts organizers waiting for confirmation for the Administrator only',()=>{
  assert.equal(boot.pendingOrganizers({user:{role:'admin'},features:{pendingOrganizers:4}}),4);
  assert.equal(boot.pendingOrganizers({user:{role:'admin'},features:{}}),0);

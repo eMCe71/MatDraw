@@ -57,6 +57,11 @@ export function outcome(error){
  if(error?.status===409&&code==='stripe_not_ready')return {kind:'stripe',message};
  return {kind:'error',message};
 }
+/** What the page does after a refused save that opens no new dialog: 'stale' closes an open dialog and reloads (the question no longer
+ * applies to the new version); 'stripe' and 'error' keep an open dialog with its question, so that its button can try again. */
+export const refusalPlan=(kind,{dialog=false}={})=>kind==='stale'?{close:true,reload:true,keep:false}:{close:false,reload:false,keep:!!dialog};
+/** Whether a saved change moves the pending-organizer count of me.features (the nav badge of #members, 0 while confirmation is off). */
+export const touchesPending=fields=>!!fields&&(Object.hasOwn(fields,'trustRequired')||Object.hasOwn(fields,'organizers'));
 /** Body of the bulk action "require payment from" for groups A and B (Billing::adminAction scope free-signup). */
 export const bulkBody=date=>({action:'requireFrom',scope:'free-signup',date});
 
@@ -182,7 +187,7 @@ export function decisionView(counts,today=warsawToday()){
 
 // ---- Requests ----
 /** Transport and demo switch behind one object so that tests can run the flow without a server. */
-export const io={request:(route,options)=>Client.request(route,options),demo:Client.isDemo};
+export const io={request:(route,options)=>Client.request(route,options),demo:Client.isDemo,refreshMe:()=>import('./me.js').then(m=>m.loadMe({force:true})).catch(()=>{})};
 export const loadView=()=>io.request('admin-settings');
 /** One save attempt: {ok:true,view} or {ok:false,...outcome(error)}; the caller opens the dialog the outcome asks for. */
 export async function attempt(view,fields,extra={}){
@@ -221,20 +226,25 @@ const openModal=(title,body,actions,large=false)=>ui().modal(title,body,actions,
 const closeModal=()=>ui().closeModal();
 /** Pending save while a dialog asks a question: the fields and the answers given so far. */
 let pending=null;
-async function save(el,fields,extra={},done=T('Zapisano ustawienia.')){
+/** The pending save (tests only). */
+export const pendingSave=()=>pending;
+/** One save with its dialogs (exported for tests/settings-ui.test.mjs, which runs it against a stub document and io). */
+export async function save(el,fields,extra={},done=T('Zapisano ustawienia.')){
  if(!st.view)return;
  if(!Object.keys(fields).length){say(el,T('Nic nie zmieniono.'));return;}
  const r=await attempt(st.view,fields,extra);
- if(r.ok){pending=null;st.view=r.view;closeIfOpen();paint();toast(done);return;}
+ if(r.ok){pending=null;st.view=r.view;closeIfOpen();paint();toast(done);if(touchesPending(fields))io.refreshMe();return;}
  pending={fields,extra,done};
  if(r.kind==='test_mode'){openModal(T('Stripe w trybie testowym'),h`<p class="modal-lead">${r.message}</p><p class="muted small">${T('W trybie testowym karty testowe przechodzą, a prawdziwe płatności nie. Przełącz Stripe na tryb live w config.php przed prawdziwym otwarciem płatności.')}</p><div class="form-error" role="alert"></div>`,
   all(btn(T('Anuluj'),'close'),btn(T('Potwierdzam tryb testowy'),'test-go','primary')));return;}
  if(r.kind==='decision'){openModal(T('Konta z okresu bezpłatnego'),decisionView(r.counts),all(btn(T('Anuluj'),'close'),h`<button class="btn primary" type="submit" form="set-decision-form">${T('Zapisz decyzję')}</button>`),true);return;}
- pending=null;
- if(r.kind==='stale'){await load();toast(r.message);return;}
+ const plan=refusalPlan(r.kind,{dialog:dialogOpen()});pending=plan.keep?{fields,extra,done}:null;
+ if(plan.close)closeIfOpen();
+ if(plan.reload){await load();toast(r.message);return;}
  say(el,r.message);
 }
-const closeIfOpen=()=>{if(document.querySelector('#modal-root .modal'))closeModal();};
+const dialogOpen=()=>!!document.querySelector('#modal-root .modal');
+const closeIfOpen=()=>{if(dialogOpen())closeModal();};
 const busy=async(el,fn)=>{const b=el?.matches?.('form')?document.querySelector('button[type=submit][form="'+el.id+'"]')||el.querySelector('button[type=submit]'):el;if(b)b.disabled=true;try{await fn();}catch(error){say(el,translateMessage(error.message));}finally{if(b?.isConnected)b.disabled=false;}};
 const ACTS={
  close:()=>{pending=null;closeModal();},

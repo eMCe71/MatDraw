@@ -435,6 +435,10 @@ test('trust, untrust, block and restore of the organizer role, the account block
  assert.deepEqual(members.blockCall('u1').options.body,{action:'active',userId:'u1',active:false});
  assert.deepEqual(members.hideReason('  a   b '),{ok:true,reason:'a b'});assert.equal(members.hideReason('x'.repeat(201)).ok,false);
  assert.equal(createBody({email:'a@b.pl',organizer:true}).organizer,true);assert.ok(!('organizer' in createBody({email:'a@b.pl',organizer:false})));
+ // The hide option names the count as all tournaments (past and hidden ones included); only upcoming ones not hidden yet are hidden.
+ const hide=members.hideFields({tournaments:5}).html;
+ assert.match(hide,/Ukryj też jego nadchodzące turnieje \(wszystkie jego turnieje: 5\)/);assert.match(hide,/data-mem-hide checked/);
+ assert.ok(!/checked/.test(members.hideFields({tournaments:2},false).html));assert.equal(members.hideFields({}).html??members.hideFields({}),'','no option without tournaments');
 });
 
 test('bulk action: the payload of the selected rows and the done/failed summary',()=>{

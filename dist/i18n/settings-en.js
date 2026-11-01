@@ -184,4 +184,5 @@ export default {
  'Wycofaj też zgłoszenia samych zawodników ({n})':'Also withdraw entries athletes made themselves ({n})',
  'Turniej ukryty.':'Tournament hidden.',
  'Turniej przywrócony.':'Tournament restored.',
+ 'Potwierdzenie zapisane, ale rola organizatora tej osoby jest odebrana, więc turniej dalej jest niepotwierdzony. Przywróć rolę w panelu Członkowie.':'Confirmation saved, but this person’s organiser role is taken away, so the tournament is still unconfirmed. Give the role back in the Members panel.',
 };

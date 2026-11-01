@@ -5,7 +5,9 @@
  *    "Rename" (club.save) and "Merge into" (club.merge, also into "Niezrzeszony"); pending club names with "Create club and assign"
  *    (club.adopt). Snapshots of entries keep the club of the entry day; public brackets show the current name.
  *  - tournament cards: "Hide" with a reason and the withdrawSelf option, "Restore" (tournament.hide), "Show organizer" (#members
- *    filtered by ownerOf) and "Confirm organizer" (admin-member organizer-trust; only while confirmation is required and missing).
+ *    filtered by ownerOf) and "Confirm organizer" (admin-member organizer-trust) for a community tournament whose organizer does not count
+ *    as confirmed: unconfirmed while confirmation is required, or blocked, or erased (the workspace cannot tell these apart; the answer's
+ *    caps.organizerBlocked sends the Administrator to #members, an erased account answers 404).
  * Buttons carry data-clb-act and forms data-clb-form (not data-action), handled here. Every value reaches the DOM through h`…`.
  * The plain functions up to "Page" are pure and tested in tests/settings-ui.test.mjs. */
 import {registry,h,setHtml} from './registry.js';
@@ -52,7 +54,7 @@ export const adoptBody=g=>({name:g.name,profileIds:[...g.profileIds]});
 
 // ---- Tournament card tools (pure) ----
 /** Actions of the Administrator for a tournament: restore (hidden), hide (community, not hidden), owner (community), trust (community
- * with an unconfirmed organizer, which happens only while confirmation is required, §17). */
+ * whose organizer does not count as confirmed, t.trusted false: unconfirmed while confirmation is required (§17), blocked or erased). */
 export function toolsFor(t,user){
  if(user?.role!=='admin'||!t)return [];
  const out=[];if(t.hidden)out.push('restore');else if(t.community)out.push('hide');
@@ -69,6 +71,12 @@ export function hideBody(tournamentId,{hidden=true,reason='',withdrawSelf=false}
 /** Self entries of a tournament (entries made by athletes themselves). */
 export const selfEntries=t=>(t?.entries||[]).filter(e=>e?.self===true).length;
 export const trustBody=userId=>({action:'organizer-trust',userId,trusted:true});
+/** The message after organizer-trust: a blocked organizer stays without trust on the tournament (Domain::trustedOrganizer), so the
+ * Administrator is told to give the role back in #members instead of a success that changes nothing on the card. */
+export function trustOutcome(r){
+ if(r?.caps?.organizerBlocked)return {ok:false,message:T('Potwierdzenie zapisane, ale rola organizatora tej osoby jest odebrana, więc turniej dalej jest niepotwierdzony. Przywróć rolę w panelu Członkowie.')};
+ return {ok:true,message:T('Organizator potwierdzony.')};
+}
 
 // ---- Views (pure: SafeHtml) ----
 const btn=(label,act,cls='secondary',attrs={})=>h`<button type="button" class="btn ${cls}" data-clb-act="${act}"${Object.entries(attrs).map(([k,v])=>v==null||v===false?'':v===true?h` ${k}`:h` ${k}="${v}"`)}>${label}</button>`;
@@ -111,7 +119,7 @@ export function hideView(t){
 }
 
 // ---- Page ----
-export const io={request:(route,options)=>Client.request(route,options),demo:Client.isDemo};
+export const io={request:(route,options)=>Client.request(route,options),demo:Client.isDemo,refreshMe:()=>import('./me.js').then(m=>m.loadMe({force:true})).catch(()=>{})};
 const st={filter:'unverified',q:'',touched:false};
 export const state=st;
 registry.on('logout',()=>{st.filter='unverified';st.q='';st.touched=false;});
@@ -168,7 +176,8 @@ const ACTS={
  't-trust':async el=>{
   const t=tournamentById(el.dataset.clbId);if(!t)return;if(io.demo){toast(T('Ta funkcja jest niedostępna w wersji demonstracyjnej.'));return;}
   el.disabled=true;
-  try{await io.request('admin-member',{method:'POST',body:trustBody(t.createdBy)});toast(T('Organizator potwierdzony.'));document.querySelector('.topbar [data-action="refresh"]')?.click();}
+  try{const r=trustOutcome(await io.request('admin-member',{method:'POST',body:trustBody(t.createdBy)}));toast(r.message);io.refreshMe();
+   if(r.ok)document.querySelector('.topbar [data-action="refresh"]')?.click();else ui().navigate('members',{ownerOf:t.id});}
   catch(error){toast(translateMessage(error.message));}finally{if(el.isConnected)el.disabled=false;}
  }
 };
