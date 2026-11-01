@@ -467,6 +467,34 @@ test('a blocked or deactivated organizer: no new self-entries or outside entries
  const active=rich();active.users.find(u=>u.id==='u-org3').organizerBlockedAt=null;const r2=runJs(active,ok),p2=bridge({job:'execute',db:active,commands:ok});compare(r2,p2,ok);
  assert.deepEqual(STATUS(r2.results),[200],'the same organizer unblocked: the adult enters');
 });
+// Review M3: blocking an organizer also takes away trust (trustedOrganizer), so unlike a deactivated one (above) his tournament is
+// untrusted: outsideEntry/canEnter and sees() refuse clubs, editors and other organizers, also for entries they made earlier, and a
+// minor's self-entry cannot be corrected. Owners still withdraw (and adults correct) their own self-entries; the Administrator
+// handles the rest. These statuses are pinned so that a change of this rule is a decision, not an accident.
+test('a blocked organizer: only owners withdraw (adults also correct) and the Administrator handles the rest (review M3)',{skip},()=>{
+ const db=rich();db.users.find(u=>u.id==='u-org2').organizerBlockedAt=NOW-500;
+ const t2=db.tournaments.find(t=>t.id==='t-org2');
+ t2.entries.push({...structuredClone(db.tournaments.find(t=>t.id==='t-org1').entries.find(e=>e.profileId==='p-o1a')),age:t2.entries.find(e=>e.profileId==='p-ed').age});
+ t2.entries.push({...structuredClone(db.tournaments.find(t=>t.id==='t-org1').entries.find(e=>e.profileId==='p-self')),age:t2.entries.find(e=>e.profileId==='p-ed').age});
+ const E={events:['forms'],weight:70,height:175,gradeType:'cup',grade:5},list=[
+  {actor:'u-club2',type:'entry.save',payload:{...E,tournamentId:'t-org2',profileId:'p-club2',update:true,weight:71}},  // 0 the club corrects: no
+  {actor:'u-org1',type:'entry.save',payload:{...E,tournamentId:'t-org2',profileId:'p-o1a',update:true,weight:72}},    // 1 another organizer: does not see it
+  {actor:'u-par',type:'entry.self',payload:{tournamentId:'t-org2',profileId:'p-kid',events:['forms'],update:true,weight:43}}, // 2 a minor's correction: untrusted
+  {actor:'u-ath',type:'entry.self',payload:{tournamentId:'t-org2',profileId:'p-self',events:['forms'],update:true,weight:73}}, // 3 an adult owner corrects
+  {actor:'u-club2',type:'entry.remove',payload:{tournamentId:'t-org2',id:'p-club2'}},                                 // 4 the club withdraws: no
+  {actor:'demo-editor',type:'entry.remove',payload:{tournamentId:'t-org2',id:'p-ed'}},                                // 5 the editor withdraws: no
+  {actor:'u-org1',type:'entry.remove',payload:{tournamentId:'t-org2',id:'p-o1a'}},                                    // 6 another organizer: does not see it
+  {actor:'u-par',type:'entry.remove',payload:{tournamentId:'t-org2',id:'p-kid'}},                                     // 7 the guardian withdraws the minor
+  {actor:'u-ath',type:'entry.remove',payload:{tournamentId:'t-org2',id:'p-self'}},                                    // 8 the adult withdraws
+  {actor:'demo-admin',type:'entry.remove',payload:{tournamentId:'t-org2',id:'p-club2'}},                              // 9 the Administrator
+  {actor:'demo-admin',type:'entry.remove',payload:{tournamentId:'t-org2',id:'p-ed'}},                                 // 10
+  {actor:'demo-admin',type:'entry.remove',payload:{tournamentId:'t-org2',id:'p-o1a'}},                                // 11
+ ];
+ const js=runJs(db,list),ph=bridge({job:'execute',db,commands:list});compare(js,ph,list);
+ assert.deepEqual(STATUS(js.results),[403,404,409,200,403,403,404,200,200,200,200,200]);
+ assert.deepEqual([0,4,5,1,6].map(i=>js.results[i].error),['Zapisy do tego turnieju są zamknięte.','Zapisy są zamknięte.','Zapisy są zamknięte.','Turniej nie jest dostępny.','Turniej nie jest dostępny.']);
+ for(const r of [js,ph])assert.deepEqual(r.db.tournaments.find(t=>t.id==='t-org2').entries.map(e=>e.profileId),['p-o2'],'the owners and the Administrator withdrew everything');
+});
 // I3: the workspace tells those who do not manage such a tournament that it takes no new entry (entriesClosed, only that flag),
 // so the client hides "Nowy zawodnik"/"Dodaj z bazy" (canAddEntry) and keeps "Edytuj"/"Wycofaj" (canEnter); PHP = JS.
 test('publicData marks tournaments of a deactivated or blocked organizer for outsiders (entriesClosed); canAddEntry reads it, canEnter does not (I3)',{skip},()=>{

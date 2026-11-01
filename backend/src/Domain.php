@@ -54,7 +54,10 @@ final class Domain {
   * A tournament whose member creator was blocked as organizer or deactivated by the Administrator (final review R1.6):
   * nobody who does not manage it enters new athletes (a new entry.self or entry.save), since nobody runs it now.
   * Withdrawals and corrections of entries already made stay as they were (R2.1: canEnter() does not read it), and so do
-  * trust, the results and their visibility. Without $db (views) the view field entriesClosed that publicData() gives those
+  * trust, the results and their visibility. That keeps them working for a deactivated organizer only: blocking also takes
+  * away trust (trustedOrganizer()), so outsideEntry()/canEnter() and sees() refuse clubs, editors and other organizers, a
+  * minor's self-entry cannot be corrected, and only owners withdraw (adults also correct); the Administrator handles the
+  * rest (review M3, pinned by tests/roles-parity.test.mjs). Without $db (views) the view field entriesClosed that publicData() gives those
   * who do not manage the tournament (I3: the client offers no new entry the server would refuse).
   */
  public static function closedCreator(?array $db,array $t):bool {

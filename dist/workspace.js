@@ -65,7 +65,7 @@ export function trustedOrganizer(db,userId){
  return !!o&&!o.blocked&&(!!o.trusted||!trustRequired(db));
 }
 export const trusted=(db,t)=>db?!community(db,t)||trustedOrganizer(db,t.createdBy):!t?.community||!!t?.trusted;
-/** Mirror of Domain::closedCreator (final review R1.6, R2.1): a member creator blocked as organizer or deactivated (no new entries from outside; canEnter does not read it); without db the view field entriesClosed. */
+/** Mirror of Domain::closedCreator (final review R1.6, R2.1): a member creator blocked as organizer or deactivated (no new entries from outside; canEnter does not read it); without db the view field entriesClosed. Blocking also takes away trust, so in a blocked organizer's tournament only owners withdraw and the Administrator handles the rest (review M3). */
 export function closedCreator(db,t){
  if(!db)return t?.entriesClosed===true;if(typeof t?.createdBy!=='string')return false;let o=isObj(db.organizers)&&Object.hasOwn(db.organizers,t.createdBy)?db.organizers[t.createdBy]:null;
  if(!o){const u=db.users.find(x=>x.id===t.createdBy&&x.role==='member');if(u)o={blocked:isset(u.organizerBlockedAt),active:u.active!==false};}
