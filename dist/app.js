@@ -155,7 +155,8 @@ function render(){
  // Registered pages first (with their roles), then the built-in pages; a member never falls back to the tournaments page.
  // Registered pages must return SafeHtml (plan §5.9): setHtml throws for a plain string instead of injecting it unescaped.
  // A page that throws (or returns a plain string) gets the built-in page instead: one broken module must not stop the shell.
- const found=registry.page(ui.page),reg=found&&registry.allows(found,role,user)?found:null,app=document.querySelector('#app');let own=registry.allows(reg,role);
+ // reg has passed allows(page,role,user), visible(user) included: own must not ask again without the user (visible(null) is false).
+ const found=registry.page(ui.page),reg=found&&registry.allows(found,role,user)?found:null,app=document.querySelector('#app');let own=!!reg;
  if(own){try{registry.setHtml(app,reg.render(registry.parseRoute(location.hash).params));}catch(error){try{console.error('MatBravo page '+ui.page+' failed',error);}catch{}own=false;}}
  if(!own)app.innerHTML=member?memberHome():(pages[ui.page]||tournamentsPage)();
  document.title='MatBravo — '+(own?registry.title(ui.page):member?T('Czat'):({tournaments:T('Turnieje'),database:T('Baza zawodników'),accounts:T('Konta i role'),draws:T('Drabinki'),athletes:T('Zgłoszenia'),checkin:T('Kontrola startowa'),overview:T('Przegląd'),rules:T('Zasady turnieju'),architecture:T('O projekcie')}[ui.page]||T('Turnieje')));
@@ -279,7 +280,9 @@ function profileForm(id,register=false){
  const user=workspace.user,member=user.role==='member',a=workspace.profiles.find(a=>a.id===id)||{name:'',clubId:member?null:user.clubId,sex:'M',birthDate:'',gradeType:'cup',grade:6,weight:60,height:170,events:['forms'],champion:false};
  let minor=false;try{minor=!!a.birthDate&&ageAt(a.birthDate,warsawToday())<MINOR_SELF_AGE;}catch{}
  // Club: a club representative keeps the own club; everyone else picks from the list, a new name or "Niezrzeszony" (club-picker, §10.4).
- const club=user.role==='club'?`<label class="span-two">${T('Klub')}<select name="clubId" disabled>${workspace.clubs.map(c=>`<option value="${c.id}" ${a.clubId===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select></label>`:String(pickerHtml({name:'club',clubs:workspace.clubs,value:a.clubId===UNAFFILIATED?{none:true}:a.clubId?{id:a.clubId}:null}));
+ // Only the Administrator changes the club of an existing athlete (Domain: 403), so for others the picker is read-only there.
+ const lockClub=!!id&&user.role!=='admin';
+ const club=user.role==='club'?`<label class="span-two">${T('Klub')}<select name="clubId" disabled>${workspace.clubs.map(c=>`<option value="${c.id}" ${a.clubId===c.id?'selected':''}>${esc(c.name)}</option>`).join('')}</select></label>`:String(pickerHtml({name:'club',clubs:workspace.clubs,value:a.clubId===UNAFFILIATED?{none:true}:a.clubId?{id:a.clubId}:null,disabled:lockClub}))+(lockClub?`<p class="muted small span-two club-locked">${T('Klub zawodnika może zmienić Administrator.')}</p>`:'');
  // An organizer adding a child under 16 declares the guardian's consent (§5.3); the empty slot is for the texts of the legal session.
  const consent=member?`<div class="span-two consent-field" data-guardian-consent${minor?'':' hidden'}><label class="checkbox-label"><input type="checkbox" name="guardianConsent" ${a.guardianConsentAt?'checked':''}> <span>${T('Mam zgodę rodzica lub opiekuna na podanie tych danych w celu zgłoszenia do turnieju.')}</span></label><small>${T('Wymagane dla osób poniżej 16 lat.')}</small><div class="acct-consents" data-acct-consents></div></div>`:'';
  const t=state.tournament,forget=!!id&&a.ownerId==null&&(user.role==='admin'||(user.role==='editor'||isOrg(user))&&a.createdBy===user.id),archive=!!id&&(a.ownerId==null||user.role==='admin');
@@ -507,7 +510,7 @@ function askPassword(error){
 }
 async function submitUnlock(form,submit){
  const box=form.querySelector('.form-error');box.textContent='';if(submit)submit.disabled=true;
- try{await Client.unlock(new FormData(form).get('password'));unlockFinish?.();}
+ try{await Client.unlock(new FormData(form).get('password'));screenPaused=false;unlockFinish?.();}
  catch(error){box.textContent=translateMessage(error.message);form.elements.password?.select?.();}
  finally{if(submit?.isConnected)submit.disabled=false;}
 }
@@ -618,7 +621,11 @@ document.addEventListener('submit',async event=>{
   if(form.id==='tournament-form'){await save('tournament.save',{id:form.dataset.id||undefined,name:f.get('name'),city:f.get('city'),date:f.get('date'),status:f.get('status'),mat:f.get('mat'),selfEntry:f.has('selfEntry')});activeId=result.id;sessionStorage.setItem('matdraw.activeTournament',activeId);}
   else if(form.id==='profile-form'){
    // Club: {id}|{name}|{none:true} from the picker (Clubs::pick), the own club for a club representative.
-   const picker=form.querySelector('[data-club-picker]'),club=picker?readPicker(picker):null;if(picker&&!club)throw Error('Wybierz klub lub wpisz nazwę nowego klubu.');
+   // Editing: a non-admin keeps the current club (the picker is read-only); "Niezrzeszony" again is {id:UNAFFILIATED}, which keeps the
+   // club name waiting for the Administrator (pendingClubName, §6.3); {none:true} would drop it.
+   const picker=form.querySelector('[data-club-picker]'),old=form.dataset.id?workspace.profiles.find(x=>x.id===form.dataset.id):null;let club=picker?readPicker(picker):null;
+   if(picker&&old?.clubId&&workspace.user.role!=='admin')club={id:old.clubId};else if(old?.clubId===UNAFFILIATED&&club?.none)club={id:UNAFFILIATED};
+   if(picker&&!club)throw Error('Wybierz klub lub wpisz nazwę nowego klubu.');
    const p={id:form.dataset.id||undefined,name:f.get('name'),...(picker?{club}:{clubId:f.get('clubId')||workspace.user.clubId}),birthDate:f.get('birthDate'),sex:f.get('sex'),...entryPayload(f)};
    if(f.has('guardianConsent'))p.guardianConsent=true;
    if(form.dataset.register==='yes')p.registration={tournamentId:activeId,...entryPayload(f)};
@@ -629,7 +636,8 @@ document.addEventListener('submit',async event=>{
   else if(form.id==='check-form'){
    // A self-entry's club corrected at check-in (§7.5, D3): entry.save with update and clubId first, then the check-in at the new revision.
    const a=athlete(form.dataset.id),clubId=checkClub(form);
-   if(a&&clubId)await save('entry.save',{tournamentId:activeId,profileId:a.profileId,update:true,clubId,weight:a.weight,height:a.height,gradeType:a.gradeType,grade:a.grade,events:a.events});
+   // The new revision goes into the form and the dialog at once: when the check-in fails (e.g. no weight), a retry is not stale (409).
+   if(a&&clubId){await save('entry.save',{tournamentId:activeId,profileId:a.profileId,update:true,clubId,weight:a.weight,height:a.height,gradeType:a.gradeType,grade:a.grade,events:a.events});for(const el of [form,form.closest('.modal')])if(el)el.dataset.revision=workspace.revision;}
    await save('checkin.save',{tournamentId:activeId,id:form.dataset.id,presence:f.get('presence'),actualWeight:f.get('actualWeight')},clubId?workspace.revision:revision);
   }
   // Modules react while the form is still in the page (e.g. account billing fields); passwords are never passed on.
@@ -656,10 +664,12 @@ document.addEventListener('keydown',event=>{
 window.addEventListener('storage',async e=>{if(e.key===LANGUAGE_KEY&&LANGUAGES.includes(e.newValue)){setLanguage(e.newValue,{persist:false});return;}if(!workspace||e.key!==Client.dataKey)return;try{workspace=await reload();if(!document.querySelector('.modal'))render();}catch(error){await handleError(error);}});
 /** Page from the hash (registry.parseRoute: query in params, #czat normalized to #chat); #screen and #guest keep their own handling. */
 function routePage(){const route=registry.parseRoute(location.hash);if(route.alias)history.replaceState(null,'',registry.routeHash(route.page,route.params));return route.page||'tournaments';}
-window.addEventListener('hashchange',()=>{document.body.classList.remove('print-preview');if(!location.hash.startsWith('#screen'))ui.page=routePage();render();});
+window.addEventListener('hashchange',()=>{document.body.classList.remove('print-preview');screenPaused=false;if(!location.hash.startsWith('#screen'))ui.page=routePage();render();});
 setInterval(()=>{const el=document.querySelector('#arena-time');if(el)el.textContent=new Date().toLocaleTimeString(locale(),{hour:'2-digit',minute:'2-digit',timeZone:'Europe/Warsaw'});},30000);
 // Hall screen: polls bootstrap with the tournament's rev (§8.1); {unchanged:true} keeps the picture (only the automatic section change runs).
-setInterval(async()=>{if(workspace&&!communityOnly(workspace.user)&&location.hash.startsWith('#screen')&&fullView(workspace.user,state.tournament)){try{const t=state.tournament,next=await Client.withReauth(()=>Client.bootstrap(t.id&&Number.isInteger(t.rev)?{t:t.id,rev:t.rev}:{}),askPassword);if(next?.unchanged){if(!ui.screenAuto)return;}else{workspace=next;syncState();}if(ui.screenAuto){const d=ensureDraw(selected());if(d&&d.size>8)ui.screenPart=(ui.screenPart+1)%(d.size/8+1);}renderScreen();}catch(error){await handleError(error);}}},15000);
+// A cancelled password prompt pauses the polling (an unattended projector must not ask every 15 s); leaving #screen or unlocking resumes it.
+let screenPaused=false;
+setInterval(async()=>{if(workspace&&!communityOnly(workspace.user)&&location.hash.startsWith('#screen')&&fullView(workspace.user,state.tournament)&&!screenPaused){try{const t=state.tournament,next=await Client.withReauth(()=>Client.bootstrap(t.id&&Number.isInteger(t.rev)?{t:t.id,rev:t.rev}:{}),askPassword);if(next?.unchanged){if(!ui.screenAuto)return;}else{workspace=next;syncState();}if(ui.screenAuto){const d=ensureDraw(selected());if(d&&d.size>8)ui.screenPart=(ui.screenPart+1)%(d.size/8+1);}renderScreen();}catch(error){if(error?.status===401&&error.code==='reauth')screenPaused=true;await handleError(error);}}},15000);
 ui.page=location.hash.startsWith('#screen')?'draws':routePage();
 // Language: static page texts now, and a re-render (keeping page state and typed login data) whenever it changes.
 function applyStaticTexts(){const skip=document.querySelector('.skip-link');if(skip)skip.textContent=T('Przejdź do treści');document.querySelector('meta[name="description"]')?.setAttribute('content',T('Zgłoszenia, kontrola startowa i czytelne drabinki taekwondo. MatBravo — cały turniej w jednym miejscu.'));}

@@ -114,7 +114,7 @@ test('dictionary merge: first wins, a collision is listed (no exception), the sh
 
 test('app.js paints registered pages through setHtml, so a page that returns a plain string throws instead of injecting it',async()=>{
  const {readFileSync}=await import('node:fs');const app=readFileSync(new URL('../dist/app.js',import.meta.url),'utf8');
- assert.match(app,/let own=registry\.allows\(reg,role\);\n if\(own\)\{try\{registry\.setHtml\(app,reg\.render\(registry\.parseRoute\(location\.hash\)\.params\)\);\}catch\(error\)\{[^\n]*own=false;\}\}\n if\(!own\)app\.innerHTML=member\?memberHome\(\):\(pages\[ui\.page\]\|\|tournamentsPage\)\(\);/,'a page that throws or returns a string falls back to the built-in page instead of stopping render()');
+ assert.match(app,/reg=found&&registry\.allows\(found,role,user\)\?found:null,app=document\.querySelector\('#app'\);let own=!!reg;\n if\(own\)\{try\{registry\.setHtml\(app,reg\.render\(registry\.parseRoute\(location\.hash\)\.params\)\);\}catch\(error\)\{[^\n]*own=false;\}\}\n if\(!own\)app\.innerHTML=member\?memberHome\(\):\(pages\[ui\.page\]\|\|tournamentsPage\)\(\);/,'a page that throws or returns a string falls back to the built-in page instead of stopping render()');
  assert.ok(!/innerHTML=String\(own\?/.test(app),'no direct innerHTML for registered pages');
  registerPage({id:'qa-plain-string',label:'QA',roles:['member'],render:()=>'<img src=x onerror="alert(1)">'});
  const el={innerHTML:''};assert.throws(()=>setHtml(el,page('qa-plain-string').render(new URLSearchParams())),TypeError);assert.equal(el.innerHTML,'');
@@ -133,12 +133,15 @@ test('event-chat (chat-boot.js) is a tournament page for an organizer: a member 
  const {execFileSync}=await import('node:child_process');
  const code=`import {registry} from './dist/registry.js';import {setLanguage} from './dist/i18n.js';setLanguage('pl',{persist:false});await import('./dist/chat-boot.js');
   const org={role:'member',caps:{organizer:true}},plain={role:'member',caps:{organizer:false}},ids=(u,t)=>registry.navItems(u,{tournament:t}).map(x=>x.id);
-  console.log(JSON.stringify({orgWith:ids(org,{id:'t-1'}),orgWithout:ids(org,null),plainWith:ids(plain,{id:'t-1'}),roles:registry.page('event-chat').roles,staff:ids({role:'club'},{id:'t-1'})}));`;
+  console.log(JSON.stringify({orgWith:ids(org,{id:'t-1'}),orgWithout:ids(org,null),plainWith:ids(plain,{id:'t-1'}),roles:registry.page('event-chat').roles,staff:ids({role:'club'},{id:'t-1'}),
+   typed:[org,plain,{role:'member',caps:{athlete:true}},{role:'admin'}].map(u=>registry.allows(registry.page('event-chat'),u.role,u)),noUser:registry.allows(registry.page('event-chat'),'member')}));`;
  const out=JSON.parse(execFileSync(process.execPath,['--input-type=module','-e',code],{cwd:new URL('..',import.meta.url),encoding:'utf8'}).trim().split('\n').at(-1));
  assert.deepEqual(out.roles,['admin','editor','club','member']);
  assert.ok(out.orgWith.includes('event-chat'),'an organizer with an active tournament gets the tournament chat');
  assert.ok(!out.orgWithout.includes('event-chat'),'no tournament, no event page');
- assert.ok(out.plainWith.includes('event-chat'),'registry rule: event pages need a tournament; app.js gives a member without the organizer role none (communityOnly)');
+ assert.ok(!out.plainWith.includes('event-chat'),'a member without the organizer role has no tournament chat in the menu');
+ assert.deepEqual(out.typed,[true,false,false,true],'a typed #event-chat: render() sends a member without the organizer role to the start page');
+ assert.equal(out.noUser,true,'callers passing the role only keep the role rule');
  assert.ok(out.staff.includes('event-chat'));
 });
 

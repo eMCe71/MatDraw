@@ -123,6 +123,20 @@ test('password confirmation (§4.6): a 401 reauth asks once and the request runs
  assert.match(app,/if\(error\.status===401&&error\.code==='reauth'\)\{[^\n]*return;\}\/\/ a cancelled password prompt: the session stays/,'a cancelled prompt never signs out');
 });
 
+test('review round 1: registered pages with visible(user) render, the club of an edited profile is kept, check-in retry and screen polling',()=>{
+ const render=app.slice(app.indexOf('function render(){'),app.indexOf('function memberHome('));
+ assert.match(render,/reg=found&&registry\.allows\(found,role,user\)\?found:null,app=document\.querySelector\('#app'\);let own=!!reg;/,'own follows the check made with the user');
+ assert.ok(!/registry\.allows\(reg,role\)/.test(render),'no second check without the user (visible(null) would hide the page)');
+ const form=app.slice(app.indexOf('function profileForm('),app.indexOf('function toggleConsent('));
+ assert.match(form,/const lockClub=!!id&&user\.role!=='admin';/);assert.match(form,/disabled:lockClub\}\)\)\+\(lockClub\?`<p class="muted small span-two club-locked">\$\{T\('Klub zawodnika może zmienić Administrator\.'\)\}<\/p>`:''\)/);
+ assert.match(app,/if\(picker&&old\?\.clubId&&workspace\.user\.role!=='admin'\)club=\{id:old\.clubId\};else if\(old\?\.clubId===UNAFFILIATED&&club\?\.none\)club=\{id:UNAFFILIATED\};/,'"Niezrzeszony" again keeps the pending club name');
+ assert.match(app,/for\(const el of \[form,form\.closest\('\.modal'\)\]\)if\(el\)el\.dataset\.revision=workspace\.revision;\}/,'after entry.save the retry of the check-in uses the new revision');
+ assert.match(app,/location\.hash\.startsWith\('#screen'\)&&fullView\(workspace\.user,state\.tournament\)&&!screenPaused\)\{try\{/);
+ assert.match(app,/catch\(error\)\{if\(error\?\.status===401&&error\.code==='reauth'\)screenPaused=true;await handleError\(error\);\}\}\},15000\);/,'a cancelled prompt on the hall screen stops the polling');
+ assert.match(app,/addEventListener\('hashchange',\(\)=>\{document\.body\.classList\.remove\('print-preview'\);screenPaused=false;/);assert.match(app,/await Client\.unlock\(new FormData\(form\)\.get\('password'\)\);screenPaused=false;unlockFinish/);
+ const chat=readFileSync(DIST+'chat-boot.js','utf8');assert.match(chat,/id:'event-chat'[^\n]*visible:u=>!registry\.communityOnly\(u\)/);
+});
+
 // ---- Browser checks ----
 let chromium=null;if(process.env.MATDRAW_BROWSER_TESTS==='1')try{({chromium}=createRequire(import.meta.url)('playwright'));}catch{}
 const CSP="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self'";
@@ -227,5 +241,39 @@ test('API mode in a browser: a reauth at start-up asks for the password, a wrong
   await p2.click('[data-action="organizer-unlock"]');await p2.waitForSelector('#unlock-form');await p2.fill('#unlock-form [name=password]','Prawidlowe-Haslo-2026');await p2.click('button[form="unlock-form"]');
   await p2.waitForSelector('.tournament-grid');assert.equal(await p2.locator('[data-action="organizer-unlock"]').count(),0);
   await c2.close();assert.deepEqual(problems,[]);
+ }finally{await browser.close();server.close();}
+});
+
+test('demo in a browser: a page with visible(user) renders for its user, #event-chat stays closed to an athlete, an edited unaffiliated profile keeps its pending club name',{skip:!chromium&&'MATDRAW_BROWSER_TESTS=1 and Playwright needed',timeout:180000},async()=>{
+ const {server,url}=await serve(),browser=await chromium.launch().catch(e=>{server.close();throw e;}),problems=[];
+ const ctx=await browser.newContext({viewport:{width:1440,height:900},locale:'pl-PL',serviceWorkers:'block'}),page=await ctx.newPage();page.on('pageerror',e=>problems.push(e.message));page.on('console',m=>{if(m.type()==='error')problems.push(m.text().slice(0,200));});
+ const stored=id=>page.evaluate(id=>JSON.parse(localStorage.getItem('matdraw.workspace.v2')).profiles.find(p=>p.id===id),id);
+ const signIn=async role=>{await page.evaluate(()=>sessionStorage.clear());await page.goto(url);await page.reload();await page.waitForSelector('.login-page');await page.click(`[data-action="demo-login"][data-role="${role}"]`);await page.waitForSelector('.app-shell');};
+ const editSave=async(id,change)=>{await page.evaluate(()=>{location.hash='#database';});await page.waitForSelector(`[data-action="edit-profile"][data-id="${id}"]`);await page.click(`[data-action="edit-profile"][data-id="${id}"]`);await page.waitForSelector('#profile-form');
+  const state=await page.evaluate(()=>({disabled:[...document.querySelectorAll('#profile-form [data-cp-mode]')].every(r=>r.disabled),mode:document.querySelector('#profile-form [data-cp-mode]:checked')?.value,note:document.querySelector('#profile-form .club-locked')?.textContent||null}));
+  await change();await page.click('button[form="profile-form"]');await page.waitForFunction(()=>!document.querySelector('#profile-form'));return state;};
+ try{
+  await page.goto(url);await page.waitForSelector('.login-page');await page.click('[data-action="demo-login"][data-role="athlete"]');await page.waitForSelector('.app-shell');
+  const r=await page.evaluate(async()=>{const {registry,h}=await import('./registry.js'),wait=()=>new Promise(r=>setTimeout(r,300));
+   registry.registerPage({id:'qa-starts',icon:'trophy',label:'Moje starty QA',nav:'global',roles:['member'],order:15,visible:u=>!!u?.caps?.athlete,title:'Moje starty QA',render:()=>registry.use('ui').shell(h`<div id="qa-starts-body">STARTS</div>`,'Moje starty QA','')});
+   location.hash='#qa-starts';await wait();const starts={body:!!document.querySelector('#qa-starts-body'),title:document.title};
+   location.hash='#event-chat';await wait();return {starts,eventChat:location.hash,eventMount:!!document.querySelector('[data-chat-mount][data-tournament]')};});
+  assert.deepEqual(r.starts,{body:true,title:'MatBravo — Moje starty QA'},'the page itself, not memberHome');
+  assert.equal(r.eventChat,'#chat','a typed #event-chat sends an athlete to the start page');assert.equal(r.eventMount,false);
+  // An organizer's unaffiliated athlete with a club name waiting for the Administrator (§6.3).
+  await signIn('organizer');
+  await page.evaluate(()=>{const key='matdraw.workspace.v2',db=JSON.parse(localStorage.getItem(key));db.profiles.push({id:'qa-pending',name:'Jan Oczekujący',clubId:'unaffiliated',pendingClubName:'Orły Opole',sex:'M',birthDate:'1990-05-01',weight:60,height:175,gradeType:'cup',grade:5,events:['forms'],champion:false,createdBy:'demo-organizer',createdAt:Math.floor(Date.now()/1000),archived:false,ownerId:null});db.revision++;localStorage.setItem(key,JSON.stringify(db));});
+  await page.reload();await page.waitForSelector('.app-shell');
+  const org=await editSave('qa-pending',()=>page.fill('#profile-form [name=weight]','61'));
+  assert.deepEqual(org,{disabled:true,mode:'none',note:'Klub zawodnika może zmienić Administrator.'},'an organizer sees the club read-only');
+  let p=await stored('qa-pending');assert.deepEqual([p.weight,p.clubId,p.pendingClubName],[61,'unaffiliated','Orły Opole']);
+  await signIn('admin');
+  const admin=await editSave('qa-pending',()=>page.fill('#profile-form [name=weight]','62'));
+  assert.deepEqual(admin,{disabled:false,mode:'none',note:null},'the Administrator can change the club');
+  p=await stored('qa-pending');assert.deepEqual([p.weight,p.clubId,p.pendingClubName],[62,'unaffiliated','Orły Opole'],'"Niezrzeszony" again keeps the pending name');
+  const club=await page.evaluate(()=>JSON.parse(localStorage.getItem('matdraw.workspace.v2')).clubs.find(c=>c.id!=='unaffiliated'&&!c.mergedInto).id);
+  await editSave('qa-pending',async()=>{await page.check('#profile-form [data-cp-mode][value="list"]');await page.selectOption('#profile-form [data-cp-select]',club);});
+  p=await stored('qa-pending');assert.deepEqual([p.clubId,p.pendingClubName],[club,undefined],'another club replaces it');
+  assert.deepEqual(problems,[]);
  }finally{await browser.close();server.close();}
 });

@@ -17,8 +17,9 @@ const shell=(content,title,subtitle)=>ui()?.shell?ui().shell(content,title,subti
 
 registry.registerPage({id:'chat',icon:'chat',label:()=>T('Czat'),nav:'global',roles:['admin','editor','club','member'],order:10,title:()=>T('Czat'),
  render:()=>shell(h`<div class="chat-page-mount" data-chat-mount="page"></div>`,T('Czat'),T('Społeczność MatBravo'))});
-// A member reaches it only with a tournament in the workspace (an organizer, PLAN-REJESTRACJA-ROLE §10.4): event pages need one.
-registry.registerPage({id:'event-chat',icon:'chat',label:()=>T('Czat turnieju'),nav:'event',roles:['admin','editor','club','member'],order:50,title:()=>T('Czat turnieju'),
+// A member reaches it only with a tournament in the workspace (an organizer, PLAN-REJESTRACJA-ROLE §10.4): event pages need one;
+// visible() keeps a member without the organizer role (athlete, chat only) out of it also on a typed #event-chat.
+registry.registerPage({id:'event-chat',icon:'chat',label:()=>T('Czat turnieju'),nav:'event',roles:['admin','editor','club','member'],order:50,title:()=>T('Czat turnieju'),visible:u=>!registry.communityOnly(u),
  render:()=>{const t=ui()?.getState?.()?.tournament;return shell(h`<div class="chat-page-mount" data-chat-mount="page" data-tournament="${t?.id||''}"></div>`,T('Czat turnieju'),t?.name||'');}});
 // Guests: the public full chat (#chat, #chat?c=<slug>, #chat?t=<tournamentId>) with the guest bar.
 registry.registerPublicPage({id:'chat',render:()=>{
