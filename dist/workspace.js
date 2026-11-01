@@ -126,7 +126,8 @@ export function publicWorkspace(db,user){
  }
  for(const c of db.clubs){
   if(admin){out.clubs.push(c);continue;}
-  if(role==='club'?c.id!==user.clubId:!((c.verified!==false&&!isset(c.mergedInto))||used.has(c.id)))continue;
+  // A club account gets its club and the clubs merged into it (mergedInto kept), as Domain::publicData (final review R1.5).
+  if(role==='club'?(roots.get(c.id)??c.id)!==user.clubId:!((c.verified!==false&&!isset(c.mergedInto))||used.has(c.id)))continue;
   const {createdBy,createdAt,...rest}=c;out.clubs.push(rest);
  }
  if(admin)out.users=db.users.filter(u=>STAFF.includes(u.role)).map(publicUser);

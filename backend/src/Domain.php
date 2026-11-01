@@ -128,7 +128,9 @@ final class Domain {
   }
   foreach($db['clubs'] as $c){
    if($admin){$out['clubs'][]=$c;continue;}
-   if($role==='club'?$c['id']!==$u['clubId']:!((($c['verified']??true)!==false&&($c['mergedInto']??null)===null)||isset($used[$c['id']])))continue;
+   // A club account gets its club and the clubs merged into it (mergedInto kept), so the client reads old snapshots through the
+   // merges as entryVisible does (Clubs::roots; final review R1.5).
+   if($role==='club'?($roots[$c['id']]??$c['id'])!==$u['clubId']:!((($c['verified']??true)!==false&&($c['mergedInto']??null)===null)||isset($used[$c['id']])))continue;
    unset($c['createdBy'],$c['createdAt']);$out['clubs'][]=$c;
   }
   if($admin)$out['users']=array_values(array_map([self::class,'safeUser'],array_filter($db['users'],fn($x)=>in_array($x['role']??null,self::STAFF,true))));

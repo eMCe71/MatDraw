@@ -17,6 +17,7 @@ import {registry,h,setHtml} from './registry.js';
 import {CONFIG} from './runtime-config.js';
 import {t as T} from './i18n.js';
 import {warsawToday} from './guest-view.js';
+import {resolveClub} from './workspace.js';
 
 export const KEY='matdraw.pwa',DAY=864e5,MUTE_MS=30*DAY,INAPP_MUTE_MS=7*DAY,MAX_REFUSALS=3;
 export const MIN_AGE=15e3,INAPP_AGE=4e3,SENT_DELAY=3e3,ACTIVE_NEED=9e4,ACTIVE_TICK=1e4,LOOP_GUARD_MS=6e4,CHECK_MS=36e5;
@@ -59,10 +60,11 @@ export function setManifestLanguage(lang,doc=globalThis.document){
 export const standaloneNow=(w=globalThis)=>{try{return ['standalone','minimal-ui'].some(m=>w.matchMedia?.('(display-mode: '+m+')').matches)||w.navigator?.standalone===true;}catch{return false;}};
 /** What may be remembered as "installed" for good: a standalone window or iOS home-screen launch, never minimal-ui (also a mere hint). */
 export const installedNow=(w=globalThis)=>{try{return !!w.matchMedia?.('(display-mode: standalone)').matches||w.navigator?.standalone===true;}catch{return false;}};
-/** Whether this club has entries in a tournament dated today (Warsaw time): the "tournament day" trigger. */
+/** Whether this club has entries in a tournament dated today (Warsaw time): the "tournament day" trigger. A snapshot's club is read
+ * through the Administrator's merges (resolveClub, as Domain::entryVisible; final review R1.5). */
 export const tournamentToday=(workspace,today)=>{
- const user=workspace?.user;if(!user)return false;
- return (workspace.tournaments||[]).some(t=>t.date===today&&t.status!=='draft'&&(t.entries||[]).some(e=>e.clubId===user.clubId));
+ const user=workspace?.user;if(!user)return false;const clubs=workspace.clubs||[];
+ return (workspace.tournaments||[]).some(t=>t.date===today&&t.status!=='draft'&&(t.entries||[]).some(e=>(resolveClub(clubs,e.clubId)?.id??e.clubId)===user.clubId));
 };
 /** True on the first visit ever (storage works and no first day was recorded before this page). */
 export const isFirstVisit=before=>!!before&&!before.first;

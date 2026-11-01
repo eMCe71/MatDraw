@@ -475,6 +475,8 @@ test('after club.merge the club account still sees its old club entries, also in
  assert.equal(after.db.users.find(u=>u.id==='u-club2').clubId,'club-3');
  const [view]=bridge({job:'public',db:after.db,actors:['u-club2']}),js=JSON.parse(JSON.stringify(publicWorkspace(after.db,after.db.users.find(u=>u.id==='u-club2'))));
  assert.deepEqual(view,js);
+ // R1.5: the club account also gets the clubs merged into its club (mergedInto kept), so the client resolves old snapshots (resolveClub).
+ assert.deepEqual(js.clubs.map(c=>[c.id,c.mergedInto??null]).sort(),[['club-2','club-3'],['club-3',null],['club-m','club-3']]);
  const ids=t=>js.tournaments.find(x=>x.id===t)?.entries.map(e=>e.profileId)??null;
  assert.deepEqual([ids('t-gp-gdansk-2026'),ids('t-staff-self')?.includes('p-club2'),ids('t-org2')?.includes('p-club2')],[['p-club2'],true,true],'the closed tournament is listed with the entry; open ones keep it');
  const list=[...merge,{actor:'u-club2',type:'entry.remove',payload:{tournamentId:'t-org2',id:'p-club2'}}];

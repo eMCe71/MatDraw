@@ -117,6 +117,10 @@ test('tournamentToday: the club has entries in a non-draft tournament dated toda
  assert.equal(tournamentToday(ws([t('2026-10-31',{entries:[]})]),'2026-10-31'),false,'no entries');
  assert.equal(tournamentToday(ws([t('2026-10-31',{status:'draft'})]),'2026-10-31'),false);
  assert.equal(tournamentToday(null,'2026-10-31'),false);assert.equal(tournamentToday({user:{clubId:'x'}},'2026-10-31'),false);
+ // Final review R1.5: a snapshot of a club the Administrator merged into this one counts (read through the merges, as entryVisible).
+ const merged={...ws([t('2026-10-31',{entries:[{clubId:'club-old'}]})]),clubs:[{id:'club-1',name:'A',mergedInto:null},{id:'club-old',name:'B',mergedInto:'club-1'}]};
+ assert.equal(tournamentToday(merged,'2026-10-31'),true,'the merged club is this club');
+ assert.equal(tournamentToday({...merged,user:{clubId:'club-2'}},'2026-10-31'),false,'another club still does not count');
 });
 test('busyRoute: signup and billing routes and the return-from-payment query',()=>{
  for(const [hash,search] of [['#signup',''],['#signup?step=2',''],['#billing',''],['#billing?x=1',''],['#chat','?billing=success&session_id=cs_1'],['','?x=1&billing=cancel']])assert.equal(busyRoute(hash,search),true,hash+search);

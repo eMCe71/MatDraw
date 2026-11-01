@@ -402,3 +402,24 @@ test('review round 2, API mode in a browser: the hall screen polls once behind a
   await ctx.close();assert.deepEqual(problems,[]);
  }finally{await browser.close();server.close();}
 });
+
+test('final review R1.5, demo in a browser: after club.merge the club account edits and withdraws an entry made under the former club',{skip:!chromium&&'MATDRAW_BROWSER_TESTS=1 and Playwright needed',timeout:120000},async()=>{
+ const {server,url}=await serve(),browser=await chromium.launch().catch(e=>{server.close();throw e;}),problems=[];
+ try{
+  const ctx=await browser.newContext({viewport:{width:1440,height:900},locale:'pl-PL',serviceWorkers:'block'}),page=await ctx.newPage();page.on('pageerror',e=>problems.push(e.message));page.on('console',m=>{if(m.type()==='error')problems.push(m.text().slice(0,200));});
+  await page.goto(url);await page.waitForSelector('.login-page');await page.click('[data-action="demo-login"][data-role="club"]');await page.waitForSelector('.app-shell');
+  // A club the Administrator merged into the club of this account; the entry snapshot keeps the former club (PS-10).
+  await page.evaluate(()=>{const key='matdraw.workspace.v2',db=JSON.parse(localStorage.getItem(key)),club=db.users.find(u=>u.id==='demo-club').clubId,t=db.tournaments.find(t=>t.id==='t-autumn-2026');
+   db.clubs.push({id:'qa-old',name:'Stary Klub QA',verified:true,createdBy:null,createdAt:null,mergedInto:club});
+   db.profiles.push({id:'qa-merged',name:'Adam Scalony',clubId:club,sex:'M',birthDate:'2000-04-02',weight:70,height:175,gradeType:'cup',grade:5,events:['forms'],champion:false,createdBy:'demo-club',createdAt:1793484000,archived:false,ownerId:null});
+   t.entries.push({id:'qa-merged',profileId:'qa-merged',clubId:'qa-old',name:'Adam Scalony',club:'Stary Klub QA',sex:'M',age:26,weight:70,height:175,gradeType:'cup',grade:5,champion:false,events:['forms'],presence:'pending',actualWeight:null});
+   db.revision++;localStorage.setItem(key,JSON.stringify(db));sessionStorage.setItem('matdraw.activeTournament',t.id);});
+  await page.evaluate(()=>{location.hash='#athletes';});await page.reload();await page.waitForSelector('.roster-panel');
+  assert.equal(await page.locator('[data-action="edit-entry"][data-id="qa-merged"]').count(),1,'"Edytuj" for the former club entry');
+  assert.equal(await page.locator('[data-action="remove-entry"][data-id="qa-merged"]').count(),1,'"Wycofaj" for the former club entry');
+  await page.click('[data-action="remove-entry"][data-id="qa-merged"]');await page.click('[data-action="confirm-remove-entry"]');
+  await page.waitForFunction(()=>!document.querySelector('[data-action="remove-entry"][data-id="qa-merged"]'));
+  assert.equal(await page.evaluate(()=>JSON.parse(localStorage.getItem('matdraw.workspace.v2')).tournaments.find(t=>t.id==='t-autumn-2026').entries.some(e=>e.id==='qa-merged')),false,'the withdrawal went through');
+  await ctx.close();assert.deepEqual(problems,[]);
+ }finally{await browser.close();server.close();}
+});
