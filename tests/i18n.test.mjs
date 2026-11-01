@@ -200,4 +200,7 @@ test('promotional texts (dist/promo.js: advertisement and login/access offer) al
  assert.match(t(AD.disclaimer),/fictional/,'the advertisement says the brand is fictional in both languages');
  assert.match(AD.disclaimer,/fikcyjn/);
  assert.ok(AD.image&&AD.image.alt&&Object.hasOwn(EN,AD.image.alt),'the advertisement photo has a translated description');
+ // The athlete offer of an open self-entry tournament (PLAN-REJESTRACJA-ROLE §10.1): its own CTA, without the club-account sentence.
+ assert.equal(ACCESS.athlete.cta,'Załóż konto zawodnika i zgłoś się');assert.equal(t(ACCESS.athlete.cta),'Create an athlete account and enter');
+ for(const s of [ACCESS.athlete.text,t(ACCESS.athlete.text)])assert.doesNotMatch(s,/Konta klubów|club accounts/i,s);
 }));
