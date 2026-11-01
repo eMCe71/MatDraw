@@ -337,7 +337,7 @@ test('Settings::effective (wave 1 stub): derived keys, idempotent, flags',{skip}
  assert.deepEqual(out.map(o=>o.effective.signup_mode),['off','free','paid','off','off','off']);
  assert.deepEqual(out.map(o=>o.effective.settings_degraded??null),[null,null,null,'billing-missing','force-off',null]);
  assert.deepEqual(out.map(o=>o.effective.support_email),['hello@matbravo.com','hello@matbravo.com','hello@matbravo.com','hello@matbravo.com','pomoc@x.test','hello@matbravo.com']);
- assert.deepEqual(out.map(o=>o.flags),[...Array(5).fill({organizers:'on',trustRequired:true}),{organizers:'paused',trustRequired:false}]);
+ assert.deepEqual(out.map(o=>o.flags),[...Array(5).fill({organizers:'on',trustRequired:false}),{organizers:'paused',trustRequired:false}],'trustRequired defaults to false (owner decision, §17)');
  assert.deepEqual(out.map(o=>o.effective.signup_free_beta),[true,true,false,true,true,true]);
 });
 test('Actors::build: caps of members and staff',{skip},()=>{

@@ -9,12 +9,16 @@ use PDO;
  * (peek: read-only, never clears a session; session/upload: a stale session is cleared; public/webhook: always null).
  * releaseSession() closes a started session before slow work (Stripe calls, work after the response), so other
  * requests of the same person are not blocked by the session lock.
+ * config is the effective configuration (Settings::effective, computed by Routes::dispatch with the connection it opened,
+ * which pdo() then reuses); file is the raw config.php (the Admin's settings panel and diagnostics show where a value
+ * comes from). Routes without the overlay (guests without a cookie, webhook) get the raw file as both.
  */
 final class RouteContext {
- private ?PDO $pdo=null;
+ private ?PDO $pdo;
  private array|false|null $user=false;
  private ?array $access=null;
- public function __construct(public readonly string $name,public readonly array $route,public readonly array $config,public readonly array $body=[],private readonly ?string $raw=null){}
+ public readonly array $file;
+ public function __construct(public readonly string $name,public readonly array $route,public readonly array $config,public readonly array $body=[],private readonly ?string $raw=null,?PDO $pdo=null,?array $file=null){$this->pdo=$pdo;$this->file=$file??$config;}
  public function pdo():PDO{return $this->pdo??=\matdraw_database($this->config);}
  public function user():?array {
   // The connection opens only when the cookie or session names an account (a guest costs no database connection).

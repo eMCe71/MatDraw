@@ -65,9 +65,12 @@ final class Billing {
   * (fixed by its first invoice, 03 §3.3) differs from the plan currency is replaced before the session is created.
   * Sessions that must not be paid any more are expired first (expireSessions): every open session of a customer being
   * replaced, else the pending session this one supersedes; one completed meanwhile refuses the checkout instead.
-  * Then Customer (once) and a new subscription session. Returns {url} on checkout.stripe.com.
+  * Then Customer (once) and a new subscription session. Returns {url} on checkout.stripe.com. While payments are not
+  * required (effective billing_enforce=false, the 'free' mode of the Administrator's settings) 409 not_required.
   */
  public static function checkout(PDO $pdo,array $c,array $u,mixed $lang=null):array {
+  // Settings 'free' (effective billing_enforce=false, PLAN-REJESTRACJA-ROLE §3.2): nobody is asked to pay, so no subscription starts.
+  if(empty($c['billing_enforce']))throw new ApiError('Płatności nie są teraz wymagane.',409,['code'=>'not_required']);
   $row=Access::row($pdo,$u['id']);$now=time();
   if($row&&$row['deleted_at']!==null)throw new AppError('Brak uprawnień.',403);
   $status=Access::subStatus($row,$c);$ongoing=in_array($status,BillingSync::ONGOING,true);
@@ -268,6 +271,45 @@ final class Billing {
   $tz=new \DateTimeZone('Europe/Warsaw');
   return (new \DateTimeImmutable('@'.($now??time())))->setTimezone($tz)->setTime(0,0)->modify('+14 days')->getTimestamp();
  }
+ /**
+  * Accounts the switch to 'paid' must decide about (PLAN-REJESTRACJA-ROLE §3.4 point 5, R3), from one query over the live
+  * member accounts (role member, active, no deletion tombstone) with their billing row, in PHP like adminList:
+  *  a  free-period accounts: billing_exempt=1, exempt_reason 'free-signup', the exemption still running;
+  *  b  accounts that would lose full access at once: Access::compute with billing_enforce=true gives full=false (created
+  *     by the Admin without "free", older than this release, a free period that ended in an earlier paid period).
+  *     Not in B (they are not accounts of a free period and get no free-signup exemption): accounts with a subscription
+  *     of the current billing mode (a canceled or unpaid subscriber goes back to where the subscription left him) and
+  *     accounts the Administrator explicitly set to require payment (billing_exempt=0 with exempt_by).
+  * $c is the effective configuration: while it already requires payment (effective billing_enforce), B is empty, since
+  * nobody would lose access by the switch any more (a lapsed or not yet paying account is not given a free period by the
+  * bulk action of the panel). Settings::save passes the state before the switch (billing_enforce=false).
+  * Returns {a: ids, b: ids, scheduled: {count, from}} (scheduled: group A accounts with a payment date, from the earliest).
+  */
+ public static function freePeriodSet(PDO $pdo,array $c,int $now):array {
+  $cfg=['billing_enforce'=>true]+$c;$open=empty($c['billing_enforce']);$a=[];$b=[];$count=0;$from=null;
+  $rows=$pdo->query("SELECT u.id,b.user_id AS row_id,b.billing_exempt,b.exempt_reason,b.exempt_by,b.exempt_until,b.livemode,b.sub_status,b.current_period_start,b.current_period_end,b.cancel_at_period_end FROM users u LEFT JOIN billing_accounts b ON b.user_id=u.id WHERE u.role='member' AND u.active=1 AND b.deleted_at IS NULL ORDER BY u.id")->fetchAll(PDO::FETCH_ASSOC);
+  foreach($rows as $r){
+   $row=$r['row_id']===null?null:$r;$until=$row!==null&&$row['exempt_until']!==null?(int)$row['exempt_until']:null;
+   if($row!==null&&(int)$row['billing_exempt']===1&&$row['exempt_reason']==='free-signup'&&($until===null||$until>$now)){$a[]=$r['id'];if($until!==null){$count++;$from=$from===null?$until:min($from,$until);}}
+   elseif($open&&Access::subStatus($row,$cfg)==='none'&&!($row!==null&&(int)$row['billing_exempt']===0&&$row['exempt_by']!==null)&&!Access::compute($row,['id'=>$r['id'],'role'=>'member'],$cfg,$now)['full'])$b[]=$r['id'];
+  }
+  return ['a'=>$a,'b'=>$b,'scheduled'=>['count'=>$count,'from'=>$from]];
+ }
+ /**
+  * The decision for a freePeriodSet (inside the caller's transaction): $from null = keep (group A unchanged, group B gets a
+  * running free-signup exemption), else requireFrom (both groups: free-signup exemption until 00:00 of that day, then the
+  * soon banner and the grace days of Access). Every changed account gets a billing_audit entry. Returns {a, b} counts.
+  */
+ public static function freePeriodApply(PDO $pdo,string $actor,array $set,?int $from,int $now):array {
+  $detail=$from===null?'scope=free-signup keep':'from='.date('Y-m-d',$from).' scope=free-signup';
+  $grant=$pdo->prepare("INSERT INTO billing_accounts (user_id,billing_exempt,exempt_reason,exempt_by,exempt_at,exempt_until,created_at,updated_at) VALUES (?,1,'free-signup',?,?,?,?,?) ON DUPLICATE KEY UPDATE billing_exempt=1,exempt_reason='free-signup',exempt_by=VALUES(exempt_by),exempt_at=VALUES(exempt_at),exempt_until=VALUES(exempt_until),updated_at=VALUES(updated_at)");
+  foreach($set['b'] as $id){$grant->execute([$id,$actor,$now,$from,$now,$now]);BillingSync::audit($pdo,$id,$actor,$from===null?'exempt.grant':'exempt.requireFrom',null,null,$detail);}
+  if($from!==null){
+   $q=$pdo->prepare("UPDATE billing_accounts SET exempt_until=?,updated_at=? WHERE user_id=? AND billing_exempt=1 AND exempt_reason='free-signup' AND deleted_at IS NULL");
+   foreach($set['a'] as $id){$q->execute([$from,$now,$id]);BillingSync::audit($pdo,$id,$actor,'exempt.requireFrom',null,null,$detail);}
+  }
+  return ['a'=>count($set['a']),'b'=>count($set['b'])];
+ }
  /** Plan badges of every staff account (admin-billing?list=staff), computed as if payments were enforced. */
  public static function adminList(PDO $pdo,array $c):array {
   $now=time();$cfg=['billing_enforce'=>true]+$c;$out=[];
@@ -308,11 +350,23 @@ final class Billing {
  }
  /**
   * admin-billing-action (§6.7): exempt {userId,reason,until?} (warnLive with an ongoing subscription), require {userId},
-  * requireFrom {date,scope:'user'|'grandfathered',userId?}, currency {userId,currency|null}, resync {userId},
-  * cancelAtPeriodEnd {userId}. Every action is written to billing_audit with the Admin as actor.
+  * requireFrom {date,scope:'user'|'grandfathered'|'free-signup',userId?}, currency {userId,currency|null}, resync {userId},
+  * cancelAtPeriodEnd {userId}. Every action is written to billing_audit with the Admin as actor. Scope free-signup (the
+  * bulk action of the settings panel, PLAN-REJESTRACJA-ROLE §3.4–§3.5) covers groups A and B of freePeriodSet (B only
+  * while payments are not required: effective config), from a date at least 14 days ahead, and is also listed in the settings history (account_audit settings.freePeriod).
   */
  public static function adminAction(PDO $pdo,array $c,array $admin,array $b):array {
   $action=$b['action']??null;$now=time();$actor=$admin['id'];
+  if($action==='requireFrom'&&($b['scope']??null)==='free-signup'){
+   $from=self::dayStart($b['date']??null);if($from<self::grandfatheredMin($now))throw new AppError('Płatność można wymagać od daty co najmniej 14 dni od dziś.',422);
+   $pdo->beginTransaction();
+   try{
+    $n=self::freePeriodApply($pdo,$actor,self::freePeriodSet($pdo,$c,$now),$from,$now);
+    Members::audit($pdo,$actor,'settings.freePeriod',null,'requireFrom:'.date('Y-m-d',$from).' a='.$n['a'].' b='.$n['b']);
+    $pdo->commit();
+   }catch(\Throwable $e){$pdo->rollBack();throw $e;}
+   return ['ok'=>true,'count'=>$n['a']+$n['b'],'from'=>$from]+$n;
+  }
   if($action==='requireFrom'&&($b['scope']??null)==='grandfathered'){
    $from=self::dayStart($b['date']??null);if($from<self::grandfatheredMin())throw new AppError('Płatność można wymagać od daty co najmniej 14 dni od dziś.',422);
    $pdo->beginTransaction();

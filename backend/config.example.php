@@ -32,14 +32,20 @@ return [
  'session_dir' => null,
 
  // --- Accounts and sign-up -------------------------------------------------------------------------------------
+ // The Administrator switches sign-up (off / open free / open paid), payments of existing accounts, organizers and the
+ // help address in the panel "Ustawienia" (stored in the database). signup_enabled, billing_enforce and support_email
+ // below are only the starting values until the first save there.
  // Self-service sign-up. Requires billing_enforce=true (or signup_free_beta with billing_enabled=false) and support_email.
  'signup_enabled' => false,
+ // Emergency switch: true closes sign-up whatever the panel says (use it over SSH when the panel cannot be reached).
+ 'signup_force_off' => false,
  // Owner's test window: sign-up only through #signup?invite=<token> (at least 24 characters; with signup_enabled=false
  // it needs billing_enforce=true, so invitees do not get free full access; needs support_email).
  'signup_invite_token' => null,
  // Explicit permission to open sign-up without enforced payments (a free beta; only with billing_enabled=false).
  'signup_free_beta' => false,
  // Help address shown at "Forgot your password?"; the Admin answers password requests only to the account's address.
+ // null = hello@matbravo.com once the panel is in use; the panel can change it.
  'support_email' => null,
  // Sign-up limits: per IP (IPv6 grouped by /64) per hour and per day, and for all sign-ups per hour.
  'signup_limit_ip_hour' => 30,
@@ -68,8 +74,11 @@ return [
  'trusted_proxies' => [],
 
  // --- Payments (Stripe) ----------------------------------------------------------------------------------------
- // Switches (enable in this order, see DEPLOY-PL.md): billing_enabled shows plans and allows checkout;
- // billing_enforce requires payment for full access and needs billing_enabled=true.
+ // Switches (enable in this order, see DEPLOY-PL.md): billing_enabled makes Stripe available (plans, the Stripe check and
+ // "Otwarta, płatna" in the panel "Ustawienia"); checkout opens only while payments are required: billing_enforce until
+ // the first save in the panel, then the panel's payments mode (paid). billing_enforce requires payment for full access
+ // and needs billing_enabled=true; after the first save it is only the starting value ("Otwarta, płatna" needs
+ // billing_enabled=true and a successful Stripe check). billing_enabled, billing_mode and the Stripe keys always stay here.
  'billing_enabled' => false,
  'billing_enforce' => false,
  // 'test' or 'live'; must match the key prefix (rk_test_/rk_live_) and the mode of Stripe events.
