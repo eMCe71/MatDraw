@@ -65,6 +65,12 @@ export function trustedOrganizer(db,userId){
  return !!o&&!o.blocked&&(!!o.trusted||!trustRequired(db));
 }
 export const trusted=(db,t)=>db?!community(db,t)||trustedOrganizer(db,t.createdBy):!t?.community||!!t?.trusted;
+/** Mirror of Domain::closedCreator (final review R1.6): a member creator blocked as organizer or deactivated; without db false. */
+export function closedCreator(db,t){
+ if(!db||typeof t?.createdBy!=='string')return false;let o=isObj(db.organizers)&&Object.hasOwn(db.organizers,t.createdBy)?db.organizers[t.createdBy]:null;
+ if(!o){const u=db.users.find(x=>x.id===t.createdBy&&x.role==='member');if(u)o={blocked:isset(u.organizerBlockedAt),active:u.active!==false};}
+ return !!o&&(!!o.blocked||o.active===false);
+}
 export const manages=(user,t)=>!!user&&!!t&&(user.role==='admin'||(user.role==='editor'||organizer(user))&&t.createdBy===user.id);
 export const managesTournament=manages;
 export function managesProfile(user,a,db){
@@ -73,7 +79,7 @@ export function managesProfile(user,a,db){
  if(user.role==='club')return staffProfile(db,a)&&a.clubId===user.clubId;
  return (user.role==='editor'||organizer(user))&&a.createdBy===user.id;
 }
-export const outsideEntry=(user,t,db)=>!!user&&!!t&&t.status==='open'&&trusted(db,t)&&(user.role==='club'||user.role==='editor'||organizer(user)&&t.selfEntry===true);
+export const outsideEntry=(user,t,db)=>!!user&&!!t&&t.status==='open'&&trusted(db,t)&&!closedCreator(db,t)&&(user.role==='club'||user.role==='editor'||organizer(user)&&t.selfEntry===true);
 export const canEnter=(user,t,db)=>!!user&&!!t&&t.status!=='finished'&&(manages(user,t)||outsideEntry(user,t,db));
 export const canCreateTournament=user=>!!user&&(user.role==='admin'||user.role==='editor'||organizer(user));
 const byId=rows=>new Map(rows.map(r=>[r.id,r]));
@@ -278,21 +284,24 @@ function organizerLimits(db,user,old,status,date){
  if(status!=='draft'&&date>=today&&db.tournaments.filter(t=>t.createdBy===user.id&&t.id!==old?.id&&t.status!=='draft'&&t.date>=today&&!isset(t.hiddenBy)).length>=ORGANIZER_ACTIVE)
   fail('Masz już 10 opublikowanych nadchodzących turniejów. Przełącz któryś na roboczy albo poczekaj, aż się odbędzie.',429);
 }
-// Removal of personal data (§6.6), mirror of Domain::detach and Domain::forgetProfile.
-export function detach(t,entryId){
+// Removal of personal data (§6.6), mirror of Domain::detach and Domain::forgetProfile. keep (Domain::erasureKeeps, final review R1.1):
+// an erasure by someone who does not manage the tournament leaves its saved draws alone, also in an open tournament.
+export function detach(t,entryId,keep=false){
  const e=t.entries.find(x=>x.id===entryId);if(!e)return false;
  const status=isset(t.hiddenBy)?t.hiddenFrom??t.status:t.status;if(status==='finished')return false;
  if(status==='closed'&&categories(t.entries).items.some(c=>Object.hasOwn(t.draws,c.id)&&c.athletes.some(a=>a.id===entryId)))return false;
  const next=structuredClone(t);try{reconcile(next,t.entries.filter(x=>x.id!==entryId));}catch(err){if(err instanceof DomainError)return false;throw err;}
+ if(keep&&Object.keys(next.draws).length<Object.keys(t.draws).length)return false;
  t.entries=next.entries;t.draws=next.draws;audit(t,'Wycofano zgłoszenie: '+initials(String(e.name)),e.profileId);return true;
 }
+const erasureKeeps=(db,actor,t)=>!actor||!manages(actor,t)&&guarded(db,actor,t);
 // Logs never keep a forgotten name: lines marked with the profile in every tournament; unmarked (older) lines by name only where the
 // profile has an entry or the actor manages the tournament, namesakes with entries excepted. Snapshots only with useInitials.
 export function forgetProfile(db,profileId,useInitials=false,actor=null){
  const i=db.profiles.findIndex(a=>a.id===profileId);if(i<0)return 'missing';
  const names=[...new Set([db.profiles[i].name,...db.tournaments.flatMap(t=>t.entries.filter(e=>e.profileId===profileId).map(e=>e.name))].map(n=>String(n??'')))].filter(n=>n!==''&&n!==DELETED);let left=false;
  for(const t of db.tournaments){
-  const entered=t.entries.some(e=>e.profileId===profileId);if(entered&&!detach(t,profileId))left=true;
+  const entered=t.entries.some(e=>e.profileId===profileId);if(entered&&!detach(t,profileId,erasureKeeps(db,actor,t)))left=true;
   if(useInitials)for(const e of t.entries)if(e.profileId===profileId)e.name=initials(String(e.name));
   unname(t,profileId,names,entered||!!actor&&manages(actor,t));
  }
@@ -495,12 +504,12 @@ function removeEntry(db,user,p){
  reconcile(t,t.entries.filter(x=>x.id!==a.id));audit(t,'Wycofano zgłoszenie: '+a.name,a.profileId);
  if(a.self)withdrawn(db,a,t.id,user.role==='admin'?'admin':'organizer');return {id:a.id};
 }
-/** entry.self (§7.1–§7.2): an athlete enters an own profile; never into a category with a saved draw; minors only in trusted tournaments. */
+/** entry.self (§7.1–§7.2): an athlete enters an own profile; never into a category with a saved draw nor a tournament of a blocked or deactivated organizer (R1.6); minors only in trusted tournaments. */
 function selfEntry(db,user,p,owned){
  if(typeof p.profileId!=='string'||p.profileId==='')fail('Najpierw uzupełnij dane zawodnika.',409);
  let a=owned(p.profileId);if(!a)fail('Zawodnik nie istnieje.',404);if(a.archived)fail('Najpierw uzupełnij dane zawodnika.',409);
  const t=db.tournaments.find(x=>x.id===p.tournamentId&&x.status!=='draft');if(!t)fail('Turniej nie jest dostępny.',404);
- if(t.status!=='open'||t.selfEntry!==true||t.date<warsawToday())fail('Zapisy do tego turnieju są zamknięte.',403);
+ if(t.status!=='open'||t.selfEntry!==true||t.date<warsawToday()||closedCreator(db,t))fail('Zapisy do tego turnieju są zamknięte.',403);
  const old=t.entries.find(e=>e.profileId===a.id)??null,update=p.update===true;
  if(old&&!update)fail('Jesteś już zgłoszony do tego turnieju.',409);if(!old&&update)fail('Zgłoszenie nie istnieje.',404);
  keepDraws(t,old,null,'');

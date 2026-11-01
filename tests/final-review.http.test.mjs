@@ -2,7 +2,8 @@
 // sign-up on, Stripe enabled and enforced in test mode, Stripe stub on port+1): B10 members gain roles only while sign-up is
 // open, B2 the budget of member transactions, B1 saved draws against outside entries, B8 the revision floor of migration
 // 0007, B4/B5/B16 the Stripe check against the current configuration and the test-mode confirmation, B6 signup_force_off and
-// the invite token, B14 the organizer places of a network under parallel sign-ups. Every test puts back what it changed.
+// the invite token, B14 the organizer places of a network under parallel sign-ups; round 1 of the review: R1.1 erasures keep
+// saved draws, R1.6 tournaments of deactivated or blocked organizers take no new entries. Every test puts back what it changed.
 import test,{before,beforeEach,after} from 'node:test';
 import assert from 'node:assert/strict';
 import {Client,base,fixture} from './helpers/http-client.mjs';
@@ -112,6 +113,43 @@ test('B1: an organizer entering into or withdrawing from a drawn category of the
  await a.load();assert.deepEqual(Object.keys(a.data.tournaments.find(x=>x.id===t).draws),[key],'the saved draw is still there');
  // The manager still changes the category (and with it the draw), as before.
  await a.cmd('entry.remove',{tournamentId:t,id:own});assert.deepEqual(Object.keys(a.data.tournaments.find(x=>x.id===t).draws),[]);
+});
+
+// Round 1 of the review, R1.1: erasures (profile.forget, athlete-forget, account deletion) are no way around the rule of B1.
+test('R1.1: forgetting a profile or deleting the account keeps the Administrator\'s saved draw; the entries stay as initials',{skip},async()=>{
+ const a=await admin(),t=(await a.cmd('tournament.save',{...T({name:'Turniej Wymazań'}),selfEntry:true})).id;
+ const o=member('r11org',{organizer:true}),oc=await signIn(o.email);await oc.load();
+ const fake=(await oc.cmd('profile.save',{...A,name:'Fikcyjny Zawodnik',club:{none:true}})).id,twin=(await oc.cmd('profile.save',{...A,name:'Drugi Fikcyjny',club:{none:true}})).id;
+ for(const id of [fake,twin])await oc.cmd('entry.save',{...E,tournamentId:t,profileId:id});
+ const x=athlete('r11ath');ok(await (await signIn(x.email)).req('athlete-entry',{tournamentId:t,profileId:x.profileId,events:['forms']}));
+ await a.load();for(const name of ['Adam Wymazań','Bartek Wymazań'])await a.cmd('profile.save',{...A,name:name+' '+uniq('p'),clubName:'Klub '+name,registration:{...E,tournamentId:t}});
+ await a.load();const key=categories(a.data.tournaments.find(y=>y.id===t).entries).items.find(c=>c.type==='bracket').id;await a.cmd('draw.create',{tournamentId:t,categoryId:key});
+ const draws=async()=>{await a.load();return Object.keys(a.data.tournaments.find(y=>y.id===t).draws);},names=()=>Object.fromEntries(fixture('roles-entries',{tournamentId:t}).map(e=>[e.profileId,e.snapshot.name]));
+ await oc.load();error(await command(oc,'entry.remove',{tournamentId:t,id:fake}),409,'Losowanie Twojej kategorii już się odbyło. Wycofanie może zrobić organizator.');
+ assert.equal(ok(await command(oc,'profile.forget',{id:fake})).result.state,'anonymized','the erasure works');
+ assert.deepEqual(await draws(),[key],'profile.forget: the draw stays');assert.equal(names()[fake],'F. Z.');
+ const xc=await signIn(x.email);ok(await xc.req('athlete-forget',{profileId:x.profileId,password:PASSWORD}));
+ assert.deepEqual(await draws(),[key],'athlete-forget: the draw stays');assert.match(names()[x.profileId],/^Z\. \S\.$/u);
+ ok(await (await signIn(o.email)).req('account-delete',{password:PASSWORD}));
+ assert.deepEqual(await draws(),[key],'account deletion of the organizer: the draw stays');assert.ok(twin in names(),'his other athlete stays in the drawn category');
+ // The Administrator manages the tournament: his change drops the draw as before.
+ await a.cmd('entry.remove',{tournamentId:t,id:twin});assert.deepEqual(await draws(),[]);
+});
+
+// R1.6: a tournament of an organizer the Administrator deactivated or blocked (without hiding it) takes no new entries from outside.
+test('R1.6: no self-entries into tournaments of a deactivated or blocked organizer; back after reactivation; withdrawing works',{skip},async()=>{
+ const a=await admin(),o=member('r16org',{organizer:true}),oc=await signIn(o.email);await oc.load();
+ const t=(await oc.cmd('tournament.save',{...T({name:'Turniej Wyłączonego'}),selfEntry:true})).id;
+ const x=athlete('r16ath'),xc=await signIn(x.email),y=athlete('r16in'),yc=await signIn(y.email);ok(await yc.req('athlete-entry',{tournamentId:t,profileId:y.profileId,events:['forms']}));
+ const enter=()=>xc.req('athlete-entry',{tournamentId:t,profileId:x.profileId,events:['forms']}),CLOSED_T='Zapisy do tego turnieju są zamknięte.';
+ assert.deepEqual(ok(await a.req('admin-member',{action:'active',userId:o.id,active:false})),{id:o.id,active:false});
+ error(await enter(),403,CLOSED_T);
+ ok(await yc.req('athlete-withdraw',{tournamentId:t,profileId:y.profileId}));
+ ok(await a.req('admin-member',{action:'active',userId:o.id,active:true}));
+ ok(await enter());ok(await xc.req('athlete-withdraw',{tournamentId:t,profileId:x.profileId}));
+ ok(await a.req('admin-member',{action:'organizer',userId:o.id,blocked:true}));
+ error(await enter(),403,CLOSED_T);
+ ok(await a.req('admin-member',{action:'organizer',userId:o.id,blocked:false}));ok(await enter());
 });
 
 test('B8: a command based on a revision from before migration 0007 is stale even for objects never stamped since',{skip},async()=>{

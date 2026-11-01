@@ -7,7 +7,7 @@ use PDO;
  * One transaction and revision cover cross-tournament/profile invariants (PLAN-REJESTRACJA-ROLE §4.3, R5).
  * Members (role member) never enter the workspace as data: transaction($fn, $actor) puts the member actor of the request
  * into $db['users'] for $fn only, and rows() skips every member. Read-only parts of $db: organizers {userId:{trusted,
- * blocked}} (members who created tournaments), flags (Settings::flags, from the caller), withdrawals (tombstones the
+ * blocked, active}} (members who created tournaments), flags (Settings::flags, from the caller), withdrawals (tombstones the
  * command writes) and withdrawalsPurge (Domain::retain). persist() inserts new keys with a plain INSERT and updates
  * changed rows with UPDATE … WHERE key (never an upsert that could take over another club by its unique name), maps a
  * duplicate key to 409, deletes profiles missing from the result after entries and draws, and writes the revision stamps.
@@ -74,7 +74,7 @@ final class Repository {
  /** [revision, staffRev, revFloor] of app_meta (rev_floor: the global revision when migration 0007 ran, Domain::stale, final review B8). */
  private function meta():array{$m=$this->pdo->query('SELECT revision,staff_rev,rev_floor FROM app_meta WHERE id=1')->fetch();return [(int)$m['revision'],(int)$m['staff_rev'],(int)$m['rev_floor']];}
  /** Members who created tournaments: {id:{trusted, blocked}} (Domain::trustedOrganizer). */
- private function organizers():array{$o=[];foreach($this->pdo->query("SELECT id,organizer_trusted_at,organizer_blocked_at FROM users WHERE role='member' AND id IN (SELECT created_by FROM tournaments)") as $u)$o[$u['id']]=['trusted'=>$u['organizer_trusted_at']!==null,'blocked'=>$u['organizer_blocked_at']!==null];return $o;}
+ private function organizers():array{$o=[];foreach($this->pdo->query("SELECT id,active,organizer_trusted_at,organizer_blocked_at FROM users WHERE role='member' AND id IN (SELECT created_by FROM tournaments)") as $u)$o[$u['id']]=['trusted'=>$u['organizer_trusted_at']!==null,'blocked'=>$u['organizer_blocked_at']!==null,'active'=>(int)$u['active']===1];return $o;}
  private function staff():array{$users=[];foreach($this->pdo->query("SELECT * FROM users WHERE role IN ('admin','editor','club') ORDER BY email,id") as $u)$users[]=['id'=>$u['id'],'clubId'=>$u['club_id'],'email'=>$u['email'],'role'=>$u['role'],'active'=>(bool)$u['active'],'passwordHash'=>$u['password_hash'],'authVersion'=>(int)$u['auth_version']];return $users;}
  private function clubs():array{return array_map([self::class,'club'],$this->pdo->query("SELECT id,name,verified,created_by,created_at,merged_into FROM clubs ORDER BY id='unaffiliated',name,id")->fetchAll());}
  private function load():array {

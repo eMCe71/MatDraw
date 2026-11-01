@@ -106,17 +106,24 @@ test('athlete-entry: open 200; closed, without self-entries and past 403; hidden
  const raw=JSON.stringify(view);for(const s of ['Staff Pierwszy Losowany','Staff Drugi','admin@test.example','Sprawdzamy'])assert.ok(!raw.includes(s),s);
 });
 
-test('minors enter only trusted tournaments; an adult self profile may enter an untrusted one',{skip},async()=>{
+test('minors enter only trusted tournaments; an adult self profile may enter an untrusted one; a blocked organizer\'s tournament takes nobody new (R1.6)',{skip},async()=>{
  const org=fixture('member',{email:`org.${Date.now()}@athletes.test`,profile:true});fixture('domain-organizer',{userId:org.id,organizer:true});
- const created=run(org.id,'tournament.save',{name:'Społeczny Atletów',city:'Opole',date:day(20),mat:'Mata 1',status:'open'});assert.equal(created.status,200,JSON.stringify(created));
- // A blocked organizer is never trusted, whatever trustRequired says (§17).
- fixture('domain-organizer',{userId:org.id,blocked:true});const t=created.result.id;
- const parent=await member('parent');const child=ok(await parent.req('athlete-save',{...SELF,name:'Zosia Mała',birthDate:yearsAgo(12),sex:'F',grade:8,relation:'guardian'})).profile.id;
- assert.equal(ok(await parent.req('athlete-entry',{tournamentId:t,profileId:child,...ENTRY}),409).error,'Zgłoszenia osób niepełnoletnich do tego turnieju będą możliwe, gdy MatBravo potwierdzi organizatora.');
- const offer=ok(await parent.req('athlete')).open.find(x=>x.id===t);assert.equal(offer.community,true);assert.equal(offer.trusted,false);assert.deepEqual(offer.profiles,[{id:child,entered:false,blocked:'minor-untrusted'}]);
- assert.deepEqual(offer.organizer,{n:'Test C.'},'the organizer\'s display name (O11)');
- const adult=await member('adult');const own=ok(await adult.req('athlete-save',SELF)).profile.id;
- const r=ok(await adult.req('athlete-entry',{tournamentId:t,profileId:own,...ENTRY}));assert.equal(r.entry.tournament.trusted,false);assert.equal(r.entry.tournament.community,true);
+ const created=run(org.id,'tournament.save',{name:'Społeczny Atletów',city:'Opole',date:day(20),mat:'Mata 1',status:'open'});assert.equal(created.status,200,JSON.stringify(created));const t=created.result.id;
+ // An organizer not confirmed yet under trustRequired=true (§17) is untrusted.
+ fixture('settings-set',{data:{trustRequired:true}});
+ try{
+  const parent=await member('parent');const child=ok(await parent.req('athlete-save',{...SELF,name:'Zosia Mała',birthDate:yearsAgo(12),sex:'F',grade:8,relation:'guardian'})).profile.id;
+  assert.equal(ok(await parent.req('athlete-entry',{tournamentId:t,profileId:child,...ENTRY}),409).error,'Zgłoszenia osób niepełnoletnich do tego turnieju będą możliwe, gdy MatBravo potwierdzi organizatora.');
+  const offer=ok(await parent.req('athlete')).open.find(x=>x.id===t);assert.equal(offer.community,true);assert.equal(offer.trusted,false);assert.deepEqual(offer.profiles,[{id:child,entered:false,blocked:'minor-untrusted'}]);
+  assert.deepEqual(offer.organizer,{n:'Test C.'},'the organizer\'s display name (O11)');
+  const adult=await member('adult');const own=ok(await adult.req('athlete-save',SELF)).profile.id;
+  const r=ok(await adult.req('athlete-entry',{tournamentId:t,profileId:own,...ENTRY}));assert.equal(r.entry.tournament.trusted,false);assert.equal(r.entry.tournament.community,true);
+  // R1.6: once the Administrator blocks the organizer nobody runs the tournament: no new entries, withdrawing still works.
+  fixture('domain-organizer',{userId:org.id,blocked:true});
+  const late=await member('late');const lateOwn=ok(await late.req('athlete-save',SELF)).profile.id;
+  assert.equal(ok(await late.req('athlete-entry',{tournamentId:t,profileId:lateOwn,...ENTRY}),403).error,'Zapisy do tego turnieju są zamknięte.');
+  ok(await adult.req('athlete-withdraw',{tournamentId:t,profileId:own}));
+ }finally{fixture('settings-reset');}
 });
 
 test('an organizer neither confirmed nor blocked: trusted only without trustRequired; build() equals the workspace for both values',{skip},async()=>{

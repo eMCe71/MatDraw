@@ -44,11 +44,20 @@ final class Domain {
  public static function staffProfile(?array $db,array $a):bool{return $db===null?($a['staff']??false)===true:($a['ownerId']??null)===null&&isset(self::staffIds($db)[$a['createdBy']??'']);}
  public static function community(?array $db,array $t):bool{return $db===null?!empty($t['community']):!isset(self::staffIds($db)[$t['createdBy']??'']);}
  public static function trustRequired(array $db):bool{return ($db['flags']['trustRequired']??true)!==false;}
- /** {trusted, blocked} of a member creator, or null: Repository::load() lists members who created tournaments; the actor of the request (also before his first tournament) and the demo hold the fields themselves. */
+ /** {trusted, blocked, active} of a member creator, or null: Repository::load() lists members who created tournaments; the actor of the request (also before his first tournament) and the demo hold the fields themselves. */
  private static function organizerState(array $db,mixed $id):?array {
   if(!is_string($id))return null;$o=$db['organizers'][$id]??null;
-  if($o===null)foreach($db['users'] as $u)if($u['id']===$id&&($u['role']??null)==='member')$o=['trusted'=>($u['organizerTrustedAt']??null)!==null,'blocked'=>($u['organizerBlockedAt']??null)!==null];
+  if($o===null)foreach($db['users'] as $u)if($u['id']===$id&&($u['role']??null)==='member')$o=['trusted'=>($u['organizerTrustedAt']??null)!==null,'blocked'=>($u['organizerBlockedAt']??null)!==null,'active'=>($u['active']??true)!==false];
   return $o;
+ }
+ /**
+  * A tournament whose member creator was blocked as organizer or deactivated by the Administrator (final review R1.6):
+  * nobody who does not manage it enters new athletes (entry.self, outsideEntry), since nobody runs it now. Trust, the
+  * results and their visibility are untouched. Without $db (views) false: the server decides.
+  */
+ public static function closedCreator(?array $db,array $t):bool {
+  if($db===null)return false;$o=self::organizerState($db,$t['createdBy']??null);
+  return $o!==null&&(!empty($o['blocked'])||($o['active']??true)===false);
  }
  /** A member creator confirmed by the Administrator and not blocked; with trustRequired=false every creator not blocked (§17). */
  public static function trustedOrganizer(array $db,mixed $id):bool {
@@ -63,7 +72,7 @@ final class Domain {
   if($u['role']==='club')return self::staffProfile($db,$a)&&($a['clubId']??null)===$u['clubId'];
   return ($u['role']==='editor'||self::organizer($u))&&($a['createdBy']??null)===$u['id'];
  }
- public static function outsideEntry(array $u,array $t,?array $db=null):bool{return ($t['status']??null)==='open'&&self::trusted($db,$t)&&($u['role']==='club'||$u['role']==='editor'||self::organizer($u)&&($t['selfEntry']??false)===true);}
+ public static function outsideEntry(array $u,array $t,?array $db=null):bool{return ($t['status']??null)==='open'&&self::trusted($db,$t)&&!self::closedCreator($db,$t)&&($u['role']==='club'||$u['role']==='editor'||self::organizer($u)&&($t['selfEntry']??false)===true);}
  public static function canEnter(array $u,array $t,?array $db=null):bool{return ($t['status']??null)!=='finished'&&(self::manages($u,$t)||self::outsideEntry($u,$t,$db));}
  public static function canCreateTournament(array $u):bool{return $u['role']==='admin'||$u['role']==='editor'||self::organizer($u);}
  /**
@@ -251,14 +260,26 @@ final class Domain {
   }
  }
  // Removal and retention of personal data (§6.6–§6.7).
- /** The entry leaves its tournament, unless the tournament is finished, closed with a saved draw in one of the entry's categories, or reconcile refuses (results). */
- public static function detach(array &$t,string $entryId):bool {
+ /**
+  * The entry leaves its tournament, unless the tournament is finished, closed with a saved draw in one of the entry's
+  * categories, or reconcile refuses (results). $keep (an erasure by someone who does not manage the tournament, see
+  * erasureKeeps()): an open tournament keeps its saved draws as well, so the entry stays (as in a closed one) whenever
+  * leaving would drop a draw (final review R1.1: forgetting a profile is no way around keepDraws()).
+  */
+ public static function detach(array &$t,string $entryId,bool $keep=false):bool {
   $e=null;foreach($t['entries'] as $x)if($x['id']===$entryId)$e=$x;if(!$e)return false;
   $status=($t['hiddenBy']??null)!==null?($t['hiddenFrom']??$t['status']):$t['status'];if($status==='finished')return false;
   if($status==='closed')foreach(Rules::categories($t['entries']) as $key=>$c)if(isset($t['draws'][$key])&&in_array($entryId,array_column($c['athletes'],'id'),true))return false;
   $next=$t;try{self::reconcile($next,array_filter($t['entries'],fn($x)=>$x['id']!==$entryId));}catch(AppError){return false;}
+  if($keep&&count($next['draws'])<count($t['draws']))return false;
   $t=$next;self::audit($t,'Wycofano zgłoszenie: '.GuestView::initials((string)$e['name']),$e['profileId']);return true;
  }
+ /**
+  * Whether an erasure by $u leaves the saved draws of tournament $t alone (detach() $keep, R1.1): the rule of keepDraws()
+  * for entry.remove (everyone who does not manage $t, staff in staff tournaments excepted, a67ad42); $u null (retain(), a
+  * system erasure) keeps them everywhere.
+  */
+ private static function erasureKeeps(array $db,?array $u,array $t):bool{return $u===null||!self::manages($u,$t)&&self::guarded($db,$u,$t);}
  /**
   * Forgets profile $id: every entry is detached; without remaining entries the profile leaves $db (persist() deletes the
   * row), otherwise it is anonymized. Tournament logs never keep its name: every line marked with its id gets initials in
@@ -267,14 +288,15 @@ final class Domain {
   * snapshots) only in tournaments where it has an entry or that the actor $u manages (the Administrator: all), never in
   * other tenants' tournaments, and not when an entry of another profile there carries that name. $initials
   * (profile.forget, athlete.forget) also turns the name in the remaining snapshots into initials; otherwise they keep it
-  * as results history (O7). Returns 'deleted', 'anonymized' or 'missing'.
+  * as results history (O7). An entry stays in a tournament where leaving would drop a saved draw that $u may not drop
+  * (erasureKeeps(), R1.1). Returns 'deleted', 'anonymized' or 'missing'.
   */
  public static function forgetProfile(array &$db,string $id,bool $initials=false,?array $u=null):string {
   $i=null;foreach($db['profiles'] as $k=>$a)if($a['id']===$id)$i=$k;if($i===null)return 'missing';
   $names=[(string)($db['profiles'][$i]['name']??'')];foreach($db['tournaments'] as $t)foreach($t['entries'] as $e)if($e['profileId']===$id)$names[]=(string)$e['name'];
   $names=array_values(array_diff(array_unique($names),['',self::DELETED]));$left=false;
   foreach($db['tournaments'] as $k=>$t){
-   $has=in_array($id,array_column($t['entries'],'profileId'),true);if($has&&!self::detach($t,$id))$left=true;
+   $has=in_array($id,array_column($t['entries'],'profileId'),true);if($has&&!self::detach($t,$id,self::erasureKeeps($db,$u,$t)))$left=true;
    if($initials)foreach($t['entries'] as $j=>$e)if($e['profileId']===$id)$t['entries'][$j]['name']=GuestView::initials((string)$e['name']);
    self::unname($t,$id,$names,$has||$u!==null&&self::manages($u,$t));$db['tournaments'][$k]=$t;
   }
@@ -291,16 +313,21 @@ final class Domain {
    if($mark===null&&$legacy)foreach($names as $n)if(!isset($kept[$n])&&str_ends_with($s,': '.$n)){$t['activity'][$j]['text']=substr($s,0,-strlen($n)).GuestView::initials($n);break;}
   }
  }
- /** Account deletion (§6.6, PHP only, idempotent): owned profiles forgotten; as organizer, upcoming tournaments (dated today or later, not finished: results of a tournament that ended today stay public, final review B19) hidden by 'system' (self-entries of others detached, tombstone 'system') and created profiles forgotten. */
+ /**
+  * Account deletion (§6.6, PHP only, idempotent): owned profiles forgotten; as organizer, upcoming tournaments (dated today
+  * or later, not finished: results of a tournament that ended today stay public, final review B19) hidden by 'system'
+  * (self-entries of others detached, tombstone 'system') and created profiles forgotten. The member is the actor of the
+  * erasure: his own tournaments as he managed them, saved draws of other tournaments stay (R1.1).
+  */
  public static function forgetMember(array &$db,string $userId):array {
-  $db['withdrawals']??=[];$before=$db;$today=date('Y-m-d');$out=['profiles'=>0,'tournaments'=>0];
-  foreach($db['profiles'] as $a)if(($a['ownerId']??null)===$userId&&self::forgetProfile($db,$a['id'])!=='missing')$out['profiles']++;
+  $db['withdrawals']??=[];$before=$db;$today=date('Y-m-d');$out=['profiles'=>0,'tournaments'=>0];$me=['id'=>$userId,'role'=>'member','organizer'=>true];
+  foreach($db['profiles'] as $a)if(($a['ownerId']??null)===$userId&&self::forgetProfile($db,$a['id'],false,$me)!=='missing')$out['profiles']++;
   foreach($db['tournaments'] as $k=>$t){
    if($t['createdBy']!==$userId||$t['date']<$today||$t['status']==='finished'||($t['hiddenBy']??null)!==null)continue;
    foreach($t['entries'] as $e)if(!empty($e['self'])&&self::detach($t,$e['id']))self::withdrawn($db,$e,$t['id'],'system');
    $t['hiddenFrom']=$t['status'];$t['status']='draft';$t['hiddenBy']='system';self::audit($t,'Konto organizatora zostało usunięte.');$db['tournaments'][$k]=$t;$out['tournaments']++;
   }
-  foreach($db['profiles'] as $a)if(($a['ownerId']??null)===null&&($a['createdBy']??null)===$userId&&($a['name']??null)!==self::DELETED&&self::forgetProfile($db,$a['id'])!=='missing')$out['profiles']++;
+  foreach($db['profiles'] as $a)if(($a['ownerId']??null)===null&&($a['createdBy']??null)===$userId&&($a['name']??null)!==self::DELETED&&self::forgetProfile($db,$a['id'],false,$me)!=='missing')$out['profiles']++;
   self::stamp($before,$db,false);return $out;
  }
  /**
@@ -506,12 +533,12 @@ final class Domain {
   self::reconcile($t,array_filter($t['entries'],fn($x)=>$x['id']!==$a['id']));self::audit($t,'Wycofano zgłoszenie: '.$a['name'],$a['profileId']);
   if(!empty($a['self']))self::withdrawn($db,$a,$t['id'],$u['role']==='admin'?'admin':'organizer');return ['id'=>$a['id']];
  }
- /** entry.self (§7.1–§7.2): an athlete enters an own profile; never into a category with a saved draw; minors only in trusted tournaments. */
+ /** entry.self (§7.1–§7.2): an athlete enters an own profile; never into a category with a saved draw nor a tournament of a blocked or deactivated organizer (R1.6); minors only in trusted tournaments. */
  private static function selfEntry(array &$db,array $u,array $p,callable $owned):array {
   if(!is_string($p['profileId']??null)||$p['profileId']==='')throw new AppError('Najpierw uzupełnij dane zawodnika.',409);
   $a=$owned($p['profileId']);if(!$a)throw new AppError('Zawodnik nie istnieje.',404);if($a['archived'])throw new AppError('Najpierw uzupełnij dane zawodnika.',409);
   $t=null;foreach($db['tournaments'] as $x)if($x['id']===($p['tournamentId']??null)&&$x['status']!=='draft')$t=$x;if(!$t)throw new AppError('Turniej nie jest dostępny.',404);
-  if($t['status']!=='open'||($t['selfEntry']??false)!==true||$t['date']<date('Y-m-d'))throw new AppError('Zapisy do tego turnieju są zamknięte.',403);
+  if($t['status']!=='open'||($t['selfEntry']??false)!==true||$t['date']<date('Y-m-d')||self::closedCreator($db,$t))throw new AppError('Zapisy do tego turnieju są zamknięte.',403);
   $old=null;foreach($t['entries'] as $e)if($e['profileId']===$a['id'])$old=$e;$update=($p['update']??null)===true;
   if($old&&!$update)throw new AppError('Jesteś już zgłoszony do tego turnieju.',409);if(!$old&&$update)throw new AppError('Zgłoszenie nie istnieje.',404);
   self::keepDraws($t,$old,null,'');
