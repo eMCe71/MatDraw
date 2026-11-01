@@ -440,8 +440,16 @@ test('I3, demo in a browser: a club account in the tournament of a deactivated o
   const roster=async()=>{await page.evaluate(()=>{location.hash='#athletes';});await page.reload();await page.waitForSelector('.roster-panel');
    return page.evaluate(()=>({add:document.querySelectorAll('[data-action="new-entry"],[data-action="entry-picker"]').length,closed:document.querySelector('.entries-closed')?.textContent??null,
     edit:document.querySelectorAll('[data-action="edit-entry"][data-id="qa-club-a"]').length,remove:document.querySelectorAll('[data-action="remove-entry"][data-id="qa-club-a"]').length}));};
+  // The profiles database offers "Zgłoś" (register-profile) under the same condition as the roster (final review F1).
+  const database=async()=>{await page.evaluate(()=>{location.hash='#database';});await page.reload();await page.waitForSelector('.roster-table');
+   return page.evaluate(()=>({register:document.querySelectorAll('[data-action="register-profile"]').length,edit:document.querySelectorAll('[data-action="edit-profile"]').length}));};
   await setActive(true);assert.deepEqual(await roster(),{add:2,closed:null,edit:1,remove:1},'an active organizer: entries open');
+  const open=await database();assert.ok(open.register>0&&open.register===open.edit,'an active organizer: "Zgłoś" for every profile of the club');
   await setActive(false);assert.deepEqual(await roster(),{add:0,closed:'Zapisy do tego turnieju są zamknięte.',edit:1,remove:1},'deactivated: no new entry offered, corrections and withdrawals stay');
+  assert.deepEqual(await database(),{register:0,edit:open.edit},'deactivated: no "Zgłoś" in the database, the profiles stay editable');
+  await page.evaluate(()=>{sessionStorage.setItem('matdraw.activeTournament','t-autumn-2026');});
+  assert.equal((await database()).register,open.edit,'another tournament with open entries: "Zgłoś" is back');
+  await page.evaluate(()=>{sessionStorage.setItem('matdraw.activeTournament','qa-closed');});await roster();
   await page.click('[data-action="remove-entry"][data-id="qa-club-a"]');await page.click('[data-action="confirm-remove-entry"]');
   await page.waitForFunction(()=>!document.querySelector('[data-action="remove-entry"][data-id="qa-club-a"]'));
   assert.equal(await page.evaluate(()=>JSON.parse(localStorage.getItem('matdraw.workspace.v2')).tournaments.find(t=>t.id==='qa-closed').entries.length),0,'the withdrawal went through');
