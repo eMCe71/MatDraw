@@ -189,6 +189,8 @@ export default {
  'Wyłącz rolę organizatora':'Turn the organizer role off',
  'Po włączeniu strona odświeży się i pojawią się narzędzia organizatora.':'After you turn it on, the page reloads with the organizer tools.',
  'Nie masz jeszcze profilu zawodnika. Dodaj go, aby zgłaszać siebie albo swoje dziecko do turniejów.':'You have no athlete profile yet. Add one to enter yourself or your child in tournaments.',
+ 'Nie masz jeszcze profilu zawodnika.':'You have no athlete profile yet.',
+ 'Role są dostępne po otwarciu rejestracji.':'Roles become available once sign-up opens.',
  'Uzupełnij dane zawodnika':'Add athlete details',
  'Zapisz dane zawodnika':'Save athlete details',
  'Edytuj dane zawodnika':'Edit athlete details',

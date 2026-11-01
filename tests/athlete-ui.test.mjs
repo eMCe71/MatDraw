@@ -194,6 +194,13 @@ test('call to action in a member preview: add data, enter, entered, blocked, una
  assert.deepEqual(data.ctaFor({open:[{id:'o',profiles:[]}]},'o',{athlete:false}),{kind:'add'});
  assert.equal(data.ctaFor({open:[{id:'o',profiles:[]}]},'off',{athlete:false}),null,'open, but without self-entries: no call to action');
  assert.equal(data.ctaFor(null,'o',{athlete:false}),null,'no open list (the request failed): no call to action');
+ // Roles closed (me.features.rolesOpen false, contract (a)): no "add athlete data" for a member without a profile; an athlete is unchanged.
+ assert.equal(data.ctaFor({open:[{id:'o',profiles:[]}]},'o',{athlete:false,rolesOpen:false}),null,'roles closed: no "add athlete data"');
+ assert.deepEqual(data.ctaFor(view,'o',{athlete:true,rolesOpen:false}),{kind:'enter',profileId:'p1'},'an existing athlete still enters');
+ const none=String(flow.startsHtml({profiles:[],entries:[],withdrawn:[],open:[]},{today:TODAY,canAdd:false}));
+ assert.doesNotMatch(none,/add=1|Dodaj dane zawodnika/,'#starts without a profile while roles are closed: no add link');assert.match(none,/Role są dostępne po otwarciu rejestracji\./);
+ assert.match(String(flow.startsHtml({profiles:[],entries:[],withdrawn:[],open:[]},{today:TODAY})),/href="#profile\?tab=roles&amp;add=1">Dodaj dane zawodnika</);
+ assert.equal(Client.demoAccount('demo-organizer').features.rolesOpen,true,'the static demo reports rolesOpen true');
  assert.deepEqual(data.ctaFor(view,'o',{athlete:true}),{kind:'enter',profileId:'p1'});
  assert.deepEqual(data.ctaFor(view,'x',{athlete:true}),{kind:'entered',profileId:'p1',canEdit:true});
  assert.deepEqual(data.ctaFor(view,'m',{athlete:true}),{kind:'blocked',reason:'minor-untrusted'});

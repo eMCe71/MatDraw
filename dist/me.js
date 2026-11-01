@@ -3,7 +3,7 @@
  * prompt (402). A server without the me route (404) means community features are off, without an error message.
  * Demo mode: the demo accounts are staff/free with complete fictional profiles; edits stay in localStorage. The role
  *   fields have the server's shapes (PLAN-REJESTRACJA-ROLE §8.1, §8.2): user.caps, athletes, features.signupMode ('off':
- *   no sign-up in the demo), features.selfEntry and features.pendingOrganizers for the Administrator (Client.demoAccount; Client.demoActor gives the same caps to the workspace view).
+ *   no sign-up in the demo), features.rolesOpen (true: the demo members may take roles), features.selfEntry and features.pendingOrganizers for the Administrator (Client.demoAccount; Client.demoActor gives the same caps to the workspace view).
  * Sign-out on a shared device: purgeSession() clears per-tab drafts and tells other tabs ('reset' on the BroadcastChannel). */
 import {registry} from './registry.js';
 import * as Client from './client.js';
@@ -63,6 +63,9 @@ export const getMe=()=>me;
 /** fn(me) after every change; returns an unsubscribe function. */
 export function onMe(fn){listeners.add(fn);return()=>listeners.delete(fn);}
 export const canPost=()=>!!me?.access?.canPost;
+/** Whether members may gain roles now (features.rolesOpen: an athlete profile or the organizer role, effective sign-up mode not
+ * 'off'); a server without the field answers by its signupMode (a missing mode counts as open). The static demo reports true. */
+export function rolesOpen(m=me){const f=m?.features||{};return typeof f.rolesOpen==='boolean'?f.rolesOpen:f.signupMode!=='off';}
 export const access=()=>me?.access||null;
 /** Whether the server has community features (false after a 404 on me). */
 export const available=()=>!disabled;
@@ -86,4 +89,4 @@ registry.on('logout',()=>{forget();});
 registry.on('payment-required',()=>{loadMe({force:true});});
 try{document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible'&&me&&Date.now()-loadedAt>=REFRESH_MS)loadMe({force:true});});}catch{}
 
-export const meState={loadMe,getMe,onMe,canPost,access,available,personKey,purgeSession,saveDemoProfile,demoProfileKey};
+export const meState={loadMe,getMe,onMe,canPost,rolesOpen,access,available,personKey,purgeSession,saveDemoProfile,demoProfileKey};

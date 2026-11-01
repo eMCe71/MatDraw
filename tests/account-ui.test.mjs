@@ -448,6 +448,32 @@ test('"Role" tab states: organizer on, off and blocked (with the support address
  assert.match(src,/athleteApi\('athlete-save',\{\.\.\.\(st\.f\.id\?\{id:st\.f\.id\}:\{\}\),\.\.\.athleteBody\(st\.f\)\}\)/);
  for(const lang of ['pl','en'])inLanguage(lang,()=>{for(const me of [memberMe(),memberMe({organizer:true,athlete:true},[ZOSIA]),memberMe({organizerBlocked:true},[{...ZOSIA,archived:true}])])assert.doesNotMatch(view(me),lang==='en'?/[ąćęłńśźż]/:/\[object|undefined/,lang);});
 });
+test('roles closed (me.features.rolesOpen false, contract (a)): no Role tab without a role; with a role nothing new can be turned on',async()=>{
+ const closed=(caps,athletes=[],features={rolesOpen:false,signupMode:'off'})=>({...memberMe(caps,athletes),features});
+ const {rolesOpen}=await import('../dist/me.js');
+ // The flag wins; a server without it answers by signupMode ('off' closes, anything else or nothing opens).
+ assert.equal(rolesOpen({features:{rolesOpen:false,signupMode:'free'}}),false);assert.equal(rolesOpen({features:{rolesOpen:true,signupMode:'off'}}),true);
+ assert.equal(rolesOpen({features:{signupMode:'off'}}),false);assert.equal(rolesOpen({features:{signupMode:'paid'}}),true);assert.equal(rolesOpen({features:{}}),true);assert.equal(rolesOpen(null),true);
+ // The tab: hidden for a member with no role, shown for one with a role (also a blocked organizer or an archived profile), never for staff.
+ assert.equal(flow.showsRoles(closed()),false,'no role, roles closed: no tab');
+ assert.equal(flow.showsRoles(memberMe()),true,'no role, roles open (no flag, no signupMode): the tab');
+ assert.equal(flow.showsRoles({...memberMe(),features:{signupMode:'off'}}),false,'a missing flag follows signupMode');
+ for(const me of [closed({organizer:true}),closed({organizerBlocked:true}),closed({},[{...ZOSIA,archived:true}]),closed({athlete:true},[ZOSIA])])assert.equal(flow.showsRoles(me),true,JSON.stringify(me.user.caps));
+ assert.equal(flow.showsRoles({user:{role:'admin',caps:{}},features:{rolesOpen:true}}),false);
+ // With a role: the organizer switch cannot be turned on (disabled, explained); turning it off still works; no first athlete profile.
+ let html=String(flow.rolesView(closed({},[ZOSIA])));
+ assert.match(html,/data-acct-act="organizer-toggle" data-on="true" disabled aria-describedby="acct-roles-closed-org">Włącz rolę organizatora/);
+ assert.match(html,/id="acct-roles-closed-org">Role są dostępne po otwarciu rejestracji\./);
+ for(const act of ['athlete-edit','athlete-archive','athlete-forget'])assert.match(html,new RegExp('data-acct-act="'+act+'"'),'the own profile stays manageable: '+act);
+ html=String(flow.rolesView(closed({organizer:true})));
+ assert.match(html,/data-acct-act="organizer-toggle" data-on="false">Wyłącz rolę organizatora/,'turning the role off is not blocked');
+ assert.doesNotMatch(html,/athlete-add/,'no "add athlete" while roles are closed');assert.match(html,/Nie masz jeszcze profilu zawodnika\.<\/p><p class="acct-hint">Role są dostępne po otwarciu rejestracji\./);
+ assert.equal(flow.rolesState(closed({organizer:true})).canAdd,false,'#profile?tab=roles&add=1 does not open the form');
+ assert.equal(inLanguage('en',()=>String(flow.rolesView(closed({organizer:true})))).includes('Roles become available once sign-up opens.'),true);
+ // Open: unchanged.
+ html=String(flow.rolesView({...memberMe(),features:{rolesOpen:true,signupMode:'off'}}));
+ assert.match(html,/data-acct-act="athlete-add"/);assert.doesNotMatch(html,/ disabled/);
+});
 test('banners and offers for the roles: view-only banner for organizers and athletes, join card, athlete CTA of open self-entry tournaments',()=>{
  const me=(caps,access={full:false,state:'none'})=>({user:{role:'member',caps},access,billing:{enabled:true,enforce:true}});
  assert.deepEqual(boot.bannerInfo(me({organizer:true})),{kind:'blocked',until:null,member:'organizer'});

@@ -18,7 +18,7 @@
  * Every value from the API reaches the DOM through h`…`/setHtml or textContent (plan §5.9). Form ids carry the acct- prefix. */
 import {registry,h,setHtml} from './registry.js';
 import * as Client from './client.js';
-import {getMe,loadMe,saveDemoProfile,purgeSession} from './me.js';
+import {getMe,loadMe,saveDemoProfile,purgeSession,rolesOpen} from './me.js';
 import {t as T,getLanguage,translateMessage} from './i18n.js';
 import {COUNTRIES,SPORTS,SPORTS_MAX,CLUB_MAX,validateUsername,normalizeUsername,validateName,suggestUsernames,slugName,cleanText} from './profile-data.js';
 import {openCrop} from './avatar-crop.js';
@@ -173,11 +173,15 @@ export function roleName(me){
  return T('Członek');
 }
 /** The state of the "Role" tab (§10.2, §17) from me: organizer {on, blocked}, the account's athlete profiles and whether another
- * one may be added (one profile per account: only while there is none, archived ones included). */
+ * one may be added (one profile per account: only while there is none, archived ones included). open: members may gain roles now
+ * (features.rolesOpen, the cross-group contract (a)); while it is false nothing new is turned on (no organizer role, no first athlete
+ * profile), what the account has stays manageable. hasRole: the organizer role (also a blocked one) or an athlete profile. */
 export function rolesState(me){
- const caps=me?.user?.caps||{},athletes=Array.isArray(me?.athletes)?me.athletes.filter(a=>a&&typeof a.profileId==='string'):[];
- return {organizer:{on:!!caps.organizer,blocked:!!caps.organizerBlocked},athletes,canAdd:athletes.length<ATHLETES_PER_ACCOUNT};
+ const caps=me?.user?.caps||{},athletes=Array.isArray(me?.athletes)?me.athletes.filter(a=>a&&typeof a.profileId==='string'):[],open=rolesOpen(me);
+ return {organizer:{on:!!caps.organizer,blocked:!!caps.organizerBlocked},athletes,open,hasRole:!!caps.organizer||!!caps.organizerBlocked||athletes.length>0,canAdd:open&&athletes.length<ATHLETES_PER_ACCOUNT};
 }
+/** The "Role" tab is shown to members while roles are open, and always to a member who already has a role. */
+export const showsRoles=me=>{if(me?.user?.role!=='member')return false;const r=rolesState(me);return r.open||r.hasRole;};
 
 // ---- State ----
 const ui=()=>registry.use('ui');
@@ -472,7 +476,7 @@ async function openStripe(button,route,origin){
 
 // ---- Profile page ----
 function ensureDraft(m){if(!S.draft||S.draftFor!==m.user?.id){S.draft=newFields(m.profile,languages());S.draftFor=m.user?.id;}}
-const TABS=m=>['profile',...(m?.user?.role==='member'?['roles']:[]),'subscription','security'];
+const TABS=m=>['profile',...(showsRoles(m)?['roles']:[]),'subscription','security'];
 const tabOf=m=>{if(m.profile?.mustChangePassword)return 'security';const t=registry.parseRoute(location.hash).params.get('tab');return TABS(m).includes(t)?t:'profile';};
 function profileTab(m){
  const f=S.draft,mode=m.features?.avatars;
@@ -502,12 +506,13 @@ export function rolesView(m,st=newRoles()){
  const r=rolesState(m),support=supportAddress(),org=r.organizer;
  const orgBlock=h`<section class="acct-block acct-role" aria-labelledby="acct-role-org"><h2 id="acct-role-org">${T('Organizator turnieju')}</h2><p class="acct-lead">${T('Tworzysz własne turnieje, dodajesz zawodników i prowadzisz kontrolę startową. Widzisz tylko swoje turnieje.')}</p>
 ${org.blocked?h`<div class="notice acct-role-blocked" role="status">${icon('lock')}<p>${T('Administrator wyłączył tę rolę.')} ${support?h`${T('Napisz na')} <a class="acct-link" href="mailto:${support}">${support}</a>.`:''}</p></div>`
- :h`<p class="acct-role-state"><span class="badge ${org.on?'success':'neutral'}">${org.on?T('Rola włączona'):T('Rola wyłączona')}</span></p><div class="form-error" role="alert"></div><div class="acct-actions"><button type="button" class="btn ${org.on?'secondary':'primary'}" data-acct-act="organizer-toggle" data-on="${org.on?'false':'true'}">${org.on?T('Wyłącz rolę organizatora'):T('Włącz rolę organizatora')}</button></div>${org.on?'':h`<p class="acct-hint">${T('Po włączeniu strona odświeży się i pojawią się narzędzia organizatora.')}</p>`}`}</section>`;
+ :h`<p class="acct-role-state"><span class="badge ${org.on?'success':'neutral'}">${org.on?T('Rola włączona'):T('Rola wyłączona')}</span></p><div class="form-error" role="alert"></div><div class="acct-actions"><button type="button" class="btn ${org.on?'secondary':'primary'}" data-acct-act="organizer-toggle" data-on="${org.on?'false':'true'}"${!org.on&&!r.open?h` disabled aria-describedby="acct-roles-closed-org"`:''}>${org.on?T('Wyłącz rolę organizatora'):T('Włącz rolę organizatora')}</button></div>${org.on?'':r.open?h`<p class="acct-hint">${T('Po włączeniu strona odświeży się i pojawią się narzędzia organizatora.')}</p>`:h`<p class="acct-hint" id="acct-roles-closed-org">${T('Role są dostępne po otwarciu rejestracji.')}</p>`}`}</section>`;
  let body;
  if(st.mode==='edit'&&st.f){
   body=h`<form id="acct-athlete-form" class="acct-form" novalidate data-acct-athlete>${athleteFieldsHtml(st.f,{id:'acct-ra',clubs:clubList()})}<div class="form-error" role="alert">${st.error}</div><div class="acct-actions"><button type="button" class="btn secondary" data-acct-act="athlete-cancel">${T('Anuluj')}</button><button type="submit" class="btn primary">${T('Zapisz dane zawodnika')}</button></div></form>`;
  }else if(!r.athletes.length){
-  body=h`<p class="acct-lead">${T('Nie masz jeszcze profilu zawodnika. Dodaj go, aby zgłaszać siebie albo swoje dziecko do turniejów.')}</p>${st.error?h`<div class="form-error" role="alert">${st.error}</div>`:h`<div class="form-error" role="alert"></div>`}<div class="acct-actions"><button type="button" class="btn primary" data-acct-act="athlete-add">${icon('plus')} ${T('Uzupełnij dane zawodnika')}</button></div>`;
+  body=!r.open?h`<p class="acct-lead">${T('Nie masz jeszcze profilu zawodnika.')}</p><p class="acct-hint">${T('Role są dostępne po otwarciu rejestracji.')}</p>`
+   :h`<p class="acct-lead">${T('Nie masz jeszcze profilu zawodnika. Dodaj go, aby zgłaszać siebie albo swoje dziecko do turniejów.')}</p>${st.error?h`<div class="form-error" role="alert">${st.error}</div>`:h`<div class="form-error" role="alert"></div>`}<div class="acct-actions"><button type="button" class="btn primary" data-acct-act="athlete-add">${icon('plus')} ${T('Uzupełnij dane zawodnika')}</button></div>`;
  }else{
   body=h`<ul class="acct-athletes">${r.athletes.map(a=>h`<li class="acct-athlete"><span class="acct-avatar">${icon('user')}</span><div class="acct-athlete-text"><strong>${a.name}</strong><span>${relationName(a.relation)}${a.archived?h` · <span class="badge neutral">${T('Zarchiwizowany')}</span>`:''}</span></div><div class="acct-athlete-actions"><button type="button" class="btn secondary" data-acct-act="athlete-edit" data-id="${a.profileId}"${st.loading?h` disabled`:''}>${T('Edytuj dane zawodnika')}</button><button type="button" class="btn secondary" data-acct-act="athlete-archive" data-id="${a.profileId}" data-archived="${a.archived?'false':'true'}">${a.archived?T('Przywróć profil zawodnika'):T('Archiwizuj profil zawodnika')}</button><button type="button" class="btn acct-danger-btn" data-acct-act="athlete-forget" data-id="${a.profileId}">${T('Usuń dane zawodnika')}</button></div></li>`)}</ul><div class="form-error" role="alert">${st.error}</div>${m.user?.caps?.athlete&&registry.page('starts')?h`<p><a class="acct-link" href="#starts" data-page="starts">${T('Zobacz moje starty')} ${icon('arrow')}</a></p>`:''}`;
  }

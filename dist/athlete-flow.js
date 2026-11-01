@@ -11,7 +11,7 @@
  * only; every value from the API is escaped by h. Pure texts for the tests: statusText, positionText, withdrawnText, noticeTexts. */
 import {registry,h,setHtml} from './registry.js';
 import * as Client from './client.js';
-import {getMe} from './me.js';
+import {getMe,rolesOpen} from './me.js';
 import {t as T,locale,ruleLabel,ruleText,translateMessage,gradeLabel,gradeName} from './i18n.js';
 import {EVENTS} from './engine.js';
 import {warsawToday} from './guest-view.js';
@@ -119,9 +119,10 @@ function openCard(t,profile,selfEntry){
  return h`<article class="ath-open" aria-labelledby="${title}"><div class="ath-open-main"><h3 id="${title}">${t.name}</h3><p class="ath-when">${icon('calendar')}<span>${fmtDate(t.date)}</span>${t.city?h`<span aria-hidden="true">·</span>${icon('pin')}<span>${t.city}</span>`:''}</p>${t.community?h`<div class="ath-marks">${communityMarks(t)}${t.organizer?.n?h`<span class="ath-organizer">${organizerText(t.organizer.n)}</span>`:''}</div>`:''}</div><div class="ath-open-side">${action}<a class="text-btn ath-preview-link" href="#guest?t=${encodeURIComponent(t.id)}" aria-label="${T('Podgląd turnieju: {name}',{name:t.name})}">${icon('eye')}<span>${T('Podgląd turnieju')}</span></a></div></article>`;
 }
 /** The content of #starts for a view (SafeHtml). */
-export function startsHtml(view,{today=warsawToday(),selfEntry=true}={}){
+export function startsHtml(view,{today=warsawToday(),selfEntry=true,canAdd=true}={}){
  const p=profileOf(view);
- if(!p)return h`<section class="panel empty-state">${ui()?.emptyMascot?.()??''}<h3>${T('Nie masz jeszcze danych zawodnika.')}</h3><p>${T('Dodaj je w zakładce „Role” swojego konta, aby zgłaszać się do turniejów.')}</p><a class="btn primary" href="#profile?tab=roles&amp;add=1">${T('Dodaj dane zawodnika')}</a></section>`;
+ // No athlete profile: the way to add one, or (roles closed, me.features.rolesOpen false) why there is none.
+ if(!p)return h`<section class="panel empty-state">${ui()?.emptyMascot?.()??''}<h3>${T('Nie masz jeszcze danych zawodnika.')}</h3>${canAdd?h`<p>${T('Dodaj je w zakładce „Role” swojego konta, aby zgłaszać się do turniejów.')}</p><a class="btn primary" href="#profile?tab=roles&amp;add=1">${T('Dodaj dane zawodnika')}</a>`:h`<p>${T('Role są dostępne po otwarciu rejestracji.')}</p>`}</section>`;
  const entries=sortEntries((view.entries||[]).filter(x=>x.profileId===p.id),today),gone=(view.withdrawn||[]).filter(w=>w.profileId===p.id),open=view.open||[];
  return h`${switcher(view,p)}${profileCard(p)}
 <section class="ath-section" aria-labelledby="ath-entries-title"><div class="ath-section-head"><h2 id="ath-entries-title">${T('Moje zgłoszenia')}</h2></div>${entries.length?h`<div class="ath-list">${entries.map(x=>entryCard(x,p,today))}</div>`:h`<div class="panel ath-empty"><p><strong>${T('Nie masz jeszcze zgłoszeń.')}</strong> ${open.length?T('Wybierz turniej z listy „Otwarte turnieje” i zgłoś się.'):T('Gdy organizator otworzy zapisy, turniej pojawi się poniżej.')}</p></div>`}</section>
@@ -129,14 +130,14 @@ ${gone.length?h`<section class="ath-section" aria-labelledby="ath-gone-title"><d
 <section class="ath-section" aria-labelledby="ath-open-title"><div class="ath-section-head"><h2 id="ath-open-title">${T('Otwarte turnieje')}</h2><span>${T('Zgłoszenia przyjmowane przez MatBravo')}</span></div>${open.length?h`<div class="panel ath-open-list">${open.map(t=>openCard(t,p,selfEntry))}</div>`:h`<div class="panel ath-empty"><p>${T('Teraz żaden turniej nie przyjmuje zgłoszeń od zawodników.')}</p></div>`}</section>`;
 }
 const features=()=>getMe()?.features||{};
-const paintKey=view=>JSON.stringify([view,selected,getLocaleKey(),features().selfEntry]);
+const paintKey=view=>JSON.stringify([view,selected,getLocaleKey(),features().selfEntry,rolesOpen(getMe())]);
 const getLocaleKey=()=>{try{return locale();}catch{return '';}};
 // What #starts shows now: the root element and the key of its view, kept here and never in the DOM (the view holds the child's data).
 let painted={root:null,key:null};
 function paintStarts(view,{force=false}={}){
  const root=document.querySelector('[data-starts-root]');if(!root)return;
  const key=paintKey(view);if(!force&&painted.root===root&&painted.key===key)return;
- setHtml(root,startsHtml(view,{selfEntry:features().selfEntry!==false}));painted={root,key};root.removeAttribute('aria-busy');
+ setHtml(root,startsHtml(view,{selfEntry:features().selfEntry!==false,canAdd:rolesOpen(getMe())}));painted={root,key};root.removeAttribute('aria-busy');
 }
 function paintError(error){
  const root=document.querySelector('[data-starts-root]');if(!root)return;
@@ -181,11 +182,11 @@ let ctaTicket=0;
 /** After 'painted' {view:'guest', memberPreview:true}: fills [data-athlete-cta]. #guest?t=…&enter=1 opens the entry window once.
  * A member without an athlete profile is asked for the athlete's data only for a tournament on the open list (ctaFor). */
 export async function mountCta(mount){
- const id=mount.dataset.tournamentId,ticket=String(++ctaTicket),u=signedIn(),athlete=athleteUser(u),selfEntry=features().selfEntry!==false;mount.dataset.athTicket=ticket;
+ const id=mount.dataset.tournamentId,ticket=String(++ctaTicket),u=signedIn(),athlete=athleteUser(u),selfEntry=features().selfEntry!==false,open=rolesOpen(getMe());mount.dataset.athTicket=ticket;
  if(!id||!u)return;
  let view=null;
- if(athlete||selfEntry&&u.role==='member'){try{view=athlete?await loadView():await offerView(u);}catch(error){if(error?.status===401){ui()?.handleError?.(error);return;}view=null;}if(!view)return;}
- let state=ctaFor(view,id,{athlete,selfEntry}),reason='closed';
+ if(athlete||selfEntry&&open&&u.role==='member'){try{view=athlete?await loadView():await offerView(u);}catch(error){if(error?.status===401){ui()?.handleError?.(error);return;}view=null;}if(!view)return;}
+ let state=ctaFor(view,id,{athlete,selfEntry,rolesOpen:open}),reason='closed';
  if(state?.kind==='unavailable')reason=unavailableReason(await publicInfo(id),warsawToday(),{truncated:openTruncated(view)});
  if(!mount.isConnected||mount.dataset.athTicket!==ticket)return;
  setHtml(mount,ctaHtml(state,id,{view,reason}));

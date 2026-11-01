@@ -15,7 +15,7 @@ const {registry}=await import('../dist/registry.js');
 const Me=await import('../dist/me.js');
 
 const USER=['id','clubId','email','role','active','caps'],CAPS=['organizer','organizerBlocked','organizerTrusted','athlete'];
-const FEATURES=['signup','avatars','chat','signupMode','selfEntry'],TOP=['user','profile','access','billing','features','athletes'];
+const FEATURES=['signup','avatars','chat','signupMode','selfEntry','rolesOpen'],TOP=['user','profile','access','billing','features','athletes'];
 const NO_CAPS={organizer:false,organizerBlocked:false,organizerTrusted:false,athlete:false};
 let ws=null;registry.provide('ui',{getWorkspace:()=>ws});
 const meOf=async id=>{const u=JSON.parse(localStorage.getItem(Client.dataKey)).users.find(x=>x.id===id);ws={user:{id:u.id,clubId:u.clubId,email:u.email,role:u.role,active:true}};return Me.loadMe({force:true});};
@@ -29,7 +29,7 @@ test('demo me: the server shapes of the role fields for staff, the organizer and
   assert.deepEqual(Object.keys(m).filter(k=>k!=='demo'),TOP,id);
   assert.deepEqual(Object.keys(m.user),USER,id);assert.deepEqual(Object.keys(m.user.caps),CAPS,id);
   assert.deepEqual(Object.keys(m.features),m.user.role==='admin'?[...FEATURES,'pendingOrganizers']:FEATURES,id);
-  assert.equal(m.features.signupMode,'off');assert.equal(m.features.signup,false);assert.equal(m.features.selfEntry,true);
+  assert.equal(m.features.signupMode,'off');assert.equal(m.features.signup,false);assert.equal(m.features.selfEntry,true);assert.equal(m.features.rolesOpen,true);
   assert.ok(Array.isArray(m.athletes));
  }
  for(const id of ['demo-admin','demo-editor','demo-club']){assert.deepEqual(out[id].user.caps,NO_CAPS,'staff get no member roles: '+id);assert.deepEqual(out[id].athletes,[]);}
@@ -50,8 +50,8 @@ test('demo me: the server shapes of the role fields for staff, the organizer and
 test('demo public-config: the server keys, sign-up off, no personal data',async()=>{
  const r=await Client.publicGet({route:'public-config'});
  assert.equal(r.status,200);
- assert.deepEqual(Object.keys(r.data),['signup','signupMode','billing','amounts','avatars','support','roles']);
- assert.deepEqual(r.data,{signup:false,signupMode:'off',billing:false,amounts:{pln:899,usd:299},avatars:false,support:null,roles:true});
+ assert.deepEqual(Object.keys(r.data),['signup','signupMode','billing','amounts','avatars','support','roles','rolesOpen']);
+ assert.deepEqual(r.data,{signup:false,signupMode:'off',billing:false,amounts:{pln:899,usd:299},avatars:false,support:null,roles:true,rolesOpen:true});
  assert.ok(!/@/.test(JSON.stringify(r.data)));
  r.data.signup=true;assert.equal((await Client.publicGet({route:'public-config'})).data.signup,false,'a fresh object each time');
 });
