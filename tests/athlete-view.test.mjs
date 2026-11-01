@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
 import {initialWorkspace,execute} from '../dist/workspace.js';
 import {classify} from '../dist/engine.js';
-import {athleteView,projectAthleteView,position,recentFrom,publicClubs} from '../dist/athlete-view.js';
+import {athleteView,projectAthleteView,position,recentFrom,publicClubs,OPEN_LIMIT} from '../dist/athlete-view.js';
 import {bracket} from '../dist/guest-view.js';
 const php=process.env.PHP_BIN;const skip=!php;
 function bridge(input){const r=spawnSync(php,['tests/php-bridge-athlete.php'],{input:JSON.stringify(input),encoding:'utf8',maxBuffer:50_000_000});assert.equal(r.status,0,r.stderr||r.stdout);return JSON.parse(r.stdout);}
@@ -168,6 +168,20 @@ test('project() of hand-made inputs (build() shape: own entries only in old tour
  assert.deepEqual(js.withdrawn.map(w=>w.by),['system'],'only own profiles and known kinds');
  assert.deepEqual(js.open[0].drawn,['forms|cadet|F|cup|6–3 Cup','forms|junior|F|cup|10–7 Cup']);assert.deepEqual(js.open[0].organizer,{n:'Marta K.'});
  assert.deepEqual(js.open[0].profiles,[{id:'p1',entered:false,blocked:'minor-untrusted'}],'archived profiles are not offered');
+});
+
+test('include (?t= of the athlete route): a qualifying tournament beyond OPEN_LIMIT is appended; others change nothing (PHP = JS)',{skip},()=>{
+ const profiles=[{id:'p1',name:'Ewa Testowa',birthDate:'1990-02-03',sex:'F',weight:60,height:168,gradeType:'cup',grade:5,clubId:'unaffiliated',relation:'self',archived:false,clubRow:null}];
+ const day=n=>new Date(Date.parse(TODAY+'T00:00:00Z')+n*864e5).toISOString().slice(0,10);
+ const t=(id,date,over={})=>({id,name:'Turniej '+id,city:'Opole',date,status:'open',selfEntry:true,hiddenBy:null,createdBy:'s',community:false,trusted:true,entries:[],draws:{},...over});
+ const tournaments=[...Array.from({length:OPEN_LIMIT+2},(_,i)=>t('o'+String(i).padStart(3,'0'),day(1+i))),t('draft',day(99),{status:'draft'}),t('closed',day(99),{status:'closed'}),
+  t('noself',day(99),{selfEntry:false}),t('hidden',day(99),{hiddenBy:'a'}),t('past',day(-1))];
+ const last='o'+String(OPEN_LIMIT+1).padStart(3,'0'),run=include=>{const js=json(projectAthleteView(profiles,tournaments,[],TODAY,{},include));
+  assert.deepEqual(bridge({job:'project',profiles,tournaments,withdrawals:[],today:TODAY,organizers:{},include}),js,String(include));return js.open.map(x=>x.id);};
+ const plain=run(null);assert.equal(plain.length,OPEN_LIMIT);assert.ok(!plain.includes(last));
+ assert.deepEqual(run(last),[...plain,last],'the requested tournament comes last, after the nearest ones');
+ for(const id of ['o000','draft','closed','noself','hidden','past','missing'])assert.deepEqual(run(id),plain,id);
+ const db=json(S.db);assert.deepEqual(athleteView(db,{id:'ath'},TODAY,{include:'missing'}),athleteView(db,{id:'ath'},TODAY),'the workspace form takes include too');
 });
 
 test('publicClubs (demo of public-clubs): verified, not merged, without unaffiliated, by Polish name',()=>{

@@ -9,7 +9,9 @@
  * Community tournaments (PLAN-REJESTRACJA-ROLE §5.6; guestTournaments() in workspace.js adds community, trusted and the current
  * club of every entry, like Repository::guestTournaments): sparse summary fields community:true and trusted; guestUpcoming()
  * lists staff and trusted community tournaments only; bracket slots show the current verified club, null for an unverified
- * one, '' for 'unaffiliated'; summary.clubs skips 'unaffiliated'. categoryList() and bracket() serve the athlete view. */
+ * one, '' for 'unaffiliated'; summary.clubs skips 'unaffiliated'. categoryList() and bracket() serve the athlete view.
+ * Self-entries (§7.1, §10.1): guestTournament() adds the sparse field selfEntry:true while the tournament takes them (open,
+ * self-entries on); guestUpcoming() never carries it. */
 import {categories,resolveDraw} from './engine.js';
 
 export const UPCOMING_LIMIT=6;
@@ -21,12 +23,12 @@ export function warsawToday(now=new Date()){
 }
 export const isPublic=(t,today)=>!!t&&STATUSES.includes(t.status)&&typeof t.date==='string'&&t.date>=today;
 const compare=(a,b)=>a<b?-1:a>b?1:0;
-const summary=t=>({id:String(t.id),name:String(t.name),date:String(t.date),city:String(t.city),status:String(t.status),...(t.community?{community:true,trusted:!!t.trusted}:{})});
+const summary=(t,detail=false)=>({id:String(t.id),name:String(t.name),date:String(t.date),city:String(t.city),status:String(t.status),...(t.community?{community:true,trusted:!!t.trusted}:{}),...(detail&&String(t.status)==='open'&&t.selfEntry===true?{selfEntry:true}:{})});
 const listed=t=>!t.community||!!t.trusted;
 
 export function guestUpcoming(tournaments,today,limit=UPCOMING_LIMIT){
  const list=(tournaments||[]).filter(t=>isPublic(t,today)&&listed(t)).sort((a,b)=>compare(a.date,b.date)||compare(String(a.name),String(b.name))||compare(String(a.id),String(b.id)));
- return {tournaments:list.slice(0,limit).map(summary)};
+ return {tournaments:list.slice(0,limit).map(t=>summary(t))};
 }
 
 /** "Jan Kowalski" → "J. K."; first given name + last surname; a hyphenated surname keeps both parts ("K.-N."). */
@@ -68,5 +70,5 @@ export function guestTournament(tournaments,id,today){
  const entries=Array.isArray(t.entries)?t.entries:[],draws=t.draws&&typeof t.draws==='object'?t.draws:{};
  const items=categoryList(entries,draws).map(c=>c.public),brackets=items.filter(c=>c.bracket!==null).length;
  const clubs=new Set(entries.map(e=>String(e.currentClub?.id??e.clubId??e.club??'')).filter(k=>k!=='unaffiliated'));
- return {tournament:summary(t),summary:{entries:entries.length,clubs:clubs.size,categories:items.length,brackets},categories:items};
+ return {tournament:summary(t,true),summary:{entries:entries.length,clubs:clubs.size,categories:items.length,brackets},categories:items};
 }

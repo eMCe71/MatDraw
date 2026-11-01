@@ -1,7 +1,8 @@
 <?php
 // Athlete routes (PLAN-REJESTRACJA-ROLE §6–§8.1): the public club list and a member's own athlete profiles and self-entries.
 //   public-clubs      GET public: verified clubs that are not merged, by name, at most 2000, Cache-Control 300 s
-//   athlete           GET peek, member: AthleteView::build (no workspace, no lock)
+//   athlete           GET peek, member: AthleteView::build (no workspace, no lock); ?t=<tournament id> keeps that tournament in
+//                     the open list when it takes self-entries, also beyond OPEN_LIMIT (the guest preview's "enter" link)
 //   athlete-save      POST session, member: athlete.save (§6.1)                       20/h per account (with athlete-archive)
 //   athlete-archive   POST session, member: athlete.archive {profileId, archived}      20/h (shared)
 //   athlete-forget    POST session, member: athlete.forget {profileId, password}       5/h, password with the login limits
@@ -34,7 +35,9 @@ $correction=static function(RouteContext $ctx):bool{
  $old=$q->fetchColumn();if(!is_string($old))return false;$had=json_decode($old,true)['events']??[];$events=$ctx->input('events');
  return $events===null||(is_array($events)&&is_array($had)&&$events===array_values(array_filter($events,fn($e)=>in_array($e,$had,true))));
 };
-$view=static fn(RouteContext $ctx,array $c):array=>AthleteView::build($ctx->pdo(),$ctx->user(),date('Y-m-d'),Settings::flags($c));
+$view=static fn(RouteContext $ctx,array $c,?string $include=null):array=>AthleteView::build($ctx->pdo(),$ctx->user(),date('Y-m-d'),Settings::flags($c),$include);
+/** ?t= of the athlete route: a tournament id (the shape of every route's ids), else nothing (an invalid value is ignored, never echoed). */
+$include=static function(RouteContext $ctx):?string{$t=$ctx->query('t');return is_string($t)&&preg_match('/^[A-Za-z0-9_-]{1,40}$/D',$t)?$t:null;};
 $caps=static fn(RouteContext $ctx):array=>Actors::of($ctx->pdo(),$ctx->user())['caps'];
 return [
  'public-clubs'=>['method'=>'GET','auth'=>'public','handler'=>function(RouteContext $ctx):array{
@@ -42,7 +45,7 @@ return [
   header('Cache-Control: public, max-age=300');
   return ['clubs'=>array_map(fn($r)=>['id'=>$r['id'],'name'=>$r['name']],$q->fetchAll(PDO::FETCH_ASSOC)),'unaffiliated'=>'unaffiliated'];
  }],
- 'athlete'=>['method'=>'GET','auth'=>'peek','user'=>'member','handler'=>fn(RouteContext $ctx):array=>$view($ctx,$config($ctx))],
+ 'athlete'=>['method'=>'GET','auth'=>'peek','user'=>'member','handler'=>fn(RouteContext $ctx):array=>$view($ctx,$config($ctx),$include($ctx))],
  'athlete-save'=>['method'=>'POST','auth'=>'session','user'=>'member','handler'=>function(RouteContext $ctx)use($config,$fields,$run,$saveLimit,$view,$caps):array{
   $c=$config($ctx);$saveLimit($ctx,$c);
   $r=$run($ctx,$c,Actors::of($ctx->pdo(),$ctx->user()),'athlete.save',$fields($ctx->body,['id','name','birthDate','sex','weight','height','gradeType','grade','club','relation']));

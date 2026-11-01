@@ -16,6 +16,8 @@ namespace MatDraw;
  * exactly the five fields); upcoming() lists only staff tournaments and trusted community ones (the others are public
  * under their own address only); a bracket slot shows the current name of a verified club (after a merge: the target),
  * null for an unverified club and '' for 'unaffiliated'; summary.clubs does not count 'unaffiliated'.
+ * Self-entries (§7.1, §10.1): tournament() adds the sparse field selfEntry:true while the tournament takes them (open,
+ * self-entries on), so the preview offers "Załóż konto zawodnika i zgłoś się" only there; upcoming() never carries it.
  * categoryList() and bracket() are public for AthleteView (same codes and order as tournament()).
  * dist/guest-view.js mirrors this class for the browser demo; tests/php.test.mjs checks that both agree.
  */
@@ -25,7 +27,7 @@ final class GuestView {
  private const PREFIX=['forms'=>'UF','soft'=>'SO','hogo'=>'HG','semi'=>'SC','light'=>'LC','special'=>'TS','power'=>'SI'];
 
  public static function visible(array $t,string $today):bool{return in_array($t['status']??null,self::STATUSES,true)&&is_string($t['date']??null)&&$t['date']>=$today;}
- private static function summary(array $t):array{$s=['id'=>(string)$t['id'],'name'=>(string)$t['name'],'date'=>(string)$t['date'],'city'=>(string)$t['city'],'status'=>(string)$t['status']];if(!empty($t['community'])){$s['community']=true;$s['trusted']=!empty($t['trusted']);}return $s;}
+ private static function summary(array $t,bool $detail=false):array{$s=['id'=>(string)$t['id'],'name'=>(string)$t['name'],'date'=>(string)$t['date'],'city'=>(string)$t['city'],'status'=>(string)$t['status']];if(!empty($t['community'])){$s['community']=true;$s['trusted']=!empty($t['trusted']);}if($detail&&$s['status']==='open'&&($t['selfEntry']??false)===true)$s['selfEntry']=true;return $s;}
  private static function listed(array $t):bool{return empty($t['community'])||!empty($t['trusted']);}
 
  public static function upcoming(array $tournaments,string $today,int $limit=self::LIMIT):array{
@@ -72,7 +74,7 @@ final class GuestView {
   $entries=array_values(is_array($t['entries']??null)?$t['entries']:[]);$draws=is_array($t['draws']??null)?$t['draws']:[];
   $categories=array_column(self::categoryList($entries,$draws),'public');$brackets=count(array_filter($categories,fn($c)=>$c['bracket']!==null));
   $clubs=[];foreach($entries as $e){$k=(string)($e['currentClub']['id']??$e['clubId']??$e['club']??'');if($k!=='unaffiliated')$clubs[$k]=true;}
-  return ['tournament'=>self::summary($t),'summary'=>['entries'=>count($entries),'clubs'=>count($clubs),'categories'=>count($categories),'brackets'=>$brackets],'categories'=>$categories];
+  return ['tournament'=>self::summary($t,true),'summary'=>['entries'=>count($entries),'clubs'=>count($clubs),'categories'=>count($categories),'brackets'=>$brackets],'categories'=>$categories];
  }
  /**
   * Categories of a tournament in public order (the order and codes of categories() in dist/engine.js: event, then size,

@@ -11,7 +11,9 @@ class AppError extends \RuntimeException{public function __construct(string $mes
  * created tournaments), flags {organizers:'on'|'paused', trustRequired:bool} (Settings::flags), withdrawals (tombstones
  * written by this request) and staffRev.
  * Visibility (§5.2): community(t) = creator not staff; trusted(t) = staff tournament, or a creator confirmed by the
- * Administrator and not blocked, or any organizer not blocked when trustRequired is false (§17). A member gets the same
+ * Administrator and not blocked, or any organizer not blocked when trustRequired is false (§17). The Administrator's view of
+ * a community tournament whose creator's organizer role is blocked carries the sparse organizerBlocked:true (F3: the card
+ * offers no "Potwierdź organizatora" then). A member gets the same
  * 404 for a missing and an unseen tournament ('Turniej nie jest dostępny.') or profile ('Zawodnik nie istnieje.').
  * Revisions (§5.8): stale() rejects a command only when the objects it touches changed after the client's revision;
  * execute() stamps every changed tournament and profile (rev) and staff accounts or existing clubs (staffRev).
@@ -42,12 +44,15 @@ final class Domain {
  public static function staffProfile(?array $db,array $a):bool{return $db===null?($a['staff']??false)===true:($a['ownerId']??null)===null&&isset(self::staffIds($db)[$a['createdBy']??'']);}
  public static function community(?array $db,array $t):bool{return $db===null?!empty($t['community']):!isset(self::staffIds($db)[$t['createdBy']??'']);}
  public static function trustRequired(array $db):bool{return ($db['flags']['trustRequired']??true)!==false;}
+ /** {trusted, blocked} of a member creator, or null: Repository::load() lists members who created tournaments; the actor of the request (also before his first tournament) and the demo hold the fields themselves. */
+ private static function organizerState(array $db,mixed $id):?array {
+  if(!is_string($id))return null;$o=$db['organizers'][$id]??null;
+  if($o===null)foreach($db['users'] as $u)if($u['id']===$id&&($u['role']??null)==='member')$o=['trusted'=>($u['organizerTrustedAt']??null)!==null,'blocked'=>($u['organizerBlockedAt']??null)!==null];
+  return $o;
+ }
  /** A member creator confirmed by the Administrator and not blocked; with trustRequired=false every creator not blocked (§17). */
  public static function trustedOrganizer(array $db,mixed $id):bool {
-  if(!is_string($id))return false;
-  // Repository::load() lists members who created tournaments; the actor of the request (also before his first tournament) and the demo hold the fields themselves.
-  $o=$db['organizers'][$id]??null;
-  if($o===null)foreach($db['users'] as $u)if($u['id']===$id&&($u['role']??null)==='member')$o=['trusted'=>($u['organizerTrustedAt']??null)!==null,'blocked'=>($u['organizerBlockedAt']??null)!==null];
+  $o=self::organizerState($db,$id);
   return $o!==null&&empty($o['blocked'])&&(!empty($o['trusted'])||!self::trustRequired($db));
  }
  public static function trusted(?array $db,array $t):bool{return $db===null?empty($t['community'])||!empty($t['trusted']):!self::community($db,$t)||self::trustedOrganizer($db,$t['createdBy']??null);}
@@ -95,7 +100,7 @@ final class Domain {
    $v=$t;$v['entries']=$entries;$v['draws']=(object)array_map(static function($d){$d['results']=(object)$d['results'];return $d;},$draws);$v['activity']=$activity;
    $v['community']=$community;$v['trusted']=self::trusted($db,$t);$v['selfEntry']=($t['selfEntry']??false)===true;$v['rev']=(int)($t['rev']??0);
    if($manager){$v['hidden']=$hidden;$v['hideReason']=$t['hideReason']??null;}else unset($v['hideReason'],$v['createdAt']);
-   if($admin){$v['hiddenBy']=$t['hiddenBy']??null;$v['hiddenFrom']=$t['hiddenFrom']??null;}else unset($v['hiddenBy'],$v['hiddenFrom']);
+   if($admin){$v['hiddenBy']=$t['hiddenBy']??null;$v['hiddenFrom']=$t['hiddenFrom']??null;if($community&&!empty(self::organizerState($db,$t['createdBy']??null)['blocked']))$v['organizerBlocked']=true;}else unset($v['hiddenBy'],$v['hiddenFrom']);
    if(!$manager&&($community||$role==='member'))unset($v['createdBy']);
    $out['tournaments'][]=$v;
   }

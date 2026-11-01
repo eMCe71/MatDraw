@@ -41,18 +41,18 @@ final class Repository {
  /**
   * Read-only data for GuestView: only tournaments that may be public (not drafts, dated $today or later), without
   * creators, mats or activity; entries and draws only for the one requested tournament. Accounts and the athlete
-  * database are never read here. community/trusted come from the creator's row (§5.6; trusted follows $flags
-  * trustRequired, §17) and every entry gets currentClub {id, name}: the merge target, name null for an unverified club
+  * database are never read here. selfEntry is the tournament's switch (GuestView::tournament shows it while open, F2);
+  * community/trusted come from the creator's row (§5.6; trusted follows $flags trustRequired, §17) and every entry gets currentClub {id, name}: the merge target, name null for an unverified club
   * and '' for 'unaffiliated' (PS-10: snapshots keep the name of the moment of entry, the public view the current one).
   */
  public function guestTournaments(string $today,?string $id=null,?array $flags=null):array {
   $this->pdo->beginTransaction();
   try{
-   $q=$this->pdo->prepare("SELECT t.id,t.name,t.city,t.event_date,t.status,u.role,u.organizer_trusted_at,u.organizer_blocked_at FROM tournaments t LEFT JOIN users u ON u.id=t.created_by WHERE t.status IN ('open','closed','finished') AND t.event_date>=?".($id===null?'':' AND t.id=?').' ORDER BY t.event_date,t.id');
+   $q=$this->pdo->prepare("SELECT t.id,t.name,t.city,t.event_date,t.status,t.self_entry,u.role,u.organizer_trusted_at,u.organizer_blocked_at FROM tournaments t LEFT JOIN users u ON u.id=t.created_by WHERE t.status IN ('open','closed','finished') AND t.event_date>=?".($id===null?'':' AND t.id=?').' ORDER BY t.event_date,t.id');
    $q->execute($id===null?[$today]:[$today,$id]);$list=[];$any=($flags['trustRequired']??true)===false;
    foreach($q->fetchAll() as $t){
     $community=!in_array($t['role'],Domain::STAFF,true);$trusted=!$community||$t['organizer_blocked_at']===null&&($t['organizer_trusted_at']!==null||$any);
-    $list[]=['id'=>$t['id'],'name'=>$t['name'],'city'=>$t['city'],'date'=>$t['event_date'],'status'=>$t['status'],'community'=>$community,'trusted'=>$trusted,'entries'=>[],'draws'=>[]];
+    $list[]=['id'=>$t['id'],'name'=>$t['name'],'city'=>$t['city'],'date'=>$t['event_date'],'status'=>$t['status'],'selfEntry'=>(int)$t['self_entry']===1,'community'=>$community,'trusted'=>$trusted,'entries'=>[],'draws'=>[]];
    }
    if($id!==null&&$list){
     $e=$this->pdo->prepare('SELECT e.snapshot,c.id cid,c.verified,m.id mid,m.name mname,m.verified mverified,c.name cname FROM entries e LEFT JOIN clubs c ON c.id=e.club_id LEFT JOIN clubs m ON m.id=c.merged_into WHERE e.tournament_id=? ORDER BY e.profile_id');$e->execute([$id]);
