@@ -423,3 +423,28 @@ test('final review R1.5, demo in a browser: after club.merge the club account ed
   await ctx.close();assert.deepEqual(problems,[]);
  }finally{await browser.close();server.close();}
 });
+
+test('I3, demo in a browser: a club account in the tournament of a deactivated organizer gets no "Nowy zawodnik"/"Dodaj z bazy" but keeps "Edytuj"/"Wycofaj"',{skip:!chromium&&'MATDRAW_BROWSER_TESTS=1 and Playwright needed',timeout:120000},async()=>{
+ const {server,url}=await serve(),browser=await chromium.launch().catch(e=>{server.close();throw e;}),problems=[];
+ try{
+  const ctx=await browser.newContext({viewport:{width:1440,height:900},locale:'pl-PL',serviceWorkers:'block'}),page=await ctx.newPage();page.on('pageerror',e=>problems.push(e.message));page.on('console',m=>{if(m.type()==='error')problems.push(m.text().slice(0,200));});
+  await page.goto(url);await page.waitForSelector('.login-page');await page.click('[data-action="demo-login"][data-role="club"]');await page.waitForSelector('.app-shell');
+  // A confirmed organizer's open tournament with an entry of this club, then the Administrator deactivates the organizer.
+  const setActive=active=>page.evaluate(active=>{const key='matdraw.workspace.v2',db=JSON.parse(localStorage.getItem(key)),club=db.users.find(u=>u.id==='demo-club').clubId;
+   if(!db.users.some(u=>u.id==='qa-org')){
+    db.users.push({id:'qa-org',clubId:null,email:'qa-org@matdraw.example',role:'member',active:true,authVersion:1,organizer:true,organizerBlockedAt:null,organizerTrustedAt:1793484000});
+    db.profiles.push({id:'qa-club-a',name:'Adam Klubowy',clubId:club,sex:'M',birthDate:'2000-04-02',weight:70,height:175,gradeType:'cup',grade:5,events:['forms'],champion:false,createdBy:'demo-club',createdAt:1793484000,archived:false,ownerId:null});
+    db.tournaments.push({id:'qa-closed',name:'Puchar Wyłączonego',city:'Opole',date:'2027-05-15',mat:'Mata 1',status:'open',createdBy:'qa-org',selfEntry:true,rev:1,entries:[{id:'qa-club-a',profileId:'qa-club-a',clubId:club,name:'Adam Klubowy',club:'Klub',sex:'M',age:27,weight:70,height:175,gradeType:'cup',grade:5,champion:false,events:['forms'],presence:'pending',actualWeight:null}],draws:{},activity:[]});
+   }
+   db.users.find(u=>u.id==='qa-org').active=active;db.revision++;localStorage.setItem(key,JSON.stringify(db));sessionStorage.setItem('matdraw.activeTournament','qa-closed');},active);
+  const roster=async()=>{await page.evaluate(()=>{location.hash='#athletes';});await page.reload();await page.waitForSelector('.roster-panel');
+   return page.evaluate(()=>({add:document.querySelectorAll('[data-action="new-entry"],[data-action="entry-picker"]').length,closed:document.querySelector('.entries-closed')?.textContent??null,
+    edit:document.querySelectorAll('[data-action="edit-entry"][data-id="qa-club-a"]').length,remove:document.querySelectorAll('[data-action="remove-entry"][data-id="qa-club-a"]').length}));};
+  await setActive(true);assert.deepEqual(await roster(),{add:2,closed:null,edit:1,remove:1},'an active organizer: entries open');
+  await setActive(false);assert.deepEqual(await roster(),{add:0,closed:'Zapisy do tego turnieju są zamknięte.',edit:1,remove:1},'deactivated: no new entry offered, corrections and withdrawals stay');
+  await page.click('[data-action="remove-entry"][data-id="qa-club-a"]');await page.click('[data-action="confirm-remove-entry"]');
+  await page.waitForFunction(()=>!document.querySelector('[data-action="remove-entry"][data-id="qa-club-a"]'));
+  assert.equal(await page.evaluate(()=>JSON.parse(localStorage.getItem('matdraw.workspace.v2')).tournaments.find(t=>t.id==='qa-closed').entries.length),0,'the withdrawal went through');
+  await ctx.close();assert.deepEqual(problems,[]);
+ }finally{await browser.close();server.close();}
+});

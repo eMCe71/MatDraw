@@ -54,10 +54,11 @@ final class Domain {
   * A tournament whose member creator was blocked as organizer or deactivated by the Administrator (final review R1.6):
   * nobody who does not manage it enters new athletes (a new entry.self or entry.save), since nobody runs it now.
   * Withdrawals and corrections of entries already made stay as they were (R2.1: canEnter() does not read it), and so do
-  * trust, the results and their visibility. Without $db (views) false: the server decides.
+  * trust, the results and their visibility. Without $db (views) the view field entriesClosed that publicData() gives those
+  * who do not manage the tournament (I3: the client offers no new entry the server would refuse).
   */
  public static function closedCreator(?array $db,array $t):bool {
-  if($db===null)return false;$o=self::organizerState($db,$t['createdBy']??null);
+  if($db===null)return ($t['entriesClosed']??false)===true;$o=self::organizerState($db,$t['createdBy']??null);
   return $o!==null&&(!empty($o['blocked'])||($o['active']??true)===false);
  }
  /** A member creator confirmed by the Administrator and not blocked; with trustRequired=false every creator not blocked (§17). */
@@ -115,6 +116,8 @@ final class Domain {
    $v=$t;$v['entries']=$entries;$v['draws']=(object)array_map(static function($d){$d['results']=(object)$d['results'];return $d;},$draws);$v['activity']=$activity;
    $v['community']=$community;$v['trusted']=self::trusted($db,$t);$v['selfEntry']=($t['selfEntry']??false)===true;$v['rev']=(int)($t['rev']??0);
    if($manager){$v['hidden']=$hidden;$v['hideReason']=$t['hideReason']??null;}else unset($v['hideReason'],$v['createdAt']);
+   // No new entries from outside (closedCreator, R1.6/R2.1): only this flag, never the organizer's account state; corrections stay.
+   if(!$manager&&self::closedCreator($db,$t))$v['entriesClosed']=true;
    if($admin){$v['hiddenBy']=$t['hiddenBy']??null;$v['hiddenFrom']=$t['hiddenFrom']??null;if($community&&!empty(self::organizerState($db,$t['createdBy']??null)['blocked']))$v['organizerBlocked']=true;}else unset($v['hiddenBy'],$v['hiddenFrom']);
    if(!$manager&&($community||$role==='member'))unset($v['createdBy']);
    $out['tournaments'][]=$v;

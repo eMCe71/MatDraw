@@ -9,7 +9,7 @@
  *   'unaffiliated'. */
 import {resolveDraw} from './engine.js';
 import {categoryList} from './guest-view.js';
-import {ADULT_AGE,UNAFFILIATED,ageAt,community,trusted,currentClub,resolveClub} from './workspace.js';
+import {ADULT_AGE,UNAFFILIATED,ageAt,community,trusted,closedCreator,currentClub,resolveClub} from './workspace.js';
 
 export const RECENT_DAYS=30,ENTRY_LIMIT=100,OPEN_LIMIT=50,WITHDRAWN_LIMIT=100,CLUBS_LIMIT=2000;
 export const BY=['organizer','admin','system'];
@@ -72,7 +72,7 @@ export function projectAthleteView(profiles,tournaments,withdrawals,today,organi
  for(const t of shown){
   const inside=new Set((t.entries||[]).map(e=>String(e.profileId??''))),keys=Object.keys(isObj(t.draws)?t.draws:{}).sort();
   const n=t.community?organizers?.[t.createdBy??'']?.n:null;
-  out.open.push({id:t.id,name:t.name,city:t.city,date:t.date,community:!!t.community,trusted:!!t.trusted,organizer:typeof n==='string'&&n!==''?{n}:null,
+  out.open.push({id:t.id,name:t.name,city:t.city,date:t.date,community:!!t.community,trusted:!!t.trusted,entriesClosed:!!t.closed,organizer:typeof n==='string'&&n!==''?{n}:null,
    profiles:profiles.filter(a=>!a.archived).map(a=>({id:a.id,entered:inside.has(a.id),blocked:!t.trusted&&minorOn(a,t.date)?'minor-untrusted':null})),drawn:keys});
  }
  return out;
@@ -81,7 +81,7 @@ export function projectAthleteView(profiles,tournaments,withdrawals,today,organi
 export function athleteView(db,user,today,{withdrawals=null,organizers={},include=null}={}){
  const clubs=db.clubs||[],byId=new Map(db.tournaments.map(t=>[t.id,t]));
  const profiles=db.profiles.filter(a=>a.ownerId!=null&&a.ownerId===user.id).map(a=>{const c=resolveClub(clubs,a.clubId??null);return {...a,clubRow:c?{id:c.id,name:c.name,verified:c.verified!==false}:null};});
- const tournaments=db.tournaments.map(t=>({id:t.id,name:t.name,city:t.city,date:t.date,status:t.status,selfEntry:t.selfEntry===true,hiddenBy:t.hiddenBy??null,createdBy:t.createdBy??null,community:community(db,t),trusted:trusted(db,t),
+ const tournaments=db.tournaments.map(t=>({id:t.id,name:t.name,city:t.city,date:t.date,status:t.status,selfEntry:t.selfEntry===true,hiddenBy:t.hiddenBy??null,createdBy:t.createdBy??null,community:community(db,t),trusted:trusted(db,t),closed:closedCreator(db,t),
   entries:t.entries.map(e=>({...e,currentClub:currentClub(clubs,e.clubId??null)})),draws:t.draws}));
  const gone=[];for(const w of withdrawals??db.withdrawals??[]){const t=byId.get(w.tournamentId);if(t)gone.push({profileId:w.profileId,tournament:{id:t.id,name:t.name,date:t.date},by:w.by,at:Math.trunc(w.at)});}
  return projectAthleteView(profiles,tournaments,gone,today,organizers,include);

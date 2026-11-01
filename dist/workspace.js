@@ -65,9 +65,9 @@ export function trustedOrganizer(db,userId){
  return !!o&&!o.blocked&&(!!o.trusted||!trustRequired(db));
 }
 export const trusted=(db,t)=>db?!community(db,t)||trustedOrganizer(db,t.createdBy):!t?.community||!!t?.trusted;
-/** Mirror of Domain::closedCreator (final review R1.6, R2.1): a member creator blocked as organizer or deactivated (no new entries from outside; canEnter does not read it); without db false. */
+/** Mirror of Domain::closedCreator (final review R1.6, R2.1): a member creator blocked as organizer or deactivated (no new entries from outside; canEnter does not read it); without db the view field entriesClosed. */
 export function closedCreator(db,t){
- if(!db||typeof t?.createdBy!=='string')return false;let o=isObj(db.organizers)&&Object.hasOwn(db.organizers,t.createdBy)?db.organizers[t.createdBy]:null;
+ if(!db)return t?.entriesClosed===true;if(typeof t?.createdBy!=='string')return false;let o=isObj(db.organizers)&&Object.hasOwn(db.organizers,t.createdBy)?db.organizers[t.createdBy]:null;
  if(!o){const u=db.users.find(x=>x.id===t.createdBy&&x.role==='member');if(u)o={blocked:isset(u.organizerBlockedAt),active:u.active!==false};}
  return !!o&&(!!o.blocked||o.active===false);
 }
@@ -81,6 +81,9 @@ export function managesProfile(user,a,db){
 }
 export const outsideEntry=(user,t,db)=>!!user&&!!t&&t.status==='open'&&trusted(db,t)&&(user.role==='club'||user.role==='editor'||organizer(user)&&t.selfEntry===true);
 export const canEnter=(user,t,db)=>!!user&&!!t&&t.status!=='finished'&&(manages(user,t)||outsideEntry(user,t,db));
+/** canEnter for a NEW entry (entry.save without an entry yet): not into a tournament whose creator is closed (closedCreator) unless
+ * user manages it. Corrections and withdrawals keep canEnter (R2.1). */
+export const canAddEntry=(user,t,db)=>canEnter(user,t,db)&&(manages(user,t)||!closedCreator(db,t));
 export const canCreateTournament=user=>!!user&&(user.role==='admin'||user.role==='editor'||organizer(user));
 const byId=rows=>new Map(rows.map(r=>[r.id,r]));
 /** Club of a snapshot read through the Administrator's merges (roots: clubRoots), as Domain::entryVisible (final review B7). */
@@ -113,6 +116,8 @@ export function publicWorkspace(db,user){
   if(manager&&hidden&&!admin){const ids=new Set(entries.map(e=>e.id));draws=Object.fromEntries(Object.entries(draws).filter(([,d])=>d.slots.filter(Boolean).every(x=>ids.has(x))));activity=[];}
   const v={...t,entries,draws,activity,community:isCommunity,trusted:trusted(db,t),selfEntry:t.selfEntry===true,rev:Number(t.rev)||0};
   if(manager){v.hidden=hidden;v.hideReason=t.hideReason??null;}else{delete v.hideReason;delete v.createdAt;}
+  // No new entries from outside (closedCreator, R1.6/R2.1), as Domain::publicData: only this flag; corrections stay.
+  if(!manager&&closedCreator(db,t))v.entriesClosed=true;
   if(admin){v.hiddenBy=t.hiddenBy??null;v.hiddenFrom=t.hiddenFrom??null;}else{delete v.hiddenBy;delete v.hiddenFrom;}
   if(!manager&&(isCommunity||role==='member'))delete v.createdBy;
   out.tournaments.push(v);

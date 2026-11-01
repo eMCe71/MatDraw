@@ -6,7 +6,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
-import {initialWorkspace,execute,publicWorkspace,stale,contact,pickClub,athleteFields,drawAthletes,ageAt,UNAFFILIATED} from '../dist/workspace.js';
+import {initialWorkspace,execute,publicWorkspace,stale,contact,pickClub,athleteFields,drawAthletes,ageAt,UNAFFILIATED,canEnter,canAddEntry} from '../dist/workspace.js';
 import {classify,categories,makeDraw,sameClub,signature,firstPairs,clubConflicts,fingerprintCounts} from '../dist/engine.js';
 import {clubKey} from '../dist/profile-data.js';
 import {warsawToday} from '../dist/guest-view.js';
@@ -466,6 +466,21 @@ test('a blocked or deactivated organizer: no new self-entries or outside entries
  assert.deepEqual(STATUS(r.results),[403],'blocked organizer');
  const active=rich();active.users.find(u=>u.id==='u-org3').organizerBlockedAt=null;const r2=runJs(active,ok),p2=bridge({job:'execute',db:active,commands:ok});compare(r2,p2,ok);
  assert.deepEqual(STATUS(r2.results),[200],'the same organizer unblocked: the adult enters');
+});
+// I3: the workspace tells those who do not manage such a tournament that it takes no new entry (entriesClosed, only that flag),
+// so the client hides "Nowy zawodnik"/"Dodaj z bazy" (canAddEntry) and keeps "Edytuj"/"Wycofaj" (canEnter); PHP = JS.
+test('publicData marks tournaments of a deactivated or blocked organizer for outsiders (entriesClosed); canAddEntry reads it, canEnter does not (I3)',{skip},()=>{
+ const db=rich();db.users.find(u=>u.id==='u-org2').active=false;
+ const actors=['demo-admin','demo-editor','demo-club','u-club2','u-org1','u-org2','u-org3'],php=bridge({job:'public',db,actors});
+ const js=actors.map(id=>JSON.parse(JSON.stringify(publicWorkspace(db,db.users.find(u=>u.id===id)))));actors.forEach((id,i)=>assert.deepEqual(blockedOnly(php[i],js[i],db,id),js[i],id));
+ const flag=(i,t)=>{const v=js[i].tournaments.find(x=>x.id===t);return v?v.entriesClosed??false:null;};
+ assert.deepEqual(actors.map((_,i)=>flag(i,'t-org2')),[false,true,true,true,true,false,null],'the Administrator and the creator (managers) get no flag; a blocked organizer\'s tournament is not shown to outsiders');
+ assert.deepEqual(actors.map((_,i)=>flag(i,'t-staff-self')),[false,false,false,false,false,false,null],'a staff tournament: nothing');
+ assert.equal(flag(0,'t-org3'),false);
+ const club=db.users.find(u=>u.id==='u-club2'),view=js[3].tournaments.find(t=>t.id==='t-org2');
+ assert.deepEqual([canEnter(club,view),canAddEntry(club,view)],[true,false],'corrections and withdrawals stay, new entries are not offered');
+ const open=rich(),v2=publicWorkspace(open,open.users.find(u=>u.id==='u-club2')).tournaments.find(t=>t.id==='t-org2');
+ assert.deepEqual([canEnter(club,v2),canAddEntry(club,v2)],[true,true],'the same tournament of an active organizer');
 });
 // Final review B7: club.merge keeps snapshots (PS-10); the club account moved to the target still sees and withdraws its entries.
 test('after club.merge the club account still sees its old club entries, also in closed tournaments, and withdraws them (B7)',{skip},()=>{

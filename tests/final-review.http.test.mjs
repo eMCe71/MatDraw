@@ -153,7 +153,15 @@ test('R1.6: no new entries into tournaments of a deactivated or blocked organize
  const mine=(await o2c.cmd('profile.save',{...A,name:'Zawodnik Innego Organizatora',club:{none:true}})).id,next=(await o2c.cmd('profile.save',{...A,name:'Nowy Innego Organizatora',club:{none:true}})).id;
  await o2c.cmd('entry.save',{...E,tournamentId:t,profileId:mine});
  const enter=()=>xc.req('athlete-entry',{tournamentId:t,profileId:x.profileId,events:['forms']}),CLOSED_T='Zapisy do tego turnieju są zamknięte.';
+ // I3: the client is told before it asks: the open list of the athlete route and the workspace of outsiders mark the tournament.
+ const offer=async c=>ok(await c.req('athlete')).open.find(x=>x.id===t)??null,view=async c=>(await c.load()).tournaments.find(x=>x.id===t)??null;
+ assert.equal((await offer(xc)).entriesClosed,false);assert.equal('entriesClosed' in (await view(o2c)),false);
  assert.deepEqual(ok(await a.req('admin-member',{action:'active',userId:o.id,active:false})),{id:o.id,active:false});
+ const closed=await offer(xc);assert.deepEqual([closed.entriesClosed,closed.profiles],[true,[{id:x.profileId,entered:false,blocked:null}]],'listed, no new self-entry');
+ assert.equal((await offer(yc)).entriesClosed,true);const own=ok(await yc.req('athlete')).entries.find(e=>e.tournament.id===t);assert.deepEqual([own.canEdit,own.canWithdraw],[true,true],'the entry made earlier: "Zmień" and "Wycofaj" stay');
+ assert.equal((await view(o2c)).entriesClosed,true,'another organizer: no new entry offered');
+ assert.equal('entriesClosed' in (await view(a)),false,'the Administrator manages it: no flag');
+ const pub=await guest('public-tournament&id='+t);assert.equal(pub.status,200);assert.equal(JSON.stringify(pub.data).includes('entriesClosed'),false,'the guest view says nothing about it');
  error(await enter(),403,CLOSED_T);
  await o2c.load();error(await command(o2c,'entry.save',{...E,tournamentId:t,profileId:next}),403,CLOSED_T);
  ok(await yc.req('athlete-entry',{tournamentId:t,profileId:y.profileId,events:['forms'],update:true,weight:71}));
@@ -161,8 +169,10 @@ test('R1.6: no new entries into tournaments of a deactivated or blocked organize
  await o2c.load();ok(await command(o2c,'entry.remove',{tournamentId:t,id:mine}));
  ok(await yc.req('athlete-withdraw',{tournamentId:t,profileId:y.profileId}));
  ok(await a.req('admin-member',{action:'active',userId:o.id,active:true}));
+ assert.equal((await offer(xc)).entriesClosed,false);assert.equal('entriesClosed' in (await view(o2c)),false);
  ok(await enter());ok(await xc.req('athlete-withdraw',{tournamentId:t,profileId:x.profileId}));
  ok(await a.req('admin-member',{action:'organizer',userId:o.id,blocked:true}));
+ assert.equal((await offer(xc)).entriesClosed,true,'blocked as organizer');
  error(await enter(),403,CLOSED_T);
  ok(await a.req('admin-member',{action:'organizer',userId:o.id,blocked:false}));ok(await enter());
 });

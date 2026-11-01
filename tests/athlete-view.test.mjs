@@ -111,6 +111,18 @@ test('the open list: self-entries on, not hidden, not past; trust and minors; dr
  assert.deepEqual(athleteView(S.db,{id:'demo-admin'},TODAY).profiles,[],'an account without own profiles');
 });
 
+// R1.6/R2.1 leftovers (I3): a tournament of an organizer the Administrator deactivated or blocked takes no new self-entry, so the
+// open list marks it (entriesClosed) instead of offering "Zgłoś się"; own entries made earlier keep "Zmień" and "Wycofaj".
+test('the open list marks tournaments of a deactivated or blocked organizer (entriesClosed); own entries keep canEdit and canWithdraw (PHP = JS)',{skip},()=>{
+ const db=json(S.db);db.users.find(u=>u.id==='org-t').active=false;db.users.find(u=>u.id==='org-u').organizerBlockedAt=1790000500;
+ const cases=[{user:'ath',today:TODAY},{user:'parent',today:TODAY}],js=cases.map(c=>json(athleteView(db,{id:c.user},c.today)));
+ assert.deepEqual(bridge({job:'workspace',db,cases}),js);
+ const flags=v=>Object.fromEntries(v.open.map(t=>[t.name,t.entriesClosed]));
+ assert.deepEqual(flags(js[0]),{'Otwarty z losowaniem':false,'Otwarty bez losowania':false,'Społeczny niepotwierdzony':true,'Społeczny potwierdzony':true,'Wycofany przez organizatora':true});
+ assert.deepEqual(flags(json(athleteView(S.db,{id:'ath'},TODAY))),Object.fromEntries(Object.keys(flags(js[0])).map(k=>[k,false])),'active organizers: nothing closed');
+ const kid=js[1].entries.find(e=>e.tournament.id===S.ids.trusted);assert.deepEqual([kid.canEdit,kid.canWithdraw],[true,true],'the deactivated (still trusted) organizer: the child entry is corrected and withdrawn');
+ const own=js[0].entries.find(e=>e.tournament.id===S.ids.trusted);assert.deepEqual([own.canEdit,own.canWithdraw],[true,true]);
+});
 test('exact keys and no other person\'s data in the answer',()=>{
  const v=athleteView(S.db,{id:'ath'},TODAY);
  assert.deepEqual(keys(v.profiles[0]),['archived','birthDate','club','gradeType','grade','height','id','locked','minor','name','relation','sex','weight'].sort());
@@ -124,7 +136,7 @@ test('exact keys and no other person\'s data in the answer',()=>{
    if(c.bracket){assert.deepEqual(keys(c.bracket),['results','size','slots']);for(const s of c.bracket.slots)if(s)assert.deepEqual(keys(s),['club','initials']);}
   }
  }
- for(const t of v.open){assert.deepEqual(keys(t),['city','community','date','drawn','id','name','organizer','profiles','trusted']);for(const p of t.profiles)assert.deepEqual(keys(p),['blocked','entered','id']);}
+ for(const t of v.open){assert.deepEqual(keys(t),['city','community','date','drawn','entriesClosed','id','name','organizer','profiles','trusted']);for(const p of t.profiles)assert.deepEqual(keys(p),['blocked','entered','id']);}
  for(const w of v.withdrawn){assert.deepEqual(keys(w),['at','by','profileId','tournament']);assert.deepEqual(keys(w.tournament),['date','id','name']);}
  const raw=JSON.stringify(v);
  for(const secret of ['Piotr Inny','Marek Obcy','Jan Trzeci','Kamil Czwarty','Ola Dziecko',S.child,...S.staff,'demo-admin','org-t','org-u','@','Sprawdzamy','1995-01-01','Mata 1','"activity"','"createdBy"','"rev"','"mat"'])assert.ok(!raw.includes(secret),secret);

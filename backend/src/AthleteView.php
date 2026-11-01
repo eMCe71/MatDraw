@@ -9,7 +9,8 @@ use PDO;
  *  project(profiles, tournaments, withdrawals, today, organizers) is pure:
  *   profiles     the account's own profiles (workspace shape) with clubRow {id, name, verified} (the current club, merged →
  *                target, raw name) or null;
- *   tournaments  {id, name, city, date, status, selfEntry, hiddenBy, createdBy, community, trusted, entries, draws}; every
+ *   tournaments  {id, name, city, date, status, selfEntry, hiddenBy, createdBy, community, trusted, closed, entries, draws}
+ *                (closed: Domain::closedCreator, the creator blocked as organizer or deactivated: no new self-entry); every
  *                entry snapshot carries currentClub {id, name} as Repository::guestTournaments gives it (name null for an
  *                unverified club, '' for 'unaffiliated'); old tournaments may hold only the own entries;
  *   withdrawals  [{profileId, tournament:{id, name, date}, by, at}] (entry_withdrawals with the tournament's name and date);
@@ -32,11 +33,13 @@ use PDO;
  *              round (1 = first), match (fight number), status waiting|next|won|lost|bye|champion, opponent null |
  *              {initials, club} (next and lost only)}.
  *   withdrawn [{profileId, tournament:{id, name, date}, by:'organizer'|'admin'|'system', at}] newest first, at most 100.
- *   open      [{id, name, city, date, community, trusted, organizer:null|{n}, profiles:[{id, entered, blocked:null|
+ *   open      [{id, name, city, date, community, trusted, entriesClosed, organizer:null|{n}, profiles:[{id, entered, blocked:null|
  *              'minor-untrusted'}], drawn:[category ids with a saved draw]}]: open, self-entries on, not hidden, dated today
  *              or later, nearest first, at most 50; profiles are the non-archived own ones; blocked when the tournament is
  *              not trusted and the profile is not an adult 'self' on the tournament day (§7.1); drawn lets the entry
- *              window mark events whose category was already drawn (engine.js classify gives the category id).
+ *              window mark events whose category was already drawn (engine.js classify gives the category id);
+ *              entriesClosed: the tournament takes no new self-entry (closed, R1.6/R2.1; own entries are still corrected and
+ *              withdrawn through entries[].canEdit/canWithdraw), nothing about the organizer's account beyond that.
  *              $include (the route's ?t=<id>, a tournament the member came from: a guest preview, a shared link) is
  *              always in the list when it qualifies, appended after the first OPEN_LIMIT (it is later than all of them).
  *  Never: other athletes beyond initials and club inside brackets, ids of other entries or profiles, e-mails, creators of
@@ -112,7 +115,7 @@ final class AthleteView {
   foreach($shown as $t){
    $in=[];foreach($t['entries']??[] as $e)$in[(string)($e['profileId']??'')]=true;$keys=array_map('strval',array_keys(is_array($t['draws']??null)?$t['draws']:[]));sort($keys,SORT_STRING);
    $n=!empty($t['community'])?($organizers[$t['createdBy']??'']['n']??null):null;
-   $out['open'][]=['id'=>$t['id'],'name'=>$t['name'],'city'=>$t['city'],'date'=>$t['date'],'community'=>!empty($t['community']),'trusted'=>!empty($t['trusted']),'organizer'=>is_string($n)&&$n!==''?['n'=>$n]:null,
+   $out['open'][]=['id'=>$t['id'],'name'=>$t['name'],'city'=>$t['city'],'date'=>$t['date'],'community'=>!empty($t['community']),'trusted'=>!empty($t['trusted']),'entriesClosed'=>!empty($t['closed']),'organizer'=>is_string($n)&&$n!==''?['n'=>$n]:null,
     'profiles'=>array_values(array_map(fn($a)=>['id'=>$a['id'],'entered'=>isset($in[$a['id']]),'blocked'=>empty($t['trusted'])&&self::minorOn($a,$t['date'])?'minor-untrusted':null],array_filter($profiles,fn($a)=>empty($a['archived'])))),'drawn'=>$keys];
   }
   return $out;
@@ -123,7 +126,7 @@ final class AthleteView {
   foreach($db['profiles'] as $a){if(($a['ownerId']??null)===null||$a['ownerId']!==$u['id'])continue;$c=Clubs::resolve($clubs,$a['clubId']??null);$a['clubRow']=$c===null?null:['id'=>$c['id'],'name'=>$c['name'],'verified'=>($c['verified']??true)!==false];$profiles[]=$a;}
   foreach($db['tournaments'] as $t){
    $byId[$t['id']]=$t;
-   $tournaments[]=['id'=>$t['id'],'name'=>$t['name'],'city'=>$t['city'],'date'=>$t['date'],'status'=>$t['status'],'selfEntry'=>($t['selfEntry']??false)===true,'hiddenBy'=>$t['hiddenBy']??null,'createdBy'=>$t['createdBy']??null,'community'=>Domain::community($db,$t),'trusted'=>Domain::trusted($db,$t),
+   $tournaments[]=['id'=>$t['id'],'name'=>$t['name'],'city'=>$t['city'],'date'=>$t['date'],'status'=>$t['status'],'selfEntry'=>($t['selfEntry']??false)===true,'hiddenBy'=>$t['hiddenBy']??null,'createdBy'=>$t['createdBy']??null,'community'=>Domain::community($db,$t),'trusted'=>Domain::trusted($db,$t),'closed'=>Domain::closedCreator($db,$t),
     'entries'=>array_map(fn($e)=>array_replace($e,['currentClub'=>self::currentClub($clubs,$e['clubId']??null)]),$t['entries']),'draws'=>$t['draws']];
   }
   $gone=[];foreach($withdrawals??($db['withdrawals']??[]) as $w){$t=$byId[$w['tournamentId']??'']??null;if($t)$gone[]=['profileId'=>$w['profileId'],'tournament'=>['id'=>$t['id'],'name'=>$t['name'],'date'=>$t['date']],'by'=>$w['by'],'at'=>(int)$w['at']];}
@@ -151,10 +154,12 @@ final class AthleteView {
    if($include!==null&&!in_array($include,$open,true)){$q=$pdo->prepare("SELECT id FROM tournaments WHERE id=? AND status='open' AND self_entry=1 AND hidden_by IS NULL AND event_date>=?");$q->execute([$include,$today]);if(($x=$q->fetchColumn())!==false)$open[]=$x;}
    $all=array_values(array_unique([...$mine,...$open]));$tournaments=[];$full=[];$part=[];$creators=[];
    if($all){
-    $q=$pdo->prepare('SELECT t.id,t.name,t.city,t.event_date,t.status,t.self_entry,t.hidden_by,t.created_by,u.role,u.organizer_trusted_at,u.organizer_blocked_at FROM tournaments t LEFT JOIN users u ON u.id=t.created_by WHERE t.id IN ('.self::in($all).')');$q->execute($all);
+    $q=$pdo->prepare('SELECT t.id,t.name,t.city,t.event_date,t.status,t.self_entry,t.hidden_by,t.created_by,u.role,u.active,u.organizer_trusted_at,u.organizer_blocked_at FROM tournaments t LEFT JOIN users u ON u.id=t.created_by WHERE t.id IN ('.self::in($all).')');$q->execute($all);
     foreach($q->fetchAll(PDO::FETCH_ASSOC) as $t){
      $community=!in_array($t['role'],Domain::STAFF,true);$trusted=!$community||$t['role']==='member'&&$t['organizer_blocked_at']===null&&($t['organizer_trusted_at']!==null||$any);
-     $tournaments[$t['id']]=['id'=>$t['id'],'name'=>$t['name'],'city'=>$t['city'],'date'=>$t['event_date'],'status'=>$t['status'],'selfEntry'=>(bool)$t['self_entry'],'hiddenBy'=>$t['hidden_by'],'createdBy'=>$t['created_by'],'community'=>$community,'trusted'=>$trusted,'entries'=>[],'draws'=>[]];
+     // closed as Domain::closedCreator over Repository::organizers: a member creator blocked as organizer or deactivated.
+     $closed=$t['role']==='member'&&($t['organizer_blocked_at']!==null||(int)$t['active']!==1);
+     $tournaments[$t['id']]=['id'=>$t['id'],'name'=>$t['name'],'city'=>$t['city'],'date'=>$t['event_date'],'status'=>$t['status'],'selfEntry'=>(bool)$t['self_entry'],'hiddenBy'=>$t['hidden_by'],'createdBy'=>$t['created_by'],'community'=>$community,'trusted'=>$trusted,'closed'=>$closed,'entries'=>[],'draws'=>[]];
      if(in_array($t['id'],$mine,true)){if($t['event_date']>=$recent||in_array($t['status'],['open','closed'],true))$full[]=$t['id'];else $part[]=$t['id'];}
      if($community&&in_array($t['id'],$open,true))$creators[]=$t['created_by'];
     }

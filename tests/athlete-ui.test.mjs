@@ -218,6 +218,25 @@ test('open tournaments: enter, entered, minor-untrusted explanation, community b
  assert.equal(data.addDays('2030-12-29',7),'2031-01-05');
 });
 
+// I3 (R1.6/R2.1 leftovers): an open item with entriesClosed (the organizer was blocked or deactivated) offers no new self-entry:
+// no "Zgłoś się", no "add athlete data", the explanation instead; an entered profile keeps "Zmień zgłoszenie" and "Wycofaj".
+test('open item with entriesClosed: no enter button or add call to action, the explanation; own entries keep their actions',()=>{
+ const closed={id:'k',name:'Wstrzymany',city:'Opole',date:'2030-06-20',community:true,trusted:true,entriesClosed:true,organizer:null,profiles:[{id:'p1',entered:false,blocked:null}],drawn:[]};
+ const view={profiles:[{id:'p1',name:'Ola',archived:false,club:{},sex:'F'}],entries:[],withdrawn:[],open:[closed]};
+ const html=String(flow.startsHtml(view,{today:TODAY}));
+ assert.doesNotMatch(html,/athlete-enter/);assert.match(text(html),/Wstrzymany .*Zapisy do tego turnieju są zamknięte\./);
+ assert.ok(!/athlete-enter/.test(String(flow.startsHtml({...view,open:[{...closed,profiles:[{id:'p1',entered:false,blocked:'minor-untrusted'}]}]},{today:TODAY}))));
+ assert.match(text(String(flow.startsHtml({...view,open:[{...closed,profiles:[{id:'p1',entered:true,blocked:null}]}]},{today:TODAY}))),/Na liście zgłoszeń/);
+ assert.deepEqual(data.ctaFor(view,'k',{athlete:true}),{kind:'blocked',reason:'closed'});
+ assert.equal(data.ctaFor({open:[{...closed,profiles:[]}]},'k',{athlete:false}),null,'no "add athlete data" where a self-entry would be refused');
+ assert.match(text(flow.ctaHtml({kind:'blocked',reason:'closed'},'k',{view})),/Samodzielne zgłoszenie niedostępne Zapisy do tego turnieju są zamknięte\./);
+ assert.doesNotMatch(text(flow.ctaHtml({kind:'blocked',reason:'closed'},'k',{view})),/potwierdzi organizatora/);
+ const entered={...view,entries:[{profileId:'p1',tournament:{id:'k',name:'Wstrzymany',city:'Opole',date:'2030-06-20',status:'open',available:true,community:true,trusted:true},entry:{events:['forms'],club:{}},canWithdraw:true,canEdit:true,categories:[]}],open:[{...closed,profiles:[{id:'p1',entered:true,blocked:null}]}]};
+ assert.deepEqual(data.ctaFor(entered,'k',{athlete:true}),{kind:'entered',profileId:'p1',canEdit:true});
+ const mine=String(flow.startsHtml(entered,{today:TODAY}));assert.match(mine,/data-action="athlete-edit" data-id="k"/);assert.match(mine,/data-action="athlete-withdraw" data-id="k"/);
+ inLanguage('en',()=>assert.match(text(String(flow.startsHtml(view,{today:TODAY}))),/Registration for this tournament is closed\./));
+});
+
 test('call to action in a member preview: add data, enter, entered, blocked, unavailable with the reason',()=>{
  const view={profiles:[{id:'p1',name:'Ola'}],entries:[{profileId:'p1',tournament:{id:'x'},canEdit:true}],open:[{id:'o',profiles:[{id:'p1',entered:false,blocked:null}]},{id:'m',profiles:[{id:'p1',entered:false,blocked:'minor-untrusted'}]}]};
  // A member without a profile is asked for the athlete's data only where a self-entry is possible (the open list of the route).

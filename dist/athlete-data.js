@@ -87,15 +87,16 @@ export const entryItem=(view,id,profileId)=>(view?.entries||[]).find(x=>x?.tourn
 /** Call to action in a member's tournament preview (§10.3): {kind:'add'} for a member without an athlete profile, only when the
  * tournament is on the open list of view (the route athlete answers members without a profile too: open, self-entry, future and
  * not hidden), so nobody is asked for a child's data where a self-entry would be refused; {kind:'entered',profileId,canEdit} when
- * a profile is entered; {kind:'enter',profileId} when the open list allows it; {kind:'blocked',reason:'minor-untrusted'};
+ * a profile is entered; {kind:'enter',profileId} when the open list allows it; {kind:'blocked',reason:'minor-untrusted'}, or
+ * reason 'closed' when the open item takes no new self-entry (entriesClosed: the organizer was blocked or deactivated, R1.6);
  * {kind:'unavailable'} otherwise (the caller explains it from the tournament status). selfEntry false (features.selfEntry) and a
  * member without a profile outside the open list give null: no call to action at all. */
 export function ctaFor(view,id,{athlete=false,selfEntry=true,rolesOpen=true}={}){
  if(selfEntry===false)return null;
  // Without an athlete profile the member is asked for one only while roles are open (me.features.rolesOpen).
- if(!athlete)return rolesOpen&&openItem(view,id)?{kind:'add'}:null;
+ if(!athlete)return rolesOpen&&openItem(view,id)&&!openItem(view,id).entriesClosed?{kind:'add'}:null;
  const entered=entryItem(view,id);if(entered)return {kind:'entered',profileId:entered.profileId,canEdit:!!entered.canEdit};
- const t=openItem(view,id);if(!t)return {kind:'unavailable'};
+ const t=openItem(view,id);if(!t)return {kind:'unavailable'};if(t.entriesClosed)return {kind:'blocked',reason:'closed'};
  const rows=(t.profiles||[]).filter(p=>!p.entered),free=rows.find(p=>!p.blocked);
  if(free)return {kind:'enter',profileId:free.id};
  if(rows.length)return {kind:'blocked',reason:rows[0].blocked};

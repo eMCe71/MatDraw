@@ -72,7 +72,7 @@ export function noticeTexts(t){
  return out;
 }
 const unavailableText=reason=>reason==='finished'?T('Ten turniej już się odbył.'):reason==='off'?T('Organizator nie włączył samodzielnych zgłoszeń. Zgłosi Cię klub albo organizator turnieju.'):reason==='later'?T('Tego turnieju nie ma jeszcze na Twojej liście „Otwarte turnieje”. Sprawdź ponownie bliżej terminu zawodów albo zapytaj organizatora.'):T('Zapisy do tego turnieju są zamknięte.');
-const BLOCKED=()=>T('Zgłoszenia osób niepełnoletnich do tego turnieju będą możliwe, gdy MatBravo potwierdzi organizatora.');
+const BLOCKED=reason=>reason==='closed'?T('Zapisy do tego turnieju są zamknięte.'):T('Zgłoszenia osób niepełnoletnich do tego turnieju będą możliwe, gdy MatBravo potwierdzi organizatora.');
 const STATE_ICON={paused:'pause',finished:'trophy',absent:'alert',present:'check',closed:'clock',accepted:'check'};
 const STATE_TONE={paused:'warn',finished:'done',absent:'warn',present:'ok',closed:'wait',accepted:'ok'};
 const CATEGORY_STATE=()=>({finished:[T('Zakończona'),'success'],progress:[T('W toku'),'teal'],drawn:[T('Gotowa do rozegrania'),'teal'],pending:[T('Przed losowaniem'),'neutral'],underfilled:[T('Mało zawodników'),'neutral'],list:[T('Lista startowa'),'neutral']});
@@ -113,7 +113,8 @@ function openCard(t,profile,selfEntry){
  let action;
  if(!row)action='';
  else if(row.entered)action=h`<span class="badge teal ath-entered">${icon('check')}${T('Na liście zgłoszeń')}</span>`;
- else if(row.blocked)action=h`<p class="ath-blocked">${icon('lock')}<span>${BLOCKED()}</span></p>`;
+ // No new self-entry (entriesClosed, R1.6): the explanation instead of the button; an entered profile keeps its actions on its entry card.
+ else if(t.entriesClosed||row.blocked)action=h`<p class="ath-blocked">${icon('lock')}<span>${BLOCKED(t.entriesClosed?'closed':row.blocked)}</span></p>`;
  else if(selfEntry)action=h`<button type="button" class="btn primary" data-action="athlete-enter" data-id="${t.id}" data-profile="${row.id}" aria-label="${T('Zgłoś się: {name}',{name:t.name})}">${T('Zgłoś się')}</button>`;
  else action='';
  return h`<article class="ath-open" aria-labelledby="${title}"><div class="ath-open-main"><h3 id="${title}">${t.name}</h3><p class="ath-when">${icon('calendar')}<span>${fmtDate(t.date)}</span>${t.city?h`<span aria-hidden="true">·</span>${icon('pin')}<span>${t.city}</span>`:''}</p>${t.community?h`<div class="ath-marks">${communityMarks(t)}${t.organizer?.n?h`<span class="ath-organizer">${organizerText(t.organizer.n)}</span>`:''}</div>`:''}</div><div class="ath-open-side">${action}<a class="text-btn ath-preview-link" href="#guest?t=${encodeURIComponent(t.id)}" aria-label="${T('Podgląd turnieju: {name}',{name:t.name})}">${icon('eye')}<span>${T('Podgląd turnieju')}</span></a></div></article>`;
@@ -175,7 +176,7 @@ export function ctaHtml(state,id,{view=null,reason='closed'}={}){
  if(state.kind==='add')return h`<div class="ath-cta"><span class="ath-cta-icon">${icon('user')}</span><div class="ath-cta-copy"><strong>${T('Zapisy są otwarte')}</strong><p>${T('Dodaj dane zawodnika, aby się zgłosić. Wystarczy raz: przy następnych turniejach użyjesz ich ponownie.')}</p></div><a class="btn primary" href="#profile?tab=roles&amp;add=1&amp;then=${encodeURIComponent(id)}">${T('Dodaj dane zawodnika, aby się zgłosić')}</a></div>`;
  if(state.kind==='enter')return h`<div class="ath-cta"><span class="ath-cta-icon">${icon('trophy')}</span><div class="ath-cta-copy"><strong>${T('Zapisy są otwarte')}</strong><p>${p?T('Zgłoś zawodnika: {name}. Sprawdzimy konkurencje i kategorię przed wysłaniem.',{name:p.name}):T('Sprawdzimy konkurencje i kategorię przed wysłaniem.')}</p></div><button type="button" class="btn primary" data-action="athlete-enter" data-id="${id}" data-profile="${state.profileId}">${T('Zgłoś się')}</button></div>`;
  if(state.kind==='entered')return h`<div class="ath-cta ath-cta-done"><span class="ath-cta-icon">${icon('check')}</span><div class="ath-cta-copy"><strong>${p?T('Zgłoszenie przyjęte: {name}',{name:p.name}):T('Zgłoszenie przyjęte')}</strong><p>${T('Status, kategorię i drabinkę znajdziesz w „Moich startach”.')}</p></div><div class="ath-cta-actions">${state.canEdit?h`<button type="button" class="btn secondary" data-action="athlete-edit" data-id="${id}" data-profile="${state.profileId}">${T('Zmień zgłoszenie')}</button>`:''}<a class="btn primary" href="#starts">${T('Moje starty')}</a></div></div>`;
- if(state.kind==='blocked')return h`<div class="ath-cta ath-cta-off"><span class="ath-cta-icon">${icon('lock')}</span><div class="ath-cta-copy"><strong>${T('Samodzielne zgłoszenie niedostępne')}</strong><p>${BLOCKED()}</p></div></div>`;
+ if(state.kind==='blocked')return h`<div class="ath-cta ath-cta-off"><span class="ath-cta-icon">${icon('lock')}</span><div class="ath-cta-copy"><strong>${T('Samodzielne zgłoszenie niedostępne')}</strong><p>${BLOCKED(state.reason)}</p></div></div>`;
  return h`<div class="ath-cta ath-cta-off"><span class="ath-cta-icon">${icon('info')}</span><div class="ath-cta-copy"><strong>${T('Samodzielne zgłoszenie niedostępne')}</strong><p>${unavailableText(reason)}</p></div></div>`;
 }
 let ctaTicket=0;
