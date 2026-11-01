@@ -8,7 +8,10 @@
 //     before the current one was deleted in the Dashboard keeps its e-mail and address at Stripe, and this job makes no
 //     Stripe call, so such an account stays for account deletion, which deletes every customer), profile created more
 //     than abandoned_member_days ago, last login as old or never, no chat message and no report filed
-//     (chat_reports.reporter_id has a foreign key without cascade). At most 50 accounts per run; each in its own
+//     (chat_reports.reporter_id has a foreign key without cascade), and no community data (PLAN-REJESTRACJA-ROLE §6.6):
+//     no profile created by or owned by the person, no tournament and no club created by the person (profiles and
+//     tournaments reference users by a foreign key; such accounts leave only through account deletion, which forgets
+//     their data first). At most 50 accounts per run; each in its own
 //     transaction and try/catch (an error is logged with class and SQLSTATE only, the next account follows). The
 //     transaction locks the account again with the same conditions (FOR UPDATE) and skips it when they no longer hold
 //     (a sign-in, a Checkout or an exemption since the list was read). Deleted: chat_mutes, account_audit about the
@@ -18,12 +21,12 @@
 //     directories of public_ids without a profile row (Avatars::sweep, at most 5000 directories and about 2 s). A run
 //     that stops early stores avatar_next=<public_id> in its result (job_runs.last_result) and the next one resumes there.
 // The chat tables (migration 0003) and billing_customers (migration 0006) are checked before use; without them their
-// conditions do not apply.
+// conditions do not apply. The switches come from Settings::effective (bin/cron.php passes config.php as it is).
 declare(strict_types=1);
-use MatDraw\{Avatars,Members,Routes};
+use MatDraw\{Avatars,Members,Routes,Settings};
 return [
  'accounts-cleanup'=>['every'=>86400,'needsFlush'=>false,'run'=>function(PDO $pdo,array $c,int $now):string{
-  $deleted=0;$failed=0;$state='off';
+  $c=Settings::effective($pdo,$c);$deleted=0;$failed=0;$state='off';
   if(!empty($c['billing_enforce'])){
    $state='on';$cut=$now-max(1,(int)$c['abandoned_member_days'])*86400;
    $messages=Members::tableExists($pdo,'chat_messages');$reports=Members::tableExists($pdo,'chat_reports');$mutes=Members::tableExists($pdo,'chat_mutes');
@@ -33,7 +36,9 @@ return [
      AND (b.user_id IS NULL OR (b.billing_exempt=0 AND b.stripe_customer_id IS NULL AND b.sub_status='none' AND b.deleted_at IS NULL))"
     .($messages?' AND NOT EXISTS (SELECT 1 FROM chat_messages m WHERE m.user_id=u.id)':'')
     .($reports?' AND NOT EXISTS (SELECT 1 FROM chat_reports r WHERE r.reporter_id=u.id)':'')
-    .($customers?' AND NOT EXISTS (SELECT 1 FROM billing_customers bc WHERE bc.user_id=u.id AND bc.redacted_at IS NULL)':'');
+    .($customers?' AND NOT EXISTS (SELECT 1 FROM billing_customers bc WHERE bc.user_id=u.id AND bc.redacted_at IS NULL)':'')
+    .' AND NOT EXISTS (SELECT 1 FROM profiles pc WHERE pc.created_by=u.id) AND NOT EXISTS (SELECT 1 FROM profiles po WHERE po.owner_user_id=u.id)'
+    .' AND NOT EXISTS (SELECT 1 FROM tournaments tc WHERE tc.created_by=u.id) AND NOT EXISTS (SELECT 1 FROM clubs cc WHERE cc.created_by=u.id)';
    $q=$pdo->prepare("SELECT u.id,p.public_id $from ORDER BY p.created_at LIMIT 50");$q->execute([$cut,$cut]);
    foreach($q->fetchAll(PDO::FETCH_ASSOC) as $r){
     try{

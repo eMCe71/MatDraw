@@ -16,10 +16,18 @@ use PDO;
  *   Billing::deleteCustomer(…), Billing::pushCustomerEmail(…)  Stripe customer removal and e-mail update (billing-backend)
  * bridge() fills the parameters of those billing methods by type (PDO → connection, array → config, string → user id),
  * so they work whichever of (PDO,$userId) or (PDO,$config,$userId) the billing slice settles on.
+ * Roles of members (PLAN-REJESTRACJA-ROLE §4, §5.5, §6.6): users.organizer is the member's own switch (sign-up roles,
+ * roles()), organizer_blocked_at and organizer_trusted_at/_by are set by the Administrator (adminAction organizer,
+ * organizer-trust, organizer-bulk); an athlete profile of the account (profiles.owner_user_id) is created at sign-up
+ * without the workspace lock (R19) and otherwise by the athlete routes. erase() forgets the community data of the account
+ * (Domain::forgetMember) before the account itself. Accounts created while payments are not enforced carry the
+ * free-signup exemption (§3.4), so switching to paid later is a decision about them.
  */
 final class Members {
  private const TEMP_ALPHABET='ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789';
  public const PAGE=50,SIGNUP_MIN_SECONDS=3,SIGNUP_MAX_SECONDS=7200;
+ /** §3.7: duplicate e-mails per network (/64) and hour before every sign-up from it gets 429; organizer roles switched on per network and day; own role changes per hour; accounts in one bulk action. */
+ public const DUPLICATE_EMAILS_IP_HOUR=5,ORGANIZERS_IP_DAY=3,ROLES_HOUR=10,BULK_MAX=50;
 
  /** One rate-limit attempt (RateLimit::hit) with the generic 429 message. */
  public static function limit(PDO $pdo,array $c,string $scope,string $key,int $limit,int $window):void {
@@ -63,10 +71,14 @@ final class Members {
  }
 
  // ---------------------------------------------------------------- sign-up (§3.6)
- /** Sign-up is open (signup_enabled) or the request carries the invite token (owner's test window, ≥ 24 characters). */
+ /**
+  * Sign-up is open (signup_enabled) or, while it is off and payments are enforced, the request carries the invite token
+  * (the owner's test window of the paid sign-up, ≥ 24 characters; PLAN-REJESTRACJA-ROLE §3.3: never a way around a
+  * closed free sign-up).
+  */
  public static function signupOpen(array $c,mixed $invite):bool {
   if(!empty($c['signup_enabled']))return true;$t=$c['signup_invite_token'];
-  return is_string($t)&&strlen($t)>=24&&is_string($invite)&&hash_equals($t,$invite);
+  return !empty($c['billing_enforce'])&&is_string($t)&&strlen($t)>=24&&is_string($invite)&&hash_equals($t,$invite);
  }
  /** signup-begin {invite?}: 60 per hour per address; stores the server-side start time of the form. */
  public static function signupBegin(PDO $pdo,array $c,array $in):array {
@@ -86,36 +98,85 @@ final class Members {
   foreach([['signup-ip-hour',$ip,(int)$c['signup_limit_ip_hour'],3600],['signup-ip-day',$ip,(int)$c['signup_limit_ip_day'],86400]] as [$scope,$key,$limit,$window])
    if($s=RateLimit::hit($pdo,$c['app_key'],$scope,$key,$limit,$window))self::tooManySignups($s);
   if($global>0&&($s=RateLimit::peek($pdo,$c['app_key'],'signup-global','all',$global,3600)))self::tooManySignups($s);
+  // Duplicate e-mails (§3.7, PS-18): after 5 in an hour every sign-up from this network gets 429, whatever its outcome,
+  // so the 409 of a taken address cannot be used to test addresses in bulk.
+  if($s=RateLimit::peek($pdo,$c['app_key'],'signup-dup-ip',$ip,self::DUPLICATE_EMAILS_IP_HOUR,3600))self::tooManySignups($s);
   $started=$_SESSION['signup_at']??null;$age=is_int($started)?time()-$started:-1;
   if(!in_array($in['website']??null,[null,''],true)||$age<self::SIGNUP_MIN_SECONDS||$age>self::SIGNUP_MAX_SECONDS)throw new AppError('Nie udało się założyć konta. Spróbuj ponownie.',400);
+  // Roles (§4.5): only the two booleans roles.organizer and roles.athlete; every other field of the body is ignored.
+  $roles=is_array($in['roles']??null)?$in['roles']:[];$organizer=($roles['organizer']??null)===true;$athlete=($roles['athlete']??null)===true;
+  if($organizer&&($s=RateLimit::peek($pdo,$c['app_key'],'organizer-enable-ip-day',$ip,self::ORGANIZERS_IP_DAY,86400)))self::tooManyOrganizers($s);
   $email=self::email($in['email']??null);$hash=Domain::password(is_string($in['password']??null)?$in['password']:'');$profile=Profiles::validate($in);
-  $id=self::create($pdo,$email,$hash,$profile,['billing_exempt'=>0],time(),null);
+  // The athlete is validated in full before any transaction and without the workspace lock (R19).
+  $id=Domain::id();$now=time();$a=$athlete?self::athleteProfile($pdo,$id,is_array($in['athlete']??null)?$in['athlete']:[],$now):null;
+  self::create($pdo,$email,$hash,$profile,self::freeSignup($c,$now),$now,null,false,['id'=>$id,'organizer'=>$organizer,
+   'also'=>$a?static function()use($pdo,$a){self::insertAthlete($pdo,$a);}:null,
+   'duplicateEmail'=>static fn()=>RateLimit::hit($pdo,$c['app_key'],'signup-dup-ip',$ip,self::DUPLICATE_EMAILS_IP_HOUR,3600)]);
   if($global>0)RateLimit::hit($pdo,$c['app_key'],'signup-global','all',$global,3600);
+  if($organizer)RateLimit::hit($pdo,$c['app_key'],'organizer-enable-ip-day',$ip,self::ORGANIZERS_IP_DAY,86400);
   unset($_SESSION['signup_at']);$u=Accounts::find($pdo,$id);Auth::enter($u,$c);
-  return ['user'=>Accounts::safe($u),'csrf'=>$_SESSION['csrf']];
+  $caps=Accounts::sparseCaps(Actors::build($u,$organizer,null,null,$a?[['id'=>$a['profile']['id'],'archived'=>false,'relation'=>$a['profile']['relation']]]:[]));
+  return ['user'=>Accounts::safe($u),'csrf'=>$_SESSION['csrf']]+($caps?['caps'=>$caps]:[])+(isset($a['notice'])?['notice'=>$a['notice']]:[]);
  }
  private static function tooManySignups(int $s):never{Routes::retryAfter($s);throw new ApiError('Zbyt wiele prób zakładania konta. Spróbuj ponownie później.',429,['retry'=>$s]);}
+ private static function tooManyOrganizers(int $s):never{Routes::retryAfter($s);throw new ApiError('Zbyt wiele nowych kont organizatorów z tej sieci. Spróbuj ponownie jutro.',429,['retry'=>$s]);}
+ /** billing_accounts of a new account (§3.4): free-signup while payments are not enforced, so the switch to paid later decides about it. */
+ private static function freeSignup(array $c,int $now):array{return empty($c['billing_enforce'])?['billing_exempt'=>1,'exempt_reason'=>'free-signup','exempt_at'=>$now]:['billing_exempt'=>0];}
+ /**
+  * The athlete profile of a sign-up (§4.5, §6.1), validated before any transaction: Domain::athleteFields (422 with the
+  * messages of athlete.save), then the club among the clubs read now (Clubs::pick, the quotas of new clubs counted on
+  * them; a used-up quota gives 'unaffiliated' with the pending name). Returns {profile, newClub, notice}; the profile has
+  * the shape of athlete.save.
+  */
+ private static function athleteProfile(PDO $pdo,string $userId,array $in,int $now):array {
+  $f=Domain::athleteFields($in,date('Y-m-d'));Clubs::ensure($pdo);
+  $clubs=array_map([Clubs::class,'fromRow'],$pdo->query('SELECT id,name,verified,created_by,created_at,merged_into FROM clubs')->fetchAll(PDO::FETCH_ASSOC));
+  $u=['id'=>$userId,'role'=>'member'];$pick=Clubs::pick($clubs,$u,$f['club'],$now,Clubs::counts($clubs,$u,$now));
+  $a=['id'=>Domain::id(),'ownerId'=>$userId,'createdBy'=>$userId,'createdAt'=>$now,'archived'=>false,'name'=>$f['name'],'clubId'=>$pick['clubId'],'birthDate'=>$f['birthDate'],'sex'=>$f['sex'],'weight'=>$f['weight'],'height'=>$f['height'],'gradeType'=>$f['gradeType'],'grade'=>$f['grade'],'events'=>['forms'],'champion'=>false,'relation'=>$f['relation']];
+  if(isset($pick['pendingClubName']))$a['pendingClubName']=$pick['pendingClubName'];if($f['relation']==='guardian')$a['guardianDeclaredAt']=$now;
+  return ['profile'=>$a,'newClub'=>$pick['newClub']??null,'notice'=>$pick['notice']??null];
+ }
+ /**
+  * Inside the sign-up transaction: the new club (a plain INSERT; a name that collides under the collation, e.g. a parallel
+  * sign-up or ß/ss, takes the existing club or its merge target instead) and the profiles row (Repository::profileRow,
+  * revision stamp 0: no workspace lock, the global revision does not change).
+  */
+ private static function insertAthlete(PDO $pdo,array $x):void {
+  $a=$x['profile'];$club=$x['newClub'];
+  if($club){
+   try{$pdo->prepare('INSERT INTO clubs (id,name,verified,created_by,created_at,merged_into) VALUES (?,?,0,?,?,NULL)')->execute([$club['id'],$club['name'],$club['createdBy'],$club['createdAt']]);}
+   catch(\PDOException $e){
+    if((int)($e->errorInfo[1]??0)!==1062)throw $e;
+    $q=$pdo->prepare('SELECT id FROM clubs WHERE name=?');$q->execute([$club['name']]);$existing=$q->fetchColumn();$q->closeCursor();if(!is_string($existing))throw $e;
+    $all=array_map([Clubs::class,'fromRow'],$pdo->query('SELECT id,name,verified,created_by,created_at,merged_into FROM clubs')->fetchAll(PDO::FETCH_ASSOC));
+    $a['clubId']=Clubs::resolve($all,$existing)['id']??$existing;
+   }
+  }
+  $row=Repository::profileRow($a);$pdo->prepare('INSERT INTO profiles ('.implode(',',array_keys($row)).') VALUES ('.implode(',',array_fill(0,count($row),'?')).')')->execute(array_values($row));
+ }
  /**
   * The rows of a new member in one transaction. Duplicates: e-mail → neutral 409 (signup) or the Admin's message, username
-  * → 409, public_id collision → new id (3 tries). Returns the user id.
+  * → 409, public_id collision → new id (3 tries). Returns the user id. $o: id (fixed user id), organizer (users.organizer),
+  * also (callable run last inside the transaction: the athlete of a sign-up), duplicateEmail (callable before the 409).
   */
- private static function create(PDO $pdo,string $email,string $hash,array $profile,array $billing,int $now,?int $resetAt,bool $admin=false):string {
+ private static function create(PDO $pdo,string $email,string $hash,array $profile,array $billing,int $now,?int $resetAt,bool $admin=false,array $o=[]):string {
   for($try=0;;$try++){
-   $id=Domain::id();$publicId=Accounts::publicId();
+   $id=$o['id']??Domain::id();$publicId=Accounts::publicId();$organizer=!empty($o['organizer'])?1:0;$also=$o['also']??null;
    try{
-    return self::tx($pdo,function()use($pdo,$id,$publicId,$email,$hash,$profile,$billing,$now,$resetAt){
-     $pdo->prepare("INSERT INTO users (id,club_id,email,role,active,password_hash,auth_version) VALUES (?,NULL,?,'member',1,?,1)")->execute([$id,$email,$hash]);
+    return self::tx($pdo,function()use($pdo,$id,$publicId,$email,$hash,$profile,$billing,$now,$resetAt,$organizer,$also){
+     $pdo->prepare("INSERT INTO users (id,club_id,email,role,active,password_hash,auth_version,organizer) VALUES (?,NULL,?,'member',1,?,1,?)")->execute([$id,$email,$hash,$organizer]);
      $cols=$profile+['user_id'=>$id,'public_id'=>$publicId,'created_at'=>$now,'updated_at'=>$now,'last_login_at'=>$resetAt===null?$now:null,'pw_reset_at'=>$resetAt];
      $pdo->prepare('INSERT INTO user_profiles ('.implode(',',array_keys($cols)).') VALUES ('.implode(',',array_fill(0,count($cols),'?')).')')->execute(array_values($cols));
      $b=$billing+['user_id'=>$id,'created_at'=>$now,'updated_at'=>$now];
      $pdo->prepare('INSERT INTO billing_accounts ('.implode(',',array_keys($b)).') VALUES ('.implode(',',array_fill(0,count($b),'?')).')')->execute(array_values($b));
+     if($also)$also();
      return $id;
     });
    }catch(\PDOException $e){
     $dup=self::duplicate($e);
     if($dup==='public_id'&&$try<2)continue;
     if($dup==='username')throw new AppError('Ta nazwa użytkownika jest zajęta.',409);
-    if($dup==='email')throw $admin?new AppError('Konto z tym adresem e-mail już istnieje.',409):new AppError('Nie można założyć konta z tym adresem e-mail. Jeśli masz już konto, zaloguj się.',409);
+    if($dup==='email'){if(isset($o['duplicateEmail']))($o['duplicateEmail'])();throw $admin?new AppError('Konto z tym adresem e-mail już istnieje.',409):new AppError('Nie można założyć konta z tym adresem e-mail. Jeśli masz już konto, zaloguj się.',409);}
     throw $e;
    }
   }
@@ -189,7 +250,7 @@ final class Members {
  /**
   * Deletes a member account (§3.8, also the Admin's delete): forced payment sync, 409 confirmEnd while a subscription
   * runs and does not end (unless $endSubscription), deletion of every Stripe customer of the account (failure →
-  * stripe_redact_pending=1),
+  * stripe_redact_pending=1), the community data of the account (Domain::forgetMember, see below),
   * then one transaction: chat messages to tombstones, mutes and profile deleted, users anonymised (kept for foreign
   * keys), billing_accounts kept as a tombstone without personal data, account_audit entry; finally the avatar directory.
   */
@@ -208,6 +269,13 @@ final class Members {
    try{[$called,$ok]=self::bridge('MatDraw\\Billing','deleteCustomer',$pdo,$c,$userId);$redact=!$called||$ok===false?1:0;}
    catch(\Throwable $e){Routes::logThrowable($e,'MatDraw billing delete');$redact=1;}
   }
+  // Community data first (PLAN-REJESTRACJA-ROLE §6.6, DR-2, DR-3), in a workspace transaction only when there is some:
+  // owned athlete profiles are forgotten; as organizer, upcoming tournaments are hidden by 'system' (self-entries of
+  // others detached) and created profiles forgotten. Always ends (entries in brackets with results stay, anonymised);
+  // idempotent, so a deletion retried after an error repeats it harmlessly.
+  $q=$pdo->prepare('SELECT 1 FROM profiles WHERE owner_user_id=? UNION ALL SELECT 1 FROM profiles WHERE created_by=? UNION ALL SELECT 1 FROM tournaments WHERE created_by=? LIMIT 1');
+  $q->execute([$userId,$userId,$userId]);$community=$q->fetchColumn()!==false;$q->closeCursor();
+  if($community)(new Repository($pdo))->transaction(fn(array &$db)=>Domain::forgetMember($db,$userId));
   $q=$pdo->prepare('SELECT public_id FROM user_profiles WHERE user_id=?');$q->execute([$userId]);$publicId=$q->fetchColumn();$q->closeCursor();
   $mutes=self::tableExists($pdo,'chat_mutes');$now=time();
   // Hashed before the transaction: tombstoneUser holds chat_channels rows FOR UPDATE until commit, and bcrypt/Argon2 must not stretch that.
@@ -225,20 +293,29 @@ final class Members {
  }
 
  // ---------------------------------------------------------------- Admin panel (§4.3, §3.2, §3.10)
- /** One page of members (POST {q,filter,page}): prefix search on e-mail, username and last name, billing filters. */
+ /**
+  * One page of members (POST {q,filter,page,ownerOf?}): prefix search on e-mail, username and last name; billing filters
+  * and the role filters of PLAN-REJESTRACJA-ROLE §5.5 (organizers: the role switched on or blocked; organizers-pending:
+  * switched on, not blocked, not confirmed, active; athletes: a profile of the account that is not archived;
+  * free-signup: the exemption of the free sign-up period); ownerOf=<tournament id>: the member who created it. Items get
+  * the sparse fields caps (when one is true), tournaments (created, when any), freeSignup and trusted (when true), so
+  * members without a role keep the item shape of the panel.
+  */
  public static function adminList(PDO $pdo,array $c,array $in):array {
   $q=$in['q']??'';if(!is_string($q))$q='';$q=trim($q);if(mb_strlen($q)>100)throw new AppError('Wyszukiwana fraza jest za długa.');
-  $filter=$in['filter']??'all';if(!in_array($filter,['all','paid','free','none','problem','muted'],true))throw new AppError('Nieznany filtr.');
+  $filter=$in['filter']??'all';if(!in_array($filter,['all','paid','free','none','problem','muted','organizers','organizers-pending','athletes','free-signup'],true))throw new AppError('Nieznany filtr.');
   $page=$in['page']??1;$page=is_int($page)&&$page>=1&&$page<=100000?$page:1;
-  $sql="SELECT u.id,u.email,u.active,p.username,p.first_name,p.last_name,p.country,p.created_at,p.last_login_at,b.user_id AS b_user,b.billing_exempt,b.exempt_reason,b.exempt_until,b.livemode,b.sub_status,b.current_period_start,b.current_period_end,b.cancel_at_period_end,b.sync_error,b.stripe_redact_pending
-   FROM users u LEFT JOIN user_profiles p ON p.user_id=u.id LEFT JOIN billing_accounts b ON b.user_id=u.id WHERE u.role='member' AND b.deleted_at IS NULL";
-  $params=[];
+  $owner=$in['ownerOf']??null;if($owner!==null&&(!is_string($owner)||!preg_match('/^[A-Za-z0-9_-]{1,40}$/D',$owner)))throw new AppError('Niepoprawny formularz.',400);
+  $sql="SELECT u.id,u.email,u.active,u.organizer,u.organizer_blocked_at,u.organizer_trusted_at,(SELECT COUNT(*) FROM tournaments t WHERE t.created_by=u.id) AS t_count,EXISTS(SELECT 1 FROM profiles pr WHERE pr.owner_user_id=u.id AND pr.archived=0) AS athlete,
+   p.username,p.first_name,p.last_name,p.country,p.created_at,p.last_login_at,b.user_id AS b_user,b.billing_exempt,b.exempt_reason,b.exempt_until,b.livemode,b.sub_status,b.current_period_start,b.current_period_end,b.cancel_at_period_end,b.sync_error,b.stripe_redact_pending
+   FROM users u LEFT JOIN user_profiles p ON p.user_id=u.id LEFT JOIN billing_accounts b ON b.user_id=u.id WHERE u.role='member' AND b.deleted_at IS NULL".($owner!==null?' AND u.id=(SELECT t.created_by FROM tournaments t WHERE t.id=?)':'');
+  $params=$owner!==null?[$owner]:[];
   if($q!==''){
    // Literal prefix: ! escapes itself, % and _ (the same in MySQL and MariaDB, whatever NO_BACKSLASH_ESCAPES says).
    $like=strtr(mb_strtolower($q),['!'=>'!!','%'=>'!%','_'=>'!_']).'%';
    // username is ascii_bin: a phrase outside ASCII cannot match it, and comparing it would be error 1267 (mix of collations).
    $ascii=!preg_match('/[^\x00-\x7F]/',$like);
-   $sql.=" AND (u.email LIKE ? ESCAPE '!'".($ascii?" OR p.username LIKE ? ESCAPE '!'":'')." OR p.last_name LIKE ? ESCAPE '!')";$params=$ascii?[$like,$like,$like]:[$like,$like];
+   $sql.=" AND (u.email LIKE ? ESCAPE '!'".($ascii?" OR p.username LIKE ? ESCAPE '!'":'')." OR p.last_name LIKE ? ESCAPE '!')";$params=[...$params,...($ascii?[$like,$like,$like]:[$like,$like])];
   }
   $st=$pdo->prepare($sql.' ORDER BY p.created_at DESC,u.id');$st->execute($params);$rows=$st->fetchAll(PDO::FETCH_ASSOC);
   $cfg=array_replace($c,['billing_enforce'=>true]);$now=time();$items=[];
@@ -246,10 +323,13 @@ final class Members {
    $billing=$r['b_user']===null?null:$r;$a=Access::compute($billing,['id'=>$r['id'],'role'=>'member'],$cfg,$now);
    $exempt=$a['state']==='free';$sub=Access::subStatus($billing,$c);
    $problem=in_array($a['state'],['past_due','processing'],true)||$sub==='unpaid'||!empty($r['stripe_redact_pending'])||($r['sync_error']??null)!==null;
-   $keep=match($filter){'paid'=>in_array($a['state'],['active','ending','past_due'],true),'free'=>in_array($a['state'],['free','grace'],true),'none'=>in_array($a['state'],['none','ended'],true),'problem'=>$problem,default=>true};
+   $caps=self::caps($r);$free=!empty($r['billing_exempt'])&&$r['exempt_reason']==='free-signup';$tournaments=(int)$r['t_count'];
+   $keep=match($filter){'paid'=>in_array($a['state'],['active','ending','past_due'],true),'free'=>in_array($a['state'],['free','grace'],true),'none'=>in_array($a['state'],['none','ended'],true),'problem'=>$problem,
+    'organizers'=>!empty($r['organizer'])||$caps['organizerBlocked'],'organizers-pending'=>$caps['organizer']&&!$caps['organizerTrusted']&&!empty($r['active']),'athletes'=>$caps['athlete'],'free-signup'=>$free,default=>true};
    if($keep)$items[]=['id'=>$r['id'],'email'=>$r['email'],'username'=>$r['username'],'name'=>trim(($r['first_name']??'').' '.($r['last_name']??'')),'country'=>$r['country'],
     'createdAt'=>$r['created_at']===null?null:(int)$r['created_at'],'lastLoginAt'=>$r['last_login_at']===null?null:(int)$r['last_login_at'],'active'=>(bool)$r['active'],
-    'billing'=>['state'=>$a['state'],'until'=>$a['until'],'exempt'=>$exempt,'reason'=>$exempt||$a['state']==='grace'?$r['exempt_reason']:null],'muted'=>false,'mutedUntil'=>null];
+    'billing'=>['state'=>$a['state'],'until'=>$a['until'],'exempt'=>$exempt,'reason'=>$exempt||$a['state']==='grace'?$r['exempt_reason']:null],'muted'=>false,'mutedUntil'=>null]
+    +(in_array(true,$caps,true)?['caps'=>$caps]:[])+($tournaments>0?['tournaments'=>$tournaments]:[])+($free?['freeSignup'=>true]:[])+($caps['organizerTrusted']?['trusted'=>true]:[]);
   }
   if($filter==='muted'){$muted=self::muted($pdo,array_column($items,'id'));$items=array_values(array_filter($items,fn($i)=>array_key_exists($i['id'],$muted)));}
   $total=count($items);$items=array_slice($items,($page-1)*self::PAGE,self::PAGE);
@@ -281,28 +361,52 @@ final class Members {
   $deleted=$gone!==false&&$gone!==null;
   return $u;
  }
- /** admin-member {action,…}: create, active, password, email, profile, delete; members only, every action audited. */
+ /**
+  * admin-member {action,…}: create (organizer?), active (hideTournaments?), password, email, profile, delete, organizer
+  * {blocked, hideTournaments?}, organizer-trust {trusted}, organizer-bulk; members only, every action audited.
+  */
  public static function adminAction(RouteContext $ctx,array $admin,array $in):array {
   $pdo=$ctx->pdo();$c=$ctx->config;$action=$in['action']??null;$now=time();
   if($action==='create'){
    $email=self::email($in['email']??null);$given=$in['password']??null;$temp=$given===null||$given===''?self::temporaryPassword():null;
    $hash=Domain::password($temp??(is_string($given)?$given:''));$profile=Profiles::validate($in);
-   $billing=['billing_exempt'=>0];
-   if(($in['free']??false)===true){
+   // Without "free": the free-signup exemption while payments are not enforced (§3.4), else not exempt as before.
+   $billing=self::freeSignup($c,$now);$free=($in['free']??false)===true;$organizer=($in['organizer']??false)===true;
+   if($free){
     $reason=Text::clean($in['reason']??'');if($reason===null||mb_strlen($reason)>200)Domain::txt(null,'powód',200);
     $billing=['billing_exempt'=>1,'exempt_reason'=>$reason===''?null:$reason,'exempt_by'=>$admin['id'],'exempt_at'=>$now,'exempt_until'=>self::until($in['until']??null,$now)];
-   }
-   $id=self::create($pdo,$email,$hash,$profile,$billing,$now,$temp===null?null:$now,true);
-   self::audit($pdo,$admin['id'],'create',$id,($in['free']??false)===true?'free':null);
+   }elseif(!empty($billing['billing_exempt']))$billing['exempt_by']=$admin['id'];
+   $id=self::create($pdo,$email,$hash,$profile,$billing,$now,$temp===null?null:$now,true,['organizer'=>$organizer]);
+   $note=trim(($free?'free':(!empty($billing['billing_exempt'])?'free-signup':'')).($organizer?' organizer':''));
+   self::audit($pdo,$admin['id'],'create',$id,$note===''?null:$note);
    return ['id'=>$id]+($temp===null?[]:['temporaryPassword'=>$temp]);
   }
+  if($action==='organizer-bulk')return self::organizerBulk($pdo,$admin,$in);
   $deleted=false;$u=self::target($pdo,$in['userId']??null,$deleted);
   if($deleted){if($action==='delete')return ['id'=>$u['id'],'deleted'=>true];throw new AppError('Konto nie istnieje.',404);}
   switch($action){
    case 'active':
     if(!is_bool($in['active']??null))throw new AppError('Niepoprawny formularz.',400);
-    self::tx($pdo,function()use($pdo,$u,$in,$admin){$pdo->prepare("UPDATE users SET active=?,auth_version=auth_version+1 WHERE id=? AND role='member'")->execute([$in['active']?1:0,$u['id']]);self::audit($pdo,$admin['id'],'active',$u['id'],$in['active']?'1':'0');});
-    return ['id'=>$u['id'],'active'=>$in['active']];
+    // Blocking the account may hide the person's upcoming tournaments too (§5.5), in a second transaction; the reason is
+    // checked before the first one, so a bad reason changes nothing.
+    $hide=!$in['active']&&($in['hideTournaments']??false)===true;$reason=$hide?self::hideReason($in['reason']??null):'';
+    self::setActive($pdo,$admin,$u['id'],$in['active']);
+    return ['id'=>$u['id'],'active'=>$in['active']]+($hide?['hidden'=>self::hideTournaments($pdo,$admin,$u['id'],$reason)]:[]);
+   case 'organizer':
+    // Take the organizer role away or give it back (§5.5); the person cannot switch it on while blocked.
+    if(!is_bool($in['blocked']??null))throw new AppError('Niepoprawny formularz.',400);
+    $hide=$in['blocked']&&($in['hideTournaments']??false)===true;$reason=$hide?self::hideReason($in['reason']??null):'';
+    self::blockOrganizer($pdo,$admin,$u['id'],$in['blocked']);
+    $hidden=$hide?['hidden'=>self::hideTournaments($pdo,$admin,$u['id'],$reason)]:[];
+    return ['id'=>$u['id'],'caps'=>Actors::of($pdo,$u)['caps']]+$hidden;
+   case 'organizer-trust':
+    // Confirm an organizer or take the confirmation back (R16): home page, chat lobby and self-entries of minors.
+    if(!is_bool($in['trusted']??null))throw new AppError('Niepoprawny formularz.',400);
+    self::tx($pdo,function()use($pdo,$u,$in,$admin,$now){
+     $pdo->prepare("UPDATE users SET organizer_trusted_at=?,organizer_trusted_by=? WHERE id=? AND role='member'")->execute($in['trusted']?[$now,$admin['id'],$u['id']]:[null,null,$u['id']]);
+     self::audit($pdo,$admin['id'],$in['trusted']?'organizer.trust':'organizer.untrust',$u['id']);
+    });
+    return ['id'=>$u['id'],'caps'=>Actors::of($pdo,$u)['caps']];
    case 'password':
     $temp=self::temporaryPassword();$hash=Domain::password($temp);Accounts::ensureProfile($pdo,$u['id']);
     self::tx($pdo,function()use($pdo,$u,$hash,$admin,$now){
@@ -331,6 +435,85 @@ final class Members {
     return ['id'=>$u['id'],'deleted'=>true];
   }
   throw new AppError('Nieznana operacja.',400);
+ }
+ /** active of a member account: auth_version+1 ends every session; audited. */
+ private static function setActive(PDO $pdo,array $admin,string $userId,bool $active):void {
+  self::tx($pdo,function()use($pdo,$admin,$userId,$active){$pdo->prepare("UPDATE users SET active=?,auth_version=auth_version+1 WHERE id=? AND role='member'")->execute([$active?1:0,$userId]);self::audit($pdo,$admin['id'],'active',$userId,$active?'1':'0');});
+ }
+ /** organizer_blocked_at = now (the role is taken away; commands read it again under the workspace lock) or NULL; audited organizer.block / organizer.unblock. */
+ private static function blockOrganizer(PDO $pdo,array $admin,string $userId,bool $blocked):void {
+  self::tx($pdo,function()use($pdo,$admin,$userId,$blocked){
+   $pdo->prepare("UPDATE users SET organizer_blocked_at=? WHERE id=? AND role='member'")->execute([$blocked?time():null,$userId]);
+   self::audit($pdo,$admin['id'],$blocked?'organizer.block':'organizer.unblock',$userId);
+  });
+ }
+ /** The reason of the Administrator's tournament.hide, checked as Domain checks it (422) before the block or deactivation commits. */
+ private static function hideReason(mixed $v):string{$r=Text::clean($v??'');if($r===null||mb_strlen($r)>200)throw new AppError('Sprawdź pole: powód.');return $r;}
+ /**
+  * tournament.hide with withdrawSelf (§5.5) for every upcoming tournament (date ≥ today) of $userId that is not hidden yet,
+  * in one workspace transaction as the Administrator, each audited like the command; returns how many were hidden.
+  * $reason is already checked (hideReason).
+  */
+ private static function hideTournaments(PDO $pdo,array $admin,string $userId,string $reason):int {
+  $today=date('Y-m-d');
+  return (new Repository($pdo))->transaction(function(array &$db)use($pdo,$admin,$userId,$reason,$today):int{
+   $n=0;
+   foreach($db['tournaments'] as $t){
+    if($t['createdBy']!==$userId||$t['date']<$today||($t['hiddenBy']??null)!==null)continue;
+    Domain::execute($db,$admin['id'],'tournament.hide',['tournamentId'=>$t['id'],'hidden'=>true,'withdrawSelf'=>true,'reason'=>$reason],$db['revision']);
+    self::audit($pdo,$admin['id'],'tournament.hide',$userId,mb_substr('hidden '.$t['id'].' · '.$t['name'],0,200));$n++;
+   }
+   return $n;
+  });
+ }
+ /**
+  * organizer-bulk {userIds:[…≤50], block?:true, hideTournaments?:bool, deactivate?:bool} (§5.5): for each member account
+  * the role block (or its removal with block:false), then its upcoming tournaments hidden and the account blocked when
+  * asked, each in its own transactions; one account failing never stops the others (a server error, e.g. a deadlock, is
+  * logged and listed like a refusal). The reason is checked once, before any account. {done:[ids], failed:[{id,error}]}.
+  */
+ private static function organizerBulk(PDO $pdo,array $admin,array $in):array {
+  $ids=$in['userIds']??null;
+  if(!is_array($ids)||!array_is_list($ids)||!$ids||count($ids)>self::BULK_MAX||array_filter($ids,fn($x)=>!is_string($x))||array_filter([$in['block']??true,$in['hideTournaments']??false,$in['deactivate']??false],fn($x)=>!is_bool($x)))throw new AppError('Niepoprawny formularz.',400);
+  $block=($in['block']??true)===true;$hide=$block&&($in['hideTournaments']??false)===true;$deactivate=($in['deactivate']??false)===true;$done=[];$failed=[];
+  $reason=$hide?self::hideReason($in['reason']??null):'';
+  foreach(array_values(array_unique($ids)) as $id){
+   try{
+    $deleted=false;$u=self::target($pdo,$id,$deleted);if($deleted)throw new AppError('Konto nie istnieje.',404);
+    self::blockOrganizer($pdo,$admin,$u['id'],$block);if($hide)self::hideTournaments($pdo,$admin,$u['id'],$reason);if($deactivate)self::setActive($pdo,$admin,$u['id'],false);
+    $done[]=$u['id'];
+   }catch(AppError $e){$failed[]=['id'=>$id,'error'=>$e->getMessage()];}
+   catch(\Throwable $e){Routes::logThrowable($e,'MatDraw organizer-bulk');$failed[]=['id'=>$id,'error'=>'Błąd serwera. Skontaktuj się z Administratorem.'];}
+  }
+  return ['done'=>$done,'failed'=>$failed];
+ }
+ /** caps (§8.2) from a users row with organizer, organizer_blocked_at, organizer_trusted_at and athlete (a profile of the account that is not archived), as Actors::build. */
+ private static function caps(array $r):array{return ['organizer'=>!empty($r['organizer'])&&$r['organizer_blocked_at']===null,'organizerBlocked'=>$r['organizer_blocked_at']!==null,'organizerTrusted'=>$r['organizer_trusted_at']!==null,'athlete'=>!empty($r['athlete'])];}
+ /** Organizers waiting for the Administrator's confirmation (§5.5 queue, the nav badge of me): the role on, not blocked, not confirmed, account active. */
+ public static function pendingOrganizers(PDO $pdo):int{return (int)$pdo->query("SELECT COUNT(*) FROM users WHERE role='member' AND organizer=1 AND organizer_blocked_at IS NULL AND organizer_trusted_at IS NULL AND active=1")->fetchColumn();}
+ /**
+  * roles {organizer:bool} (§4.5): the member's own organizer switch, 10 changes per hour. Switching on: 403 while the
+  * Administrator blocks the role, 3 per day per network (/64, shared with the sign-up). Switching off: 409 while the
+  * account has tournaments with open or closed registration, checked and written under the workspace lock, so a command
+  * running at the same time cannot add one. Audited as self.organizer (on/off). Returns {caps}.
+  */
+ public static function roles(PDO $pdo,array $c,array $u,array $in):array {
+  if(!is_bool($in['organizer']??null))throw new AppError('Niepoprawny formularz.',400);
+  if($s=RateLimit::hit($pdo,$c['app_key'],'roles',$u['id'],self::ROLES_HOUR,3600)){Routes::retryAfter($s);throw new ApiError('Zbyt wiele zmian ról. Spróbuj ponownie później.',429,['retry'=>$s]);}
+  $actor=Actors::of($pdo,$u);$on=$in['organizer'];
+  if($on&&$actor['caps']['organizerBlocked'])throw new AppError('Administrator wyłączył Ci rolę organizatora.',403);
+  if($on===$actor['organizer'])return ['caps'=>$actor['caps']];
+  if($on){
+   $ip=ClientIp::bucket($c);if($s=RateLimit::peek($pdo,$c['app_key'],'organizer-enable-ip-day',$ip,self::ORGANIZERS_IP_DAY,86400))self::tooManyOrganizers($s);
+   self::tx($pdo,function()use($pdo,$u){$pdo->prepare("UPDATE users SET organizer=1 WHERE id=? AND role='member' AND organizer_blocked_at IS NULL")->execute([$u['id']]);self::audit($pdo,'self','self.organizer',$u['id'],'on');});
+   RateLimit::hit($pdo,$c['app_key'],'organizer-enable-ip-day',$ip,self::ORGANIZERS_IP_DAY,86400);
+  }else self::tx($pdo,function()use($pdo,$u){
+   $pdo->query('SELECT revision FROM app_meta WHERE id=1 FOR UPDATE')->fetchAll();
+   $q=$pdo->prepare("SELECT 1 FROM tournaments WHERE created_by=? AND status IN ('open','closed') LIMIT 1");$q->execute([$u['id']]);$running=$q->fetchColumn()!==false;$q->closeCursor();
+   if($running)throw new AppError('Masz turnieje z otwartymi lub zamkniętymi zapisami. Zakończ je albo przełącz na roboczy, zanim wyłączysz rolę organizatora.',409);
+   $pdo->prepare("UPDATE users SET organizer=0 WHERE id=? AND role='member'")->execute([$u['id']]);self::audit($pdo,'self','self.organizer',$u['id'],'off');
+  });
+  return ['caps'=>Actors::of($pdo,$u)['caps']];
  }
  /** End of a free period: null, a future epoch second, or 'YYYY-MM-DD' (end of that day, Europe/Warsaw). */
  private static function until(mixed $v,int $now):?int {

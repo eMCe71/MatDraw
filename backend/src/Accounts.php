@@ -83,9 +83,23 @@ final class Accounts {
   return $s;
  }
  public static function touchLogin(PDO $pdo,string $userId):void{$pdo->prepare('UPDATE user_profiles SET last_login_at=? WHERE user_id=?')->execute([time(),$userId]);}
- /** bootstrap for a member (§3.3): the workspace shape without any workspace data. */
- public static function memberWorkspace(array $u):array{return ['schemaVersion'=>2,'revision'=>0,'user'=>self::safe($u),'clubs'=>[],'users'=>[],'profiles'=>[],'tournaments'=>[]];}
+ /** bootstrap for a member (§3.3): the workspace shape without any workspace data; the user carries caps when it has any (sparseCaps). */
+ public static function memberWorkspace(array $u,?array $actor=null):array{return ['schemaVersion'=>2,'revision'=>0,'user'=>self::withCaps($u,$actor),'clubs'=>[],'users'=>[],'profiles'=>[],'tournaments'=>[]];}
  public static function safe(array $u):array{return Domain::safeUser($u);}
+ /**
+  * caps of an actor (Actors::of) only when one of them is true, else null (PLAN-REJESTRACJA-ROLE §8.2). Sparse, like the
+  * community fields of GuestView: accounts without a role keep the exact shapes of me, sign-up, login and the member
+  * bootstrap that clients and tests already rely on; a missing caps means all false.
+  */
+ public static function sparseCaps(?array $actor):?array{$caps=$actor['caps']??null;return is_array($caps)&&in_array(true,$caps,true)?$caps:null;}
+ /** The athlete profiles of an account for me (§8.1): [{profileId, name, relation, archived}], one query by the owner index. */
+ public static function athletes(PDO $pdo,string $userId):array {
+  $q=$pdo->prepare('SELECT id,archived,data FROM profiles WHERE owner_user_id=? ORDER BY id');$q->execute([$userId]);$out=[];
+  foreach($q->fetchAll(PDO::FETCH_ASSOC) as $r){$d=json_decode((string)$r['data'],true);$d=is_array($d)?$d:[];$out[]=['profileId'=>$r['id'],'name'=>is_string($d['name']??null)?$d['name']:'','relation'=>in_array($d['relation']??null,['self','guardian'],true)?$d['relation']:null,'archived'=>(bool)$r['archived']];}
+  return $out;
+ }
+ /** The safe account {id, clubId, email, role, active} plus caps when the actor has any. */
+ public static function withCaps(array $u,?array $actor):array{$caps=self::sparseCaps($actor);return ['id'=>$u['id'],'clubId'=>$u['clubId'],'email'=>$u['email'],'role'=>$u['role'],'active'=>$u['active']]+($caps?['caps'=>$caps]:[]);}
  /**
   * Whether a profile allows posting (§3.1): first name, last name, username, country and at least one sport. Accepts a
   * user_profiles row (first_name, sports "a,b") or the camelCase projection (firstName, sports [..]); shared by me,
