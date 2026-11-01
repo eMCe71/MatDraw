@@ -2,7 +2,8 @@
 // athlete-save (age rule, profile cap, one own profile, identity lock, closed field list), athlete-entry (open, closed, without
 // self-entries, past, hidden/draft/missing with one 404, repeat, drawn category, minors in untrusted tournaments, events),
 // athlete-withdraw and tombstones, the athlete view (equal to the workspace projection, no other person's data),
-// athlete-forget, paid mode (only entering needs full access) and seed-athletes with its safe --remove.
+// athlete-forget, paid mode (only entering needs full access; correcting an own entry does not, R12), the limits (429, 413)
+// and seed-athletes with its safe --remove (one rule for demo clubs, earlier demo clubs unverified).
 import test,{before} from 'node:test';
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
@@ -118,6 +119,25 @@ test('minors enter only trusted tournaments; an adult self profile may enter an 
  const r=ok(await adult.req('athlete-entry',{tournamentId:t,profileId:own,...ENTRY}));assert.equal(r.entry.tournament.trusted,false);assert.equal(r.entry.tournament.community,true);
 });
 
+test('an organizer neither confirmed nor blocked: trusted only without trustRequired; build() equals the workspace for both values',{skip},async()=>{
+ const org=fixture('member',{email:`org.u.${Date.now()}@athletes.test`,profile:true});fixture('domain-organizer',{userId:org.id,organizer:true});
+ const created=run(org.id,'tournament.save',{name:'Społeczny Niepotwierdzony',city:'Opole',date:day(22),mat:'Mata 1',status:'open'});assert.equal(created.status,200,JSON.stringify(created));const t=created.result.id;
+ const parent=await member('parent.u');const child=ok(await parent.req('athlete-save',{...SELF,name:'Ala Niepotwierdzona',birthDate:yearsAgo(11),sex:'F',grade:8,relation:'guardian'})).profile.id;
+ for(const required of [true,false]){
+  const check=fixture('athlete-view-check',{userId:parent.id,config:{organizers_trust_required:required}});assert.equal(check.flags.trustRequired,required);
+  assert.deepEqual(check.build,check.workspace,'build() = fromWorkspace(), trustRequired '+required);
+  const offer=check.build.open.find(x=>x.id===t);assert.equal(offer.community,true);assert.equal(offer.trusted,!required);
+  assert.deepEqual(offer.profiles,[{id:child,entered:false,blocked:required?'minor-untrusted':null}],'trustRequired '+required);
+ }
+ // The routes follow the configured switch; Domain takes the minor under trustRequired=false (§17) and refuses under true.
+ const required=fixture('athlete-view-check',{userId:parent.id}).flags.trustRequired;
+ assert.equal(ok(await parent.req('athlete')).open.find(x=>x.id===t).trusted,!required);
+ const r=await parent.req('athlete-entry',{tournamentId:t,profileId:child,...ENTRY});assert.equal(r.status,required?409:200,JSON.stringify(r.data));
+ const other=fixture('domain-run',{actor:parent.id,type:'entry.self',payload:{tournamentId:t,profileId:child,...ENTRY},config:{organizers_trust_required:!required}});
+ assert.equal(other.status,required?200:409,JSON.stringify(other));
+ assert.equal(ok(await parent.req('athlete')).entries.filter(e=>e.tournament.id===t).length,1,'entered once');
+});
+
 test('athlete-withdraw: open 200, closed 403, only own profiles; a withdrawal by the organizer leaves a tombstone',{skip},async()=>{
  const a=await admin(),m=await member('withdraw');const own=ok(await m.req('athlete-save',SELF)).profile.id;
  const open=await tournament(a,'Wycofanie Otwarte'),later=await tournament(a,'Wycofanie Zamykane');
@@ -181,19 +201,55 @@ test('paid mode: athlete-entry 402; withdraw, save, archive, forget and the view
  const t2=await tournament(a,'Płatny Tryb Drugi');
  assert.equal(ok(await m.req('athlete-entry',{tournamentId:t2,profileId:own,...ENTRY}),402).error,'Zgłoszenia do turniejów wymagają aktywnego konta.');
  assert.equal(ok(await m.req('athlete-entry',{tournamentId:'0'.repeat(32),profileId:own,...ENTRY}),402).error,'Zgłoszenia do turniejów wymagają aktywnego konta.','402 comes first: nothing to probe');
+ // R12: correcting the own entry without new events needs no full access; a new event or no entry to correct is entering.
+ const fixed=ok(await m.req('athlete-entry',{tournamentId:t,profileId:own,events:['forms'],weight:73,update:true}));assert.equal(fixed.entry.entry.weight,73);
+ for(const body of [{tournamentId:t,profileId:own,events:['forms','special'],update:true},{tournamentId:t2,profileId:own,...ENTRY,update:true}])
+  assert.equal(ok(await m.req('athlete-entry',body),402).error,'Zgłoszenia do turniejów wymagają aktywnego konta.',JSON.stringify(body));
+ const free=await member('paid.other');assert.equal(ok(await free.req('athlete-entry',{tournamentId:t,profileId:own,...ENTRY,update:true}),404).error,'Zawodnik nie istnieje.','another account never corrects it');
  ok(await m.req('athlete'));ok(await m.req('athlete-save',{...SELF,id:own,name:'Adam Niepłacący'}));
  ok(await m.req('athlete-withdraw',{tournamentId:t,profileId:own}));
  assert.deepEqual(ok(await m.req('athlete-archive',{profileId:own,archived:true})).caps.athlete,false);ok(await m.req('athlete-archive',{profileId:own,archived:false}));
  ok(await m.req('athlete-forget',{profileId:own,password:PASSWORD}));assert.equal(fixture('athlete-row',{id:own}),null);
 });
 
+test('limits: athlete-forget 5/h, the global bucket of member transactions 429 with Retry-After, athlete-entry over 4 KB 413',{skip},async()=>{
+ fixture('reset-limits');
+ try{
+  const m=await member('limits');const own=ok(await m.req('athlete-save',SELF)).profile.id;
+  for(let i=0;i<5;i++)assert.equal(ok(await m.req('athlete-forget',{profileId:own,password:'wrong password!'}),422).error,'Nieprawidłowe obecne hasło.');
+  const sixth=await m.req('athlete-forget',{profileId:own,password:PASSWORD});assert.equal(sixth.status,429,JSON.stringify(sixth.data));
+  assert.equal(sixth.data.error,'Zbyt wiele prób. Spróbuj ponownie później.');assert.ok(sixth.data.retry>0);assert.equal(sixth.headers.get('retry-after'),String(sixth.data.retry));
+  assert.ok(fixture('athlete-row',{id:own}),'the profile stays');
+  const a=await admin(),t=await tournament(a,'Limity Atletów');
+  fixture('athlete-member-tx',{attempts:120});
+  for(const [route,body] of [['athlete-entry',{tournamentId:t,profileId:own,...ENTRY}],['athlete-save',{...SELF,id:own,weight:71}],['athlete-withdraw',{tournamentId:t,profileId:own}]]){
+   const r=await m.req(route,body);assert.equal(r.status,429,route+' '+JSON.stringify(r.data));assert.equal(r.data.error,'Serwer jest teraz mocno obciążony. Spróbuj ponownie za chwilę.');
+   assert.ok(r.data.retry>0&&r.data.retry<=60,route);assert.equal(r.headers.get('retry-after'),String(r.data.retry));
+  }
+  assert.ok(!ok(await m.req('athlete')).entries.length,'nothing entered');
+  fixture('reset-limits');
+  const big=await m.req('athlete-entry',{tournamentId:t,profileId:own,...ENTRY,note:'x'.repeat(4200)});assert.equal(big.status,413);assert.equal(big.data.error,'Żądanie jest zbyt duże.');
+  ok(await m.req('athlete-entry',{tournamentId:t,profileId:own,...ENTRY}));
+ }finally{fixture('reset-limits');}
+});
+
 test('seed-athletes: demo clubs unverified; --remove refuses while a community profile uses one; seed and remove round trip',{skip},async()=>{
  const a=await admin();
+ // One rule for seeding and --remove: a club that only resembles a demo name (Clubs::key) stops the seeding until renamed.
+ await a.load();await a.cmd('profile.save',{...STAFF,name:'Podobny Klubowicz',clubName:'KS Smok Demo'});
+ const clash=seed(['--count=12','--seed=7']);assert.equal(clash.code,1);assert.equal(clash.err,'The club "KS Smok Demo" resembles the demo club "KS Smok (demo)"; rename it in the app (Kluby) first.');
+ assert.deepEqual(fixture('athlete-demo').clubs,[],'nothing seeded');
+ const similar=(await a.load()).clubs.find(c=>c.name==='KS Smok Demo').id;await a.cmd('club.save',{id:similar,name:'KS Smok Inny'});
  const added=seed(['--count=12','--seed=7']);assert.equal(added.code,0,added.err);
  const demo=fixture('athlete-demo');assert.equal(demo.clubs.length,6);assert.equal(demo.profiles,12);
  for(const c of demo.clubs){assert.equal(c.verified,0,c.name);assert.equal(c.created_by,a.data.user.id);}
- const listed=await (await fetch(base+'?route=public-clubs',{headers:{'X-MatBravo-Client':String(CLIENT_API)}})).json();
- assert.ok(!listed.clubs.some(c=>c.name.endsWith(' (demo)')),'demo clubs are not public');
+ const publicDemo=async()=>(await (await fetch(base+'?route=public-clubs',{headers:{'X-MatBravo-Client':String(CLIENT_API)}})).json()).clubs.filter(c=>c.name.endsWith(' (demo)')).length;
+ assert.equal(await publicDemo(),0,'demo clubs are not public');
+ // Demo clubs of an earlier version stayed verified (0007: DEFAULT 1): any run unverifies them first, even one that refuses.
+ fixture('athlete-demo-verify');assert.equal(await publicDemo(),6);const stale=fixture('athlete-demo').revision;
+ const repeat=seed(['--count=12','--seed=7']);assert.equal(repeat.code,1);assert.equal(repeat.err,'Sample athletes already exist. Run with --remove first.');assert.equal(repeat.out,'Unverified 6 demo clubs (off the public club list).');
+ const hidden=fixture('athlete-demo');assert.equal(await publicDemo(),0);for(const c of hidden.clubs)assert.equal(c.verified,0,c.name);
+ assert.equal(Number(hidden.revision.revision),Number(stale.revision)+1);assert.equal(hidden.revision.staff_rev,hidden.revision.revision);assert.equal(hidden.profiles,12);
  const m=await member('demo');const own=ok(await m.req('athlete-save',{...SELF,club:{id:demo.clubs[0].id}})).profile;assert.equal(own.club.verified,false);
  const used=fixture('athlete-demo');assert.equal(used.profiles,13);
  const refused=seed(['--remove']);assert.equal(refused.code,1);assert.match(refused.err,/^Demo clubs are used by community profiles; merge or rename them in the app \(Kluby\) first\.$/);

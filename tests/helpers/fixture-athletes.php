@@ -4,15 +4,22 @@
 declare(strict_types=1);
 use MatDraw\{Actors,AthleteView,Domain,People,Repository,Settings};
 return [
- // AthleteView::build() of a member and fromWorkspace() of the full workspace with every tombstone and organizer name (equal, §7.4).
+ // AthleteView::build() of a member and fromWorkspace() of the full workspace with every tombstone and organizer name (equal, §7.4),
+ // with the flags of the test configuration or of {config} over it (organizers_trust_required true/false, §17).
  'athlete-view-check'=>function(PDO $pdo,array $p,array $c):array{
-  $u=Actors::of($pdo,['id'=>(string)($p['userId']??'')]);$flags=Settings::flags(Settings::effective($pdo,$c));$today=date('Y-m-d');
+  $u=Actors::of($pdo,['id'=>(string)($p['userId']??'')]);$flags=Settings::flags(Settings::effective($pdo,array_replace($c,(array)($p['config']??[]))));$today=date('Y-m-d');
   $db=(new Repository($pdo))->snapshot();$db['flags']=$flags;
   $gone=array_map(fn($r)=>['profileId'=>$r['profile_id'],'tournamentId'=>$r['tournament_id'],'by'=>$r['by_kind'],'at'=>(int)$r['created_at']],$pdo->query('SELECT * FROM entry_withdrawals')->fetchAll(PDO::FETCH_ASSOC));
   $creators=[];foreach($db['tournaments'] as $t)if(Domain::community($db,$t))$creators[]=$t['createdBy'];
   $names=[];foreach(People::project($pdo,$creators) as $id=>$x)if(isset($x['n']))$names[$id]=['n'=>$x['n']];
-  return ['build'=>AthleteView::build($pdo,$u,$today,$flags),'workspace'=>AthleteView::fromWorkspace($db,$u,$today,$gone,$names)];
+  return ['build'=>AthleteView::build($pdo,$u,$today,$flags),'workspace'=>AthleteView::fromWorkspace($db,$u,$today,$gone,$names),'flags'=>$flags];
  },
+ // The global bucket of member transactions (member-tx, 120 per minute, §3.7) filled to {attempts} in the current window.
+ 'athlete-member-tx'=>function(PDO $pdo,array $p,array $c):array{
+  $pdo->prepare('REPLACE INTO login_limits (bucket,attempts,window_start) VALUES (?,?,?)')->execute([hash_hmac('sha256','member-tx|all',$c['app_key']),(int)($p['attempts']??120),time()]);return ['ok'=>true];
+ },
+ // Marks the demo clubs verified, as migration 0007 left the clubs of an earlier seed-athletes run (DEFAULT 1).
+ 'athlete-demo-verify'=>fn(PDO $pdo):array=>['changed'=>$pdo->exec("UPDATE clubs SET verified=1 WHERE name LIKE '% (demo)'")],
  // One profiles row (data decoded) or null.
  'athlete-row'=>function(PDO $pdo,array $p):?array{
   $q=$pdo->prepare('SELECT id,club_id,created_by,owner_user_id,archived,data FROM profiles WHERE id=?');$q->execute([(string)($p['id']??'')]);$r=$q->fetch(PDO::FETCH_ASSOC);

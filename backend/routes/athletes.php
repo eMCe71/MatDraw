@@ -6,6 +6,7 @@
 //   athlete-archive   POST session, member: athlete.archive {profileId, archived}      20/h (shared)
 //   athlete-forget    POST session, member: athlete.forget {profileId, password}       5/h, password with the login limits
 //   athlete-entry     POST session, member, 4 KB: entry.self (§7.2); 402 without full access in paid mode   30/h (with withdraw)
+//                     except a correction (update:true) of an own entry without new events (R12: correcting own data)
 //   athlete-withdraw  POST session, member: entry.remove {tournamentId, id=profileId} of an own profile (§7.3)   30/h (shared)
 // Every write is one Repository::transaction with the member actor (Actors::of) and Domain::execute at the current revision
 // (scoped revisions, §5.8), after the account's own limit and the global bucket of member transactions (member-tx, 120 per
@@ -26,6 +27,13 @@ $run=static function(RouteContext $ctx,array $c,array $actor,string $type,array 
 };
 $saveLimit=static function(RouteContext $ctx,array $c):void{if($s=RateLimit::hit($ctx->pdo(),$c['app_key'],'athlete-save',$ctx->user()['id'],20,3600))throw new ApiError('Zbyt wiele zmian danych zawodnika. Spróbuj ponownie później.',429,['retry'=>Routes::retryAfter($s)]);};
 $entryLimit=static function(RouteContext $ctx,array $c):void{if($s=RateLimit::hit($ctx->pdo(),$c['app_key'],'athlete-entry',$ctx->user()['id'],30,3600))throw new ApiError('Zbyt wiele zmian zgłoszeń. Spróbuj ponownie później.',429,['retry'=>Routes::retryAfter($s)]);};
+/** R12: a correction of an own existing entry (update:true, the events a subset of the entry's) never needs full access; anything else does. */
+$correction=static function(RouteContext $ctx):bool{
+ if($ctx->input('update')!==true||!is_string($t=$ctx->input('tournamentId'))||!is_string($id=$ctx->input('profileId')))return false;
+ $q=$ctx->pdo()->prepare('SELECT e.snapshot FROM entries e JOIN profiles p ON p.id=e.profile_id WHERE e.tournament_id=? AND e.profile_id=? AND p.owner_user_id=?');$q->execute([$t,$id,$ctx->user()['id']]);
+ $old=$q->fetchColumn();if(!is_string($old))return false;$had=json_decode($old,true)['events']??[];$events=$ctx->input('events');
+ return $events===null||(is_array($events)&&is_array($had)&&$events===array_values(array_filter($events,fn($e)=>in_array($e,$had,true))));
+};
 $view=static fn(RouteContext $ctx,array $c):array=>AthleteView::build($ctx->pdo(),$ctx->user(),date('Y-m-d'),Settings::flags($c));
 $caps=static fn(RouteContext $ctx):array=>Actors::of($ctx->pdo(),$ctx->user())['caps'];
 return [
@@ -54,9 +62,9 @@ return [
   $run($ctx,$c,Actors::of($pdo,$u),'athlete.forget',['profileId'=>$ctx->input('profileId')]);
   return ['caps'=>$caps($ctx)];
  }],
- 'athlete-entry'=>['method'=>'POST','auth'=>'session','user'=>'member','max'=>4096,'handler'=>function(RouteContext $ctx)use($config,$fields,$run,$entryLimit,$view):array{
+ 'athlete-entry'=>['method'=>'POST','auth'=>'session','user'=>'member','max'=>4096,'handler'=>function(RouteContext $ctx)use($config,$fields,$run,$entryLimit,$view,$correction):array{
   $c=$config($ctx);$entryLimit($ctx,$c);
-  if(!Access::of($ctx->pdo(),$ctx->user(),$c)['full'])throw new ApiError('Zgłoszenia do turniejów wymagają aktywnego konta.',402);
+  if(!Access::of($ctx->pdo(),$ctx->user(),$c)['full']&&!$correction($ctx))throw new ApiError('Zgłoszenia do turniejów wymagają aktywnego konta.',402);
   $r=$run($ctx,$c,Actors::of($ctx->pdo(),$ctx->user()),'entry.self',$fields($ctx->body,['tournamentId','profileId','events','weight','height','gradeType','grade','saveToProfile','update']));
   $entry=null;foreach($view($ctx,$c)['entries'] as $e)if($e['profileId']===$r['id']&&$e['tournament']['id']===$r['tournamentId'])$entry=$e;
   return ['ok'=>true,'entry'=>$entry];
