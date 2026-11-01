@@ -213,5 +213,9 @@ export default {
  'Załóż konto zawodnika i zgłoś siebie albo swoje dziecko. Status zgłoszenia, kategorię i drabinkę zobaczysz w „Moich startach”.':'Create an athlete account and enter yourself or your child. You will see the entry status, category and bracket in “My entries”.',
  'Zgłoszenie bez pośredników':'Enter without going through a club',
  'Status zgłoszenia i drabinka w jednym miejscu':'Entry status and bracket in one place',
- 'Załóż konto zawodnika i zgłoś się':'Create an athlete account and enter'
+ 'Załóż konto zawodnika i zgłoś się':'Create an athlete account and enter',
+ // Return screen after a paid sign-up (§10.1): where landing() goes.
+ 'Przejdź do zgłoszenia do turnieju':'Go to the tournament entry',
+ 'Przejdź do swoich turniejów':'Go to your tournaments',
+ 'Przejdź do „Moich startów”':'Go to “My entries”'
 };

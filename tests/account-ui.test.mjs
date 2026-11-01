@@ -409,6 +409,8 @@ test('landing after the sign-up (§10.1, UX-3): plan while payments are required
  const src=source('account-flow.js');
  assert.doesNotMatch(src,/'Konto utworzone\.'\)\);goChat\(\)/,'no fixed chat after the sign-up');
  assert.match(src,/act==='later'\)\{flowEnd\(\);if\(!land\(getMe\(\),\{later:true\}\)\)goChat\(\);\}/,'"Później" uses landing()');
+ assert.match(src,/act==='to-landing'\)\{S\.ret=null;if\(!land\(getMe\(\),\{later:true\}\)\)goChat\(\);\}/,'the return screen after a Checkout uses landing()');
+ assert.match(src,/act==='to-chat'\)\{S\.ret=null;clearTarget\(\);goChat\(\);\}/,'choosing the chat drops the sign-up target');
 });
 test('roleName (§4.5): Organizator, Zawodnik, Opiekun zawodnika, Członek; null for staff',()=>{
  assert.equal(flow.roleName(memberMe({organizer:true},[ZOSIA])),'Organizator');
@@ -763,7 +765,8 @@ test('demo in a browser: the "Role" tab of the parent and of the organizer, PL a
 test('PHP build in a browser: sign-up with the roles, the athlete step, landing and the "Role" tab (§4.5, §10.1, §10.2)',{skip:(!BROWSER||!API)&&'MATDRAW_BROWSER_TESTS=1 under scripts/test-http.sh needed',timeout:300000},async()=>{
  const {fixture}=await import('./helpers/http-client.mjs');
  fixture('reset-limits');
- const app=API.replace(/api\/index\.php$/,''),browser=await chromium.launch(),errors=[];
+ const app=API.replace(/api\/index\.php$/,''),browser=await chromium.launch(),errors=[],stubPort=Number(new URL(API).port)+1;
+ const stub=async(op,body={})=>{const r=await fetch(`http://127.0.0.1:${stubPort}/__control`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({op,...body})});return r.json();};
  const tour=fixture('tournament',{name:'E2E Zapisy Zawodników',date:'2031-05-10',status:'open'}).id;
  const title=page=>page.evaluate(()=>[document.activeElement?.id,document.querySelector('.acct-steps-label')?.textContent]);
  try{
@@ -817,12 +820,20 @@ test('PHP build in a browser: sign-up with the roles, the athlete step, landing 
    await page.waitForSelector('.acct-plan .acct-pay',{timeout:20000});
    assert.match(await page.textContent('.acct-steps-label'),both?/Krok 4 z 4 · Plan/:/Step 3 of 3 · Plan/);
    await noOverflow(page,'plan '+w);
-   await page.click('[data-acct-act="later"]');
    if(both){
+    // 1440: paid through Checkout from the plan step; the return screen continues where landing() says (the tournament), with the
+    // chat as the second choice. 390: "Później" uses landing().
+    await ctx.route('https://checkout.stripe.com/**',async route=>{const id=new URL(route.request().url()).pathname.split('/').pop();await stub('pay',{sessionId:id});await route.fulfill({status:302,headers:{location:app+'?billing=success&session_id='+id}});});
+    await page.click('[data-acct-act="checkout"]');await page.waitForSelector('.acct-return.success',{timeout:30000});
+    assert.equal(await page.textContent('.acct-return [data-acct-act="to-landing"]'),'Przejdź do zgłoszenia do turnieju');
+    assert.equal(await page.locator('.acct-return [data-acct-act="to-chat"]').count(),1,'the chat stays the second choice');
+    assert.equal(JSON.parse(await page.evaluate(()=>sessionStorage.getItem('matdraw.signup.target'))||'null')?.t,tour,'the target survives the Checkout');
+    await noOverflow(page,'return '+w);
+    await page.click('[data-acct-act="to-landing"]');
     await page.waitForFunction(t=>location.hash.startsWith('#guest?t='+t),tour,{timeout:20000});
     assert.equal(new URLSearchParams(await page.evaluate(()=>location.hash.split('?')[1])).get('enter'),'1','the entry window is asked for');
     assert.equal(await page.evaluate(()=>sessionStorage.getItem('matdraw.signup.target')),null,'the target is used once');
-   }else await page.waitForFunction(()=>location.hash.startsWith('#tournaments'),null,{timeout:20000});
+   }else{await page.click('[data-acct-act="later"]');await page.waitForFunction(()=>location.hash.startsWith('#tournaments'),null,{timeout:20000});}
    // The "Role" tab of the new account.
    await page.goto(app+'#profile?tab=roles');await page.waitForSelector('.acct-role [data-acct-act="organizer-toggle"]',{timeout:20000});
    assert.equal(await page.getAttribute('[data-acct-act="organizer-toggle"]','data-on'),'false','the organizer role is on');
@@ -844,6 +855,22 @@ test('PHP build in a browser: sign-up with the roles, the athlete step, landing 
     await page.waitForSelector('[data-acct-act="athlete-add"]',{timeout:20000});assert.equal(await page.textContent('.acct-role-name'),'Członek');
    }else{assert.equal(await page.locator('[data-acct-act="athlete-add"]').count(),1);await shot(page,'php-roles-tab-'+w);}
    await noOverflow(page,'roles tab '+w);
+   if(!both){
+    // The member call to action "Dodaj dane zawodnika, aby się zgłosić" (#profile?tab=roles&add=1&then=<t>): add=1 leaves the
+    // address at once, and saving from #profile?tab=roles&then=<t> goes back to the tournament's member preview.
+    await page.goto(app+'#profile?tab=roles&add=1&then='+tour);await page.waitForSelector('#acct-athlete-form',{timeout:20000});
+    assert.equal(await page.evaluate(()=>location.hash),'#profile?tab=roles&then='+tour,'add=1 is consumed, then is kept');
+    await page.check('#acct-athlete-form input[name="relation"][value="self"]');assert.equal(await page.inputValue('#acct-athlete-form [name="athleteName"]'),'Olga Zielińska');
+    await page.fill('#acct-athlete-form [name="birthDate"]','1994-04-04');await page.selectOption('#acct-athlete-form [name="sex"]','F');
+    await page.fill('#acct-athlete-form [name="weight"]','62');await page.fill('#acct-athlete-form [name="height"]','168');await page.selectOption('#acct-athlete-form [name="grade"]','4');
+    await page.check('#acct-athlete-form input[name="athleteClubMode"][value="none"]');
+    const saved=page.waitForResponse(r=>new URL(r.url()).searchParams.get('route')==='athlete-save');await page.click('#acct-athlete-form button[type="submit"]');
+    assert.equal((await saved).status(),200);
+    await page.waitForFunction(t=>location.hash==='#guest?t='+t,tour,{timeout:20000});
+    // The preview is drawn (its call-to-action slot belongs to the athlete module and may still be empty, so only attached).
+    await page.waitForSelector(`[data-athlete-cta][data-tournament-id="${tour}"]`,{state:'attached',timeout:20000});
+    assert.equal(await page.locator('.access-card').count(),0,'the member preview, not the guest sign-up offer');
+   }
    await ctx.close();
   }
   assert.deepEqual(errors,[]);

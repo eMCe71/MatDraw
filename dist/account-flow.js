@@ -192,17 +192,25 @@ S.signup=newSignup();
 const sportLabel=slug=>SPORTS.find(s=>s[0]===slug)?.[1]||slug;
 const initials=f=>((f?.first||'').trim()[0]||'')+((f?.last||'').trim()[0]||'');
 const goChat=()=>{const role=getMe()?.user?.role||workspace()?.user?.role;ui()?.navigate?.(registry.allows(registry.page('chat'),role)?'chat':registry.defaultPage(role));};
-/** Goes where landing() says; a page this account may not open (e.g. #starts before its module exists) falls back to the chat. */
-function land(m,options){
+/** Where landing() sends this account with the stored target: null for the plan step; a page this account may not open
+ * (e.g. #starts before its module exists) becomes the chat. */
+function destination(m,options){
  const d=landing(m,readTarget(),options),user=workspace()?.user,role=user?.role||m?.user?.role;
- if(d.page==='signup')return false;
- clearTarget();
- if(d.page==='guest'){ui()?.navigate?.('guest',d.params);return true;}
+ if(d.page==='signup')return null;if(d.page==='guest'||d.page==='chat')return d;
  // #tournaments is a page of app.js itself (not in the registry): open for an organizer, as registry.defaultPage says.
  const open=d.page==='tournaments'?registry.organizerUser(user):registry.allows(registry.page(d.page),role,user);
- if(open)ui()?.navigate?.(d.page,d.params||undefined);else goChat();
+ return open?d:{page:'chat',params:null};
+}
+/** Goes where destination() says and uses the stored target once; false (nothing done) for the plan step. */
+function land(m,options){
+ const d=destination(m,options);if(!d)return false;
+ clearTarget();
+ if(d.page==='chat')goChat();else ui()?.navigate?.(d.page,d.params||undefined);
  return true;
 }
+/** Button of the return screen after a Checkout (§10.1): a sign-up from a tournament or with a role continues where landing()
+ * says (the plan step is behind it), everything else goes to the chat. */
+const LAND_LABELS={guest:()=>T('Przejdź do zgłoszenia do turnieju'),tournaments:()=>T('Przejdź do swoich turniejów'),starts:()=>T('Przejdź do „Moich startów”')};
 const takeNotice=()=>{try{const n=sessionStorage.getItem(SIGNUP_NOTICE);sessionStorage.removeItem(SIGNUP_NOTICE);return n;}catch{return null;}};
 const clubPending=()=>T('Klub zapiszemy po sprawdzeniu przez Administratora. Do tego czasu jesteś „Niezrzeszony”.');
 /** Clubs for the picker: public-clubs (verified, not merged), or the demo workspace's clubs; [] when they cannot be read. */
@@ -423,9 +431,12 @@ ${b.mode==='test'?h`<p class="acct-test">${T('Tryb testowy płatności: karty te
 }
 function returnView(r){
  const chat=(cls='primary')=>h`<button type="button" class="btn ${cls}" data-acct-act="to-chat">${T('Przejdź do czatu MatBravo')}</button>`;
+ // Paid sign-up: the target of #signup?as&t and the account's roles still decide where it goes once the payment is done.
+ const next=()=>{const d=r.view==='success'||r.view==='still'?destination(getMe(),{later:true}):null;
+  return d&&LAND_LABELS[d.page]?h`<button type="button" class="btn primary" data-acct-act="to-landing">${LAND_LABELS[d.page]()}</button>${chat('secondary')}`:chat();};
  if(r.view==='processing')return h`<section class="acct-return panel" role="status"><span class="acct-spin big" aria-hidden="true"></span><h2>${T('Potwierdzamy płatność…')}</h2><p>${T('To zwykle trwa kilka sekund. Możesz zamknąć tę stronę — konto aktywuje się samo.')}</p></section>`;
- if(r.view==='success')return h`<section class="acct-return panel success" role="status">${ui()?.mascot?.('success','acct-return-mascot')??''}<h2 tabindex="-1">${T('Gotowe! Twoje konto jest aktywne.')}</h2>${r.until&&r.state==='active'?h`<p>${T('Następne odnowienie: {date}.',{date:formatDate(r.until)})}</p>`:''}<div class="acct-actions">${chat()}</div></section>`;
- if(r.view==='still')return h`<section class="acct-return panel" role="status">${icon('clock','acct-return-icon')}<h2 tabindex="-1">${T('Płatność jest jeszcze przetwarzana. Sprawdzimy ją ponownie przy następnym wejściu.')}</h2><div class="acct-actions"><button type="button" class="btn secondary" data-acct-act="refresh-status">${icon('refresh')} ${T('Odśwież status')}</button>${chat()}</div></section>`;
+ if(r.view==='success')return h`<section class="acct-return panel success" role="status">${ui()?.mascot?.('success','acct-return-mascot')??''}<h2 tabindex="-1">${T('Gotowe! Twoje konto jest aktywne.')}</h2>${r.until&&r.state==='active'?h`<p>${T('Następne odnowienie: {date}.',{date:formatDate(r.until)})}</p>`:''}<div class="acct-actions">${next()}</div></section>`;
+ if(r.view==='still')return h`<section class="acct-return panel" role="status">${icon('clock','acct-return-icon')}<h2 tabindex="-1">${T('Płatność jest jeszcze przetwarzana. Sprawdzimy ją ponownie przy następnym wejściu.')}</h2><div class="acct-actions"><button type="button" class="btn secondary" data-acct-act="refresh-status">${icon('refresh')} ${T('Odśwież status')}</button>${next()}</div></section>`;
  if(r.view==='cancel')return h`<section class="acct-return panel" role="status">${icon('info','acct-return-icon')}<h2 tabindex="-1">${T('Płatność przerwana. Nic nie zostało pobrane.')}</h2><div class="acct-actions"><button type="button" class="btn primary" data-acct-act="retry-plan">${T('Spróbuj ponownie')}</button><button type="button" class="btn secondary" data-acct-act="to-chat">${T('Wróć do czatu')}</button></div></section>`;
  const retry=r.view==='error'?'refresh-status':'retry-plan';
  return h`<section class="acct-return panel failed" role="alert">${icon('alert','acct-return-icon')}<h2 tabindex="-1">${r.view==='error'?T('Nie udało się sprawdzić płatności.'):T('Płatność nie powiodła się. Spróbuj innej karty lub metody.')}</h2>${r.message?h`<p>${r.message}</p>`:''}<div class="acct-actions"><button type="button" class="btn primary" data-acct-act="${retry}">${T('Spróbuj ponownie')}</button>${chat('secondary')}</div></section>`;
@@ -782,7 +793,8 @@ async function onClick(event){
   else if(act==='athlete-cancel'){S.roles=newRoles();if(/[?&](add|then)=/.test(location.hash))history.replaceState(null,'',registry.routeHash('profile',{tab:'roles'}));repaint();document.querySelector('[data-acct-act="athlete-add"],[data-acct-act="athlete-edit"]')?.focus();}
   else if(act==='athlete-archive')await archiveAthlete(el);
   else if(act==='athlete-forget')openForget(el.dataset.id);
-  else if(act==='to-chat'){S.ret=null;goChat();}
+  else if(act==='to-landing'){S.ret=null;if(!land(getMe(),{later:true}))goChat();}
+  else if(act==='to-chat'){S.ret=null;clearTarget();goChat();}
   else if(act==='retry-plan'){S.ret=null;repaint();}
   else if(act==='refresh-status'){const sessionId=S.ret?.sessionId||null;startReturn({kind:'success',sessionId});}
   else if(act==='go-profile')ui()?.navigate?.('profile');
