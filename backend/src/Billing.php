@@ -277,15 +277,21 @@ final class Billing {
   *  a  free-period accounts: billing_exempt=1, exempt_reason 'free-signup', the exemption still running;
   *  b  accounts that would lose full access at once: Access::compute with billing_enforce=true gives full=false (created
   *     by the Admin without "free", older than this release, a free period that ended in an earlier paid period).
+  *     Not in B (they are not accounts of a free period and get no free-signup exemption): accounts with a subscription
+  *     of the current billing mode (a canceled or unpaid subscriber goes back to where the subscription left him) and
+  *     accounts the Administrator explicitly set to require payment (billing_exempt=0 with exempt_by).
+  * $c is the effective configuration: while it already requires payment (effective billing_enforce), B is empty, since
+  * nobody would lose access by the switch any more (a lapsed or not yet paying account is not given a free period by the
+  * bulk action of the panel). Settings::save passes the state before the switch (billing_enforce=false).
   * Returns {a: ids, b: ids, scheduled: {count, from}} (scheduled: group A accounts with a payment date, from the earliest).
   */
  public static function freePeriodSet(PDO $pdo,array $c,int $now):array {
-  $cfg=['billing_enforce'=>true]+$c;$a=[];$b=[];$count=0;$from=null;
-  $rows=$pdo->query("SELECT u.id,b.user_id AS row_id,b.billing_exempt,b.exempt_reason,b.exempt_until,b.livemode,b.sub_status,b.current_period_start,b.current_period_end,b.cancel_at_period_end FROM users u LEFT JOIN billing_accounts b ON b.user_id=u.id WHERE u.role='member' AND u.active=1 AND b.deleted_at IS NULL ORDER BY u.id")->fetchAll(PDO::FETCH_ASSOC);
+  $cfg=['billing_enforce'=>true]+$c;$open=empty($c['billing_enforce']);$a=[];$b=[];$count=0;$from=null;
+  $rows=$pdo->query("SELECT u.id,b.user_id AS row_id,b.billing_exempt,b.exempt_reason,b.exempt_by,b.exempt_until,b.livemode,b.sub_status,b.current_period_start,b.current_period_end,b.cancel_at_period_end FROM users u LEFT JOIN billing_accounts b ON b.user_id=u.id WHERE u.role='member' AND u.active=1 AND b.deleted_at IS NULL ORDER BY u.id")->fetchAll(PDO::FETCH_ASSOC);
   foreach($rows as $r){
    $row=$r['row_id']===null?null:$r;$until=$row!==null&&$row['exempt_until']!==null?(int)$row['exempt_until']:null;
    if($row!==null&&(int)$row['billing_exempt']===1&&$row['exempt_reason']==='free-signup'&&($until===null||$until>$now)){$a[]=$r['id'];if($until!==null){$count++;$from=$from===null?$until:min($from,$until);}}
-   elseif(!Access::compute($row,['id'=>$r['id'],'role'=>'member'],$cfg,$now)['full'])$b[]=$r['id'];
+   elseif($open&&Access::subStatus($row,$cfg)==='none'&&!($row!==null&&(int)$row['billing_exempt']===0&&$row['exempt_by']!==null)&&!Access::compute($row,['id'=>$r['id'],'role'=>'member'],$cfg,$now)['full'])$b[]=$r['id'];
   }
   return ['a'=>$a,'b'=>$b,'scheduled'=>['count'=>$count,'from'=>$from]];
  }
@@ -346,8 +352,8 @@ final class Billing {
   * admin-billing-action (§6.7): exempt {userId,reason,until?} (warnLive with an ongoing subscription), require {userId},
   * requireFrom {date,scope:'user'|'grandfathered'|'free-signup',userId?}, currency {userId,currency|null}, resync {userId},
   * cancelAtPeriodEnd {userId}. Every action is written to billing_audit with the Admin as actor. Scope free-signup (the
-  * bulk action of the settings panel, PLAN-REJESTRACJA-ROLE §3.4–§3.5) covers groups A and B of freePeriodSet, from a date
-  * at least 14 days ahead, and is also listed in the settings history (account_audit settings.freePeriod).
+  * bulk action of the settings panel, PLAN-REJESTRACJA-ROLE §3.4–§3.5) covers groups A and B of freePeriodSet (B only
+  * while payments are not required: effective config), from a date at least 14 days ahead, and is also listed in the settings history (account_audit settings.freePeriod).
   */
  public static function adminAction(PDO $pdo,array $c,array $admin,array $b):array {
   $action=$b['action']??null;$now=time();$actor=$admin['id'];

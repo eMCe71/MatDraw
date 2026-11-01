@@ -10,6 +10,7 @@ import test,{before,after} from 'node:test';
 import assert from 'node:assert/strict';
 import {Client,base,eventually,fixture} from './helpers/http-client.mjs';
 import {warsawToday} from '../dist/guest-view.js';
+import {readFileSync} from 'node:fs';
 const shared=process.env.MATDRAW_TEST_SHARED_DIR,skip=!base||!shared;
 const stubBase=base?`http://127.0.0.1:${Number(new URL(base).port)+1}`:'';
 const stub=async body=>{const r=await fetch(stubBase+'/__control',{method:'POST',body:JSON.stringify(body)});const j=await r.json();if(!r.ok)throw Error(JSON.stringify(j));return j;};
@@ -99,8 +100,8 @@ test('on → off → free: sign-up and payments follow the row at once; checkout
  else assert.deepEqual([b.billing_exempt,b.exempt_until],[1,null]);
  v=await view();assert.deepEqual(v.history.slice(0,2).map(h=>[h.action,typeof h.at]),[['settings.save','number'],['settings.save','number']],'history: newest first');
  assert.equal(v.history[0].note,'signup=on payments=free organizers=on trustRequired=0');assert.ok(v.updatedAt>=now()-60);
- // The Administrator by display name (profile) or, without a profile, by the staff e-mail; never the internal id.
- for(const who of [v.history[0].actor,v.updatedBy])assert.ok(typeof who==='string'&&who!==''&&who!==admin.id,String(who));
+ // The Administrator by display name (profile) or, without a profile, by the role label; never an e-mail or the internal id.
+ for(const who of [v.history[0].actor,v.updatedBy])assert.ok(typeof who==='string'&&who!==''&&who!==admin.id&&!who.includes('@'),String(who));
 });
 
 test('free → paid: Stripe configured and answering, test mode confirmed, a decision about groups A and B; keep',{skip},async()=>{
@@ -147,19 +148,29 @@ test('paid → free → paid with requireFrom: both groups get the payment date,
  let v=await save({version,payments:'free'});version=v.version;assert.equal(v.mode,'free');
  const lapsed=member('wygasly');fixture('billing',{userId:lapsed.id,billing_exempt:1,exempt_reason:'free-signup',exempt_at:now()-60*D,exempt_until:now()-30*D});
  const newB=member('nowyb'),a=member('grupaa2',{exempt:'free-signup'});
+ // Not accounts of a free period: a subscriber who canceled in an earlier paid period and an account the Admin set to require payment.
+ const canceled=member('anulowany');fixture('billing',{userId:canceled.id,livemode:0,sub_status:'canceled',stripe_subscription_id:'sub_'+uniq('anul'),current_period_end:now()-20*D});
+ const required=member('wymagany');assert.equal((await admin.req('admin-billing-action',{action:'require',userId:required.id})).status,200);
+ const before={canceled:row(canceled.id),required:row(required.id)};
  const set=fixture('settings-free-set');assert.ok(set.b.includes(lapsed.id)&&set.b.includes(newB.id)&&set.a.includes(a.id));
+ for(const u of [canceled,required])assert.ok(!set.a.includes(u.id)&&!set.b.includes(u.id),u.email+' is not decided about as a free-period account');
  const r=await save({version,payments:'paid',confirmTestMode:true},409);assert.deepEqual(r.counts,{a:set.a.length,b:set.b.length});
  audit();v=await save({version,payments:'paid',confirmTestMode:true,freePeriod:{action:'requireFrom',date:day(20)}});assert.equal(v.mode,'paid');
  const from=row(a.id).exempt_until;
  assert.equal(warsawToday(new Date(from*1000)),day(20));assert.equal(warsawToday(new Date((from-1)*1000)),day(19),'00:00 Europe/Warsaw of the date');
  for(const u of [a,lapsed,newB]){const x=row(u.id);assert.deepEqual([x.billing_exempt,x.exempt_reason,x.exempt_until],[1,'free-signup',from],u.email);}
+ for(const k of ['canceled','required'])assert.deepEqual(row({canceled,required}[k].id),before[k],k+': no free-signup exemption');
+ const meX=(await get('me',(await signIn(canceled.email)).cookie)).data.access;assert.deepEqual([meX.full,meX.state],[false,'ended'],'the canceled subscriber pays again, as before the free period');
  const me=await get('me',(await signIn(lapsed.email)).cookie);assert.deepEqual([me.data.access.full,me.data.access.state,me.data.access.until],[true,'free',from]);
  assert.deepEqual(audit().map(x=>x.note),[`signup=on payments=paid organizers=on trustRequired=0 requireFrom:${day(20)} a=${set.a.length} b=${set.b.length} test`]);
  v=await view();assert.ok(v.freeSignups.scheduled.count>=set.a.length+set.b.length);assert.equal(v.freeSignups.scheduled.from,from);assert.equal(v.freeSignups.b,0);
- // The bulk action of the panel (admin-billing-action, scope free-signup): at least 14 days ahead, logged in the history.
+ // The bulk action of the panel (admin-billing-action, scope free-signup): at least 14 days ahead, logged in the history;
+ // while payments are required it changes group A only (no free period for an account without access, nor for a new one).
+ const unpaid=member('niezaplacony');assert.equal(row(unpaid.id),null);
  let bulk=await admin.req('admin-billing-action',{action:'requireFrom',scope:'free-signup',date:day(13)});assert.deepEqual([bulk.status,bulk.data.error],[422,ERR.days]);
  bulk=await admin.req('admin-billing-action',{action:'requireFrom',scope:'free-signup',date:day(30)});assert.equal(bulk.status,200,JSON.stringify(bulk.data));
- assert.equal(bulk.data.count,bulk.data.a+bulk.data.b);assert.ok(bulk.data.a>=set.a.length+set.b.length);assert.equal(row(newB.id).exempt_until,bulk.data.from);
+ assert.equal(bulk.data.count,bulk.data.a+bulk.data.b);assert.ok(bulk.data.a>=set.a.length+set.b.length);assert.equal(bulk.data.b,0);assert.equal(row(newB.id).exempt_until,bulk.data.from);
+ assert.equal(row(unpaid.id),null);for(const k of ['canceled','required'])assert.deepEqual(row({canceled,required}[k].id),before[k],k+': untouched by the bulk action');
  assert.deepEqual(audit().map(x=>[x.action,x.note]),[['settings.freePeriod',`requireFrom:${day(30)} a=${bulk.data.a} b=${bulk.data.b}`]]);
  assert.equal((await view()).history[0].action,'settings.freePeriod');
 });
@@ -194,7 +205,9 @@ test('payments=paid in the database, billing_enforce=false in config.php: billin
  await setConfig({billing_enforce:true,signup_enabled:true,support_email:'pomoc@example.test'},async()=>(await view()).support.email,'pomoc@example.test');
 });
 
-test('command of the legacy API uses the same effective configuration (index.php overlay, slice accounts-backend)',{skip,todo:'index.php computes Settings::effective in the slice accounts-backend'},async()=>{
+// A TODO only while index.php has no overlay yet (slice accounts-backend): once it calls Settings::effective, the test is enforced.
+const legacyOverlay=/Settings::effective\(/.test(readFileSync('backend/public/api/index.php','utf8').replace(/\/\*[\s\S]*?\*\//g,'').replace(/^\s*\/\/.*$/gm,''));
+test('command of the legacy API uses the same effective configuration (index.php overlay, slice accounts-backend)',{skip,todo:legacyOverlay?false:'index.php computes Settings::effective in the slice accounts-backend'},async()=>{
  fixture('settings-set',{data:{signup:'off',payments:'paid'},version:51});
  await setConfig({billing_enforce:false,signup_enabled:false,support_email:'plik@example.test'},async()=>(await view()).support.email,'plik@example.test');
  try{
@@ -217,4 +230,18 @@ test('organizers paused and trustRequired are saved, audited and reach Domain th
  const ok=fixture('domain-run',{actor:org.id,type:'tournament.save',payload:{...t,status:'draft'}});assert.equal(ok.status,200,JSON.stringify(ok));
  assert.equal(ok.view.tournaments.find(x=>x.id===ok.result.id).trusted,true,'trustRequired=false: every organizer not blocked works as confirmed (§17)');
  assert.ok(v.history.some(h=>h.action==='settings.save'&&/organizers=paused/.test(h.note)));
+});
+
+test('history: actors by display name, club name or role label; never an e-mail or an internal id (§3.5 point 6, §11)',{skip},async()=>{
+ await admin.load();const email=uniq('klubhistoria')+'@settings.test',clubName=uniq('Klub Historii ');
+ const {id:club}=await admin.cmd('account.save',{email,password:PASSWORD,clubName,role:'club'});
+ const {id:editor}=await admin.cmd('account.save',{email:uniq('redaktor')+'@settings.test',password:PASSWORD,clubName:uniq('Klub Redakcji '),role:'editor'});
+ const named=member('nazwany',{profile:{firstName:'Marta',lastName:'Kowalska'}});
+ const gone='u_'+uniq('usuniety');
+ for(const [actor,note] of [[admin.id,'admin'],[editor,'editor'],[club,'club'],[named.id,'named'],[gone,'gone']])fixture('settings-audit-add',{actor,action:'settings.test',note});
+ const h=Object.fromEntries((await view()).history.filter(x=>x.action==='settings.test').map(x=>[x.note,x.actor]));
+ // The test Administrator may have a profile from an earlier file: then its display name, else the role label.
+ assert.ok(h.admin==='Administrator'||/^\S+ \p{Lu}\.$/u.test(h.admin),h.admin);delete h.admin;
+ assert.deepEqual(h,{editor:'Edytor',club:clubName,named:'Marta K.',gone:'Konto usunięte'});
+ for(const x of (await view()).history)assert.ok(typeof x.actor==='string'&&!x.actor.includes('@')&&!/^[0-9a-f]{32}$/.test(x.actor),JSON.stringify(x));
 });

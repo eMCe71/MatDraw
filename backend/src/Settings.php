@@ -37,6 +37,8 @@ final class Settings {
  /** account_audit actions listed in "Historia zmian" (§3.5 point 6). */
  public const HISTORY_LIKE=['settings.%','organizer.%','club.%'],HISTORY_IN=['tournament.hide','profile.forget'];
  public const HISTORY_MAX=50,NOTE_VALUE=90;
+ /** Labels of history actors without a display name (dictionary keys of the panel). */
+ private const ROLE_LABEL=['admin'=>'Administrator','editor'=>'Edytor','club'=>'Reprezentant klubu','member'=>'Członek'],ACTOR_GONE='Konto usunięte';
  private const CODE='/^[a-z0-9_]{1,40}$/D';
  /** PDO => ['row'=>?array] for the request (WeakMap: a closed connection drops its entry). */
  private static ?\WeakMap $rows=null;
@@ -105,7 +107,7 @@ final class Settings {
  // ---- Admin panel ---------------------------------------------------------------------------------------------------
  /** admin-settings (§8.2) for the raw config.php $file. */
  public static function view(PDO $pdo,array $file,int $now):array {
-  $s=self::get($pdo,$file);$d=$s['data'];$eff=self::effective($pdo,$file);$set=Billing::freePeriodSet($pdo,$file,$now);
+  $s=self::get($pdo,$file);$d=$s['data'];$eff=self::effective($pdo,$file);$set=Billing::freePeriodSet($pdo,$eff,$now);
   $pending=(int)$pdo->query("SELECT COUNT(*) FROM users u LEFT JOIN billing_accounts b ON b.user_id=u.id WHERE u.role='member' AND u.active=1 AND u.organizer=1 AND u.organizer_blocked_at IS NULL AND u.organizer_trusted_at IS NULL AND b.deleted_at IS NULL")->fetchColumn();
   $where=implode(' OR ',array_merge(array_fill(0,count(self::HISTORY_LIKE),'action LIKE ?'),['action IN ('.implode(',',array_fill(0,count(self::HISTORY_IN),'?')).')']));
   $q=$pdo->prepare("SELECT actor_id,action,note,created_at FROM account_audit WHERE $where ORDER BY created_at DESC,id DESC LIMIT ".self::HISTORY_MAX);$q->execute([...self::HISTORY_LIKE,...self::HISTORY_IN]);$rows=$q->fetchAll(PDO::FETCH_ASSOC);
@@ -118,20 +120,23 @@ final class Settings {
    'organizersPending'=>$pending,
    'limits'=>['organizerDay'=>Domain::ORGANIZER_DAY,'organizerActive'=>Domain::ORGANIZER_ACTIVE,'communityDayGlobal'=>Domain::COMMUNITY_DAY_GLOBAL,'organizerProfilesDay'=>Domain::ORGANIZER_PROFILES_DAY,
     'clubsDayPerUser'=>Domain::CLUBS_DAY_PER_USER,'clubsDayGlobal'=>Domain::CLUBS_DAY_GLOBAL,'minorSelfAge'=>Domain::MINOR_SELF_AGE,'adultAge'=>Domain::ADULT_AGE,'athletesPerAccount'=>Domain::ATHLETES_PER_ACCOUNT,'retentionMonths'=>Domain::RETENTION_MONTHS],
-   'history'=>array_map(fn($r)=>['at'=>(int)$r['created_at'],'actor'=>$names[$r['actor_id']]??$r['actor_id'],'action'=>$r['action'],'note'=>$r['note']],$rows),
+   'history'=>array_map(fn($r)=>['at'=>(int)$r['created_at'],'actor'=>$names[$r['actor_id']]??(in_array($r['actor_id'],['system','self'],true)?$r['actor_id']:self::ACTOR_GONE),'action'=>$r['action'],'note'=>$r['note']],$rows),
    'updatedAt'=>$s['updatedAt'],'updatedBy'=>$s['updatedBy']===null?null:($names[$s['updatedBy']]??null)];
  }
  /**
-  * Display names of audit actors (id => name): the profile name ("Marta K."), else the username, else the e-mail of a staff
-  * account (the panel is the Administrator's own); 'system' and 'self' stay as they are, unknown ids are left out.
+  * Display names of audit actors (id => name, §3.5 point 6, §11: readable, never a person's e-mail or an internal id): the
+  * profile name ("Marta K."), else the username, else the club name of a club account, else the role label of a staff
+  * account ('Administrator', 'Edytor', 'Reprezentant klubu'; 'Członek' for a member without a profile); an id without an
+  * account (erased) is 'Konto usunięte'. The labels are Polish literals the panel translates (existing dictionary keys);
+  * 'system' and 'self' stay as they are.
   */
  private static function names(PDO $pdo,array $ids):array {
-  $ids=array_values(array_unique(array_filter($ids,fn($v)=>is_string($v)&&$v!==''&&$v!=='system'&&$v!=='self')));$out=[];
+  $ids=array_values(array_unique(array_filter($ids,fn($v)=>is_string($v)&&$v!==''&&$v!=='system'&&$v!=='self')));$out=array_fill_keys($ids,self::ACTOR_GONE);
   foreach(array_chunk($ids,500) as $chunk){
-   $q=$pdo->prepare('SELECT u.id,u.role,u.email,p.username,p.first_name,p.last_name FROM users u LEFT JOIN user_profiles p ON p.user_id=u.id WHERE u.id IN ('.implode(',',array_fill(0,count($chunk),'?')).')');$q->execute($chunk);
-   foreach($q->fetchAll(PDO::FETCH_ASSOC) as $r){$n=People::name($r['first_name'],$r['last_name'],false);$out[$r['id']]=$n!==''?$n:($r['username']??($r['role']!=='member'?$r['email']:null));}
+   $q=$pdo->prepare('SELECT u.id,u.role,c.name AS club,p.username,p.first_name,p.last_name FROM users u LEFT JOIN clubs c ON c.id=u.club_id LEFT JOIN user_profiles p ON p.user_id=u.id WHERE u.id IN ('.implode(',',array_fill(0,count($chunk),'?')).')');$q->execute($chunk);
+   foreach($q->fetchAll(PDO::FETCH_ASSOC) as $r){$n=People::name($r['first_name'],$r['last_name'],false);$out[$r['id']]=$n!==''?$n:($r['username']??($r['role']==='club'&&$r['club']!==null&&$r['club']!==''?$r['club']:(self::ROLE_LABEL[$r['role']]??self::ROLE_LABEL['member'])));}
   }
-  return array_filter($out,'is_string');
+  return $out;
  }
  /**
   * The Stripe check (§3.4 point 3, admin-stripe-check): StripeClient::interactive and Billing::resolvePrice (fresh) for
@@ -160,12 +165,14 @@ final class Settings {
  /**
   * One locked read-modify-write of the row: a placeholder row (version 0, '{}', the same as no row) makes FOR UPDATE lock
   * something even on the first write; $fn(raw, version) returns [new version, new raw data, touched (updated_at/by)].
+  * The placeholder is written with ON DUPLICATE KEY UPDATE, which takes the exclusive lock on an existing row at once
+  * (INSERT IGNORE takes a shared one: two concurrent writers would both hold it and deadlock on FOR UPDATE, 1213).
   * Runs inside the caller's transaction when one is open. Drops the cached row.
   */
  private static function write(PDO $pdo,callable $fn,int $now,?string $by):mixed {
   $own=!$pdo->inTransaction();if($own)$pdo->beginTransaction();
   try{
-   $pdo->prepare("INSERT IGNORE INTO app_settings (id,version,data,updated_at,updated_by) VALUES (1,0,'{}',?,NULL)")->execute([$now]);
+   $pdo->prepare("INSERT INTO app_settings (id,version,data,updated_at,updated_by) VALUES (1,0,'{}',?,NULL) ON DUPLICATE KEY UPDATE id=id")->execute([$now]);
    $r=$pdo->query('SELECT version,data FROM app_settings WHERE id=1 FOR UPDATE')->fetch(PDO::FETCH_ASSOC);
    $raw=json_decode((string)$r['data'],true);[$version,$data,$touch]=$fn(is_array($raw)?$raw:[],(int)$r['version']);
    $json=json_encode($data?:new \stdClass(),JSON_THROW_ON_ERROR|JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);
@@ -199,22 +206,24 @@ final class Settings {
   $next=$apply($cur['data']);
   if(array_intersect_key($next,array_flip(self::FIELDS))==array_intersect_key($cur['data'],array_flip(self::FIELDS)))return self::view($pdo,$file,$now);
   $toPaid=$next['payments']==='paid'&&$cur['data']['payments']!=='paid';$test=false;
+  // The decision set is the one of the current state, where payments are not required yet (group B: who would lose access).
+  $free=['billing_enforce'=>false]+$file;
   if($toPaid){
    if(!Billing::enabled($file))self::notReady();
    self::stripeCheck($pdo,$file,$now);
    $test=($file['billing_mode']??'test')!=='live';
    if($test&&($in['confirmTestMode']??false)!==true)throw new ApiError('Stripe działa w trybie testowym: nikt nie zapłaci prawdziwymi pieniędzmi. Potwierdź, jeśli to zamierzone.',409,['code'=>'test_mode']);
-   $set=Billing::freePeriodSet($pdo,$file,$now);
+   $set=Billing::freePeriodSet($pdo,$free,$now);
    if(($set['a']||$set['b'])&&$decision===null)self::decide($set);
   }
   $pdo->beginTransaction();
   try{
    $counts=null;
-   $saved=self::write($pdo,function(array $raw,int $v)use($pdo,$version,$file,$apply,$toPaid,$decision,$from,$admin,$now,&$counts):array{
+   $saved=self::write($pdo,function(array $raw,int $v)use($pdo,$version,$file,$free,$apply,$toPaid,$decision,$from,$admin,$now,&$counts):array{
     if($v!==$version)self::stale();
     if($toPaid){
      // The set again under the lock: an account created since the check above is decided as well, never silently cut off.
-     $set=Billing::freePeriodSet($pdo,$file,$now);
+     $set=Billing::freePeriodSet($pdo,$free,$now);
      if(($set['a']||$set['b'])&&$decision===null)self::decide($set);
      $counts=$decision===null?['a'=>0,'b'=>0]:Billing::freePeriodApply($pdo,$admin['id'],$set,$from,$now);
     }
