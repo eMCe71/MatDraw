@@ -89,7 +89,7 @@ Po tej aktualizacji nic nie zmienia się dla użytkowników, dopóki Administrat
 | Reprezentant klubu | Administrator („Konta i role”) | Kartoteka własnego klubu; dodawanie, zmiana i wycofanie zgłoszeń własnego klubu w turniejach z otwartymi zapisami |
 | Członek | samodzielna rejestracja (`#signup`, gdy Administrator ją otworzy) albo Administrator („Członkowie” → „Nowe darmowe konto”) | Czat (czytanie zawsze; pisanie z pełnym dostępem i kompletnym profilem), własny profil i zdjęcie. Sam członek **nie widzi danych turniejowych** (zawodników, klubów, zgłoszeń innych osób). |
 | Członek z rolą „Organizator turnieju” | osoba zaznacza ją przy rejestracji albo w „Moje konto” → „Role”; Administrator może ją odebrać | Jak członek, a do tego tworzy **własne** turnieje, dodaje **własnych** zawodników, prowadzi kontrolę startową, losowania i wyniki tych turniejów. Nie widzi bazy zawodników, cudzych turniejów ani cudzych zgłoszeń. Narzędzia wymagają ponownego podania hasła po 30 minutach bezczynności i najpóźniej co 12 godzin. |
-| Członek z rolą „Zawodnik” | rejestracja albo „Moje konto” → „Role” | Jeden profil zawodnika na konto („Siebie” albo „Moje dziecko lub podopieczny”; osoby poniżej 16 lat zakłada rodzic lub opiekun). Strona „Moje starty”: samodzielne zgłoszenie do otwartych turniejów z włączonym „Zawodnicy mogą zgłaszać się sami”, status zgłoszenia, miejsce w drabince, wycofanie. |
+| Członek z rolą „Zawodnik” | rejestracja albo „Moje konto” → „Role” | Jeden profil zawodnika na konto („Siebie” albo „Moje dziecko lub podopiecznego”; osoby poniżej 16 lat zakłada rodzic lub opiekun). Strona „Moje starty”: samodzielne zgłoszenie do otwartych turniejów z włączonym „Zawodnicy mogą zgłaszać się sami”, status zgłoszenia, miejsce w drabince, wycofanie. |
 
 ### Płatne i darmowe konta
 
@@ -181,7 +181,7 @@ Obowiązkowe są tylko `app_url`, `db` i `app_key`. **Każdy inny klucz jest opc
 | `signup_force_off` | `false` | **awaryjne zamknięcie rejestracji ponad ustawieniem z panelu** (przez SSH, gdy panel jest niedostępny); panel pokazuje wtedy czerwony baner |
 | `signup_invite_token` | `null` | rejestracja tylko z linku `https://matbravo.com/#signup?invite=TOKEN` (okno testów; co najmniej 24 znaki; przy `signup_enabled=false` wymaga `billing_enforce=true`) |
 | `signup_free_beta` | `false` | jawna zgoda na rejestrację bez płatności w pliku (tylko z `billing_enabled=false`); przy trybie z panelu wyliczana automatycznie |
-| `support_email` | `null` | **wartość początkowa** adresu pomocy przy „Nie pamiętasz hasła?”; po pierwszym zapisie w panelu liczy się adres z panelu, a gdy nic nie wpisano, `hello@matbravo.com`; skrzynka musi istnieć |
+| `support_email` | `null` | **wartość początkowa** adresu pomocy przy „Nie pamiętasz hasła?”; po zapisie adresu w panelu liczy się adres z panelu. **Gdy nie ma go ani w pliku, ani w panelu, obowiązuje `hello@matbravo.com` od samego wdrożenia** (ekran logowania pokazuje wtedy link „Nie pamiętasz hasła?”), więc skrzynka musi istnieć przed wdrożeniem |
 | `signup_limit_ip_hour`, `signup_limit_ip_day`, `signup_limit_global_hour` | `30`, `100`, `200` | limity rejestracji (IP, na godzinę i dobę; wszystkie razem na godzinę) |
 | `username_check_limit_session`, `username_check_limit_ip` | `30`, `300` | sprawdzenia nazwy użytkownika na 10 minut |
 | `login_limit_ip` | `100` | próby logowania na IP w 15 minut (para IP + e-mail: 8) |

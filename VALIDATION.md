@@ -76,10 +76,10 @@ The roles release has its own checklist (plan `docs/plan/PLAN-REJESTRACJA-ROLE.m
 
 These need `matbravo.com`, the AfterMarket account (web9, DirectAdmin, PHP 8.3, MariaDB 10.6), the owner's Stripe account or a real device. Where to look is in `HANDOFF.md` (steps 3 to 14) and `DEPLOY-PL.md`.
 
-- **GD with WebP** on the hosting's PHP 8.3 (`server_check`, line about GD; the Admin's `route=diagnostics` shows `avatarMode`). Without it profile photos are off and initials stay; everything else works.
-- **Outbound HTTPS from PHP to `api.stripe.com`** (`server_check` line "Stripe:", and `route=diagnostics&probe=stripe` from the site's own PHP). If blocked, payments cannot work on this host.
+- **GD with WebP** on the hosting's PHP 8.3: confirmed for the SSH CLI by `server_check` run #71 (2026-10-31); still look at the web PHP once (the Admin's `route=diagnostics` shows `avatarMode`). Without WebP profile photos are off and initials stay; everything else works.
+- **Outbound HTTPS from PHP to `api.stripe.com`:** reachable from the SSH CLI (`server_check` run #71, 401 without a key); still confirm from the site's own web PHP with `route=diagnostics&probe=stripe`. If blocked there, payments cannot work on this host.
 - **Webhooks:** the host answers 403 to data-centre addresses, so Stripe probably cannot deliver; payment state is correct without them (tested on the stub with no webhooks). Whether AfterMarket allows Stripe's IP list is open.
-- **Cron:** whether DirectAdmin offers cron jobs on this plan (`server_check` shows `crontab`). Everything runs without it.
+- **Cron:** `crontab` is available (run #71); the entries themselves (daily dump, `stripe-sync`) are still to be added and watched once. Everything runs without them unless `server.afterResponse` is false.
 - **Request limits of the host** (429, 503 and 508 answered before PHP) with many phones behind one address: `bash scripts/poll-probe.sh https://matbravo.com 5 600` from a laptop or phone hotspot (never from the server or GitHub); criterion zero 429/503/508; also DirectAdmin "Resource Usage" while it runs.
 - **Headers and types** served by LiteSpeed from `.htaccess`: `sw.js` with `no-cache`, manifest as `application/manifest+json`, compression, `.webp` type (`curl -sI`, and the checks of `deploy-verify.sh`).
 - **Database rights** (ALTER, CREATE, INDEX, REFERENCES; MySQL 8.0 needs REFERENCES, MariaDB does not), `mysqldump`/`mariadb-dump`, and the host's own backups (frequency, retention, restore).
