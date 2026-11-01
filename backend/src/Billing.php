@@ -283,15 +283,19 @@ final class Billing {
   * $c is the effective configuration: while it already requires payment (effective billing_enforce), B is empty, since
   * nobody would lose access by the switch any more (a lapsed or not yet paying account is not given a free period by the
   * bulk action of the panel). Settings::save passes the state before the switch (billing_enforce=false).
+  * $had (Settings::save when payments were already 'paid': a resume after a pause, a change of Stripe mode, payments from
+  * config.php alone, final review R2.3): B only of accounts that had full access while payments were required, in either
+  * Stripe mode (a test subscriber on live keys); who was behind the paywall before the pause gets no free period.
   * Returns {a: ids, b: ids, scheduled: {count, from}} (scheduled: group A accounts with a payment date, from the earliest).
   */
- public static function freePeriodSet(PDO $pdo,array $c,int $now):array {
+ public static function freePeriodSet(PDO $pdo,array $c,int $now,bool $had=false):array {
   $cfg=['billing_enforce'=>true]+$c;$open=empty($c['billing_enforce']);$a=[];$b=[];$count=0;$from=null;
+  $paid=fn(?array $row,string $id):bool=>Access::compute($row,['id'=>$id,'role'=>'member'],['billing_mode'=>'test']+$cfg,$now)['full']||Access::compute($row,['id'=>$id,'role'=>'member'],['billing_mode'=>'live']+$cfg,$now)['full'];
   $rows=$pdo->query("SELECT u.id,b.user_id AS row_id,b.billing_exempt,b.exempt_reason,b.exempt_by,b.exempt_until,b.livemode,b.sub_status,b.current_period_start,b.current_period_end,b.cancel_at_period_end FROM users u LEFT JOIN billing_accounts b ON b.user_id=u.id WHERE u.role='member' AND u.active=1 AND b.deleted_at IS NULL ORDER BY u.id")->fetchAll(PDO::FETCH_ASSOC);
   foreach($rows as $r){
    $row=$r['row_id']===null?null:$r;$until=$row!==null&&$row['exempt_until']!==null?(int)$row['exempt_until']:null;
    if($row!==null&&(int)$row['billing_exempt']===1&&$row['exempt_reason']==='free-signup'&&($until===null||$until>$now)){$a[]=$r['id'];if($until!==null){$count++;$from=$from===null?$until:min($from,$until);}}
-   elseif($open&&Access::subStatus($row,$cfg)==='none'&&!($row!==null&&(int)$row['billing_exempt']===0&&$row['exempt_by']!==null)&&!Access::compute($row,['id'=>$r['id'],'role'=>'member'],$cfg,$now)['full'])$b[]=$r['id'];
+   elseif($open&&Access::subStatus($row,$cfg)==='none'&&!($row!==null&&(int)$row['billing_exempt']===0&&$row['exempt_by']!==null)&&!Access::compute($row,['id'=>$r['id'],'role'=>'member'],$cfg,$now)['full']&&(!$had||$paid($row,$r['id'])))$b[]=$r['id'];
   }
   return ['a'=>$a,'b'=>$b,'scheduled'=>['count'=>$count,'from'=>$from]];
  }

@@ -222,16 +222,6 @@ test('B4, B5, B16: paid mode runs only against the Stripe configuration a check 
   v=await save({version:v.version});assert.deepEqual(await state(),['paid',null,true,false,'paid',true]);
   assert.match(v.history[0].note,/ resume /);assert.doesNotMatch(v.history[0].note,/ keep| requireFrom| a=/,'no decision');
   assert.equal(await access(),false,'still without access: no free period was handed out');
-  // R1.2: test → live keys: a passing check does not resume payments (rearm), test subscribers would lose access; the gate
-  // (here the unchanged save) asks for the decision. Back to the test keys, a passing check resumes the armed configuration.
-  setConfig({billing_mode:'live',stripe_secret_key:'rk_'+'live_'+'stub'});
-  try{
-   assert.deepEqual(await state(),['off','stripe-check',true,true,'off',false]);
-   r=await check();assert.deepEqual(await state(),['off','stripe-check',true,false,'off',false],'checked, still paused');
-   v=await view();assert.deepEqual([v.stripeCheck.rearm,v.stripeCheck.mode],[true,'live'],'the panel can say that saving resumes them');assert.equal(await access(),true,'nobody loses access before the decision');
-   r=await save({version:v.version},409);assert.equal(r.code,'free_period_decision','live keys: no test-mode question, the decision');assert.ok(r.counts.b>=1,'the unpaid account is in group B');
-  }finally{setConfig({billing_mode:'test',stripe_secret_key:'rk_'+'test_'+'rotatedtwice'});}
-  r=await check();assert.deepEqual(await state(),['paid',null,true,false,'paid',true],'the armed test configuration again');assert.equal(await access(),false);
   fixture('reset-limits');// at most 6 Stripe checks an hour
   // A failed manual check (Stripe refuses the key) takes the passed one back; a passing check of the armed configuration resumes.
   await stub({op:'fault',method:'GET',path:'^/v1/prices',status:401,type:'invalid_request_error',times:4});
@@ -248,6 +238,21 @@ test('B4, B5, B16: paid mode runs only against the Stripe configuration a check 
   v=await view();assert.deepEqual([v.signup,v.effective.mode,v.effective.degraded,v.stripeCheck.ok,(await guest('public-config')).data.billing],['off','off',null,true,true],'sign-up stays closed, payments stay required');
   await stub({op:'clear-faults'});
   v=await save({version:v.version,signup:'on',allowTestMode:true});assert.deepEqual(await state(),['paid',null,true,false,'paid',true]);
+  // R1.2, R2.3: test → live keys: a passing check does not resume payments (rearm): a test subscriber would lose access, so
+  // the gate (here the unchanged save) asks for the decision. Group B holds him, never the unpaid account, which was behind
+  // the paywall before the pause.
+  const tsub=member('b4tsub');fixture('billing',{userId:tsub.id,billing_exempt:0,livemode:0,sub_status:'active',stripe_subscription_id:'sub_'+uniq('t'),current_period_start:now()-86400,current_period_end:now()+20*86400});
+  const accessOf=async m=>ok(await (await signIn(m.email)).req('me')).access.full;
+  assert.equal(await accessOf(tsub),true,'a test subscriber');
+  fixture('reset-limits');
+  setConfig({billing_mode:'live',stripe_secret_key:'rk_'+'live_'+'stub'});
+  assert.deepEqual(await state(),['off','stripe-check',true,true,'off',false]);
+  r=await check();assert.deepEqual(await state(),['off','stripe-check',true,false,'off',false],'checked, still paused');
+  v=await view();assert.deepEqual([v.stripeCheck.rearm,v.stripeCheck.mode],[true,'live'],'the panel can say that saving resumes them');assert.equal(await accessOf(tsub),true,'nobody loses access before the decision');
+  r=await save({version:v.version},409);assert.equal(r.code,'free_period_decision','live keys: no test-mode question, the decision');assert.ok(r.counts.b>=1,'the test subscriber is in group B');
+  v=await save({version:v.version,freePeriod:{action:'requireFrom',date:day(20)}});assert.deepEqual(await state(),['paid',null,true,false,'paid',true]);assert.equal(v.stripeCheck.rearm,false);
+  assert.match(v.history[0].note,/ resume requireFrom:\S+ a=\d+ b=\d+$/);
+  assert.equal(await accessOf(tsub),true,'the test subscriber keeps access until the date');assert.equal(await access(),false,'the unpaid account got no free period');
  }finally{await stub({op:'clear-faults'});fixture('settings-reset');restoreStripe();}
 });
 

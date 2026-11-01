@@ -47,7 +47,8 @@ use PDO;
  *             explicit confirmation (allowTestMode or confirmTestMode; 409 code test_mode, confirmTestMode:true, B5) and,
  *             when somebody may lose access he really had (payments start, were never confirmed in the panel, or change
  *             Stripe mode: test subscribers on live keys, R2.3), the decision about accounts of the free period
- *             (Billing::freePeriodSet, groups A and B); then one transaction with the free-period action, the row
+ *             (Billing::freePeriodSet, groups A and B; with payments already 'paid', B only of accounts that had full
+ *             access while payments were required); then one transaction with the free-period action, the row
  *             (version+1, armed) and account_audit (settings.save, settings.support old -> new).
  *  view()     admin-settings (§8.2), with stripeCheck {ok, stale, checkedAt, mode, rearm} of the last check (stale: the
  *             Stripe configuration of config.php changed since; rearm: the check passed but payments stay paused until the
@@ -307,6 +308,9 @@ final class Settings {
   // (group B: who would lose access).
   $armed=$cur['data']['armed'];$confirmed=$armed!==null&&$armed['fp']!==null&&$armed['mode']===self::stripeMode($file);
   $decide=$toPaid&&($cur['data']['payments']!=='paid'||!$confirmed);
+  // With payments already 'paid' (the pause lifted them, or they ran from config.php alone) group B holds only accounts that
+  // had full access while payments were required (test subscribers on live keys), never those behind the paywall (R2.3).
+  $had=$cur['data']['payments']==='paid';
   $free=['billing_enforce'=>false]+$file;
   if($toPaid){
    if(!Billing::enabled($file))self::notReady();
@@ -315,16 +319,16 @@ final class Settings {
    // A resume in the armed mode restores what the gate confirmed for that mode; the fresh check above already armed the
    // configuration (stripeCheck, R2.4), so there is nothing left to confirm. Every other transition in test mode asks (B5).
    if($test&&!($resume&&$confirmed)&&($in['allowTestMode']??false)!==true&&($in['confirmTestMode']??false)!==true)throw new ApiError('Stripe działa w trybie testowym: nikt nie zapłaci prawdziwymi pieniędzmi. Potwierdź, jeśli to zamierzone.',409,['code'=>'test_mode','confirmTestMode'=>true]);
-   if($decide){$set=Billing::freePeriodSet($pdo,$free,$now);if(($set['a']||$set['b'])&&$decision===null)self::decide($set);}
+   if($decide){$set=Billing::freePeriodSet($pdo,$free,$now,$had);if(($set['a']||$set['b'])&&$decision===null)self::decide($set);}
   }
   $pdo->beginTransaction();
   try{
    $counts=null;
-   $saved=self::write($pdo,function(array $raw,int $v)use($pdo,$version,$file,$free,$apply,$toPaid,$decide,$decision,$from,$admin,$now,&$counts):array{
+   $saved=self::write($pdo,function(array $raw,int $v)use($pdo,$version,$file,$free,$apply,$toPaid,$decide,$had,$decision,$from,$admin,$now,&$counts):array{
     if($v!==$version)self::stale();
     if($decide){
      // The set again under the lock: an account created since the check above is decided as well, never silently cut off.
-     $set=Billing::freePeriodSet($pdo,$free,$now);
+     $set=Billing::freePeriodSet($pdo,$free,$now,$had);
      if(($set['a']||$set['b'])&&$decision===null)self::decide($set);
      $counts=$decision===null?['a'=>0,'b'=>0]:Billing::freePeriodApply($pdo,$admin['id'],$set,$from,$now);
     }
