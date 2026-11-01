@@ -1,0 +1,354 @@
+{
+ "slices": [
+  {
+   "id": "data-domain",
+   "section": "§4.2–§4.4, §5.2–§5.8, §6.1–§6.3, §6.6–§6.7, §7.1–§7.2, §9.1, §10.6, §10.7, §12",
+   "title": "Data model, scoped revisions, Domain rules and JS mirror, i18n scaffolding",
+   "wave": 1,
+   "model": "opus",
+   "effort": "xhigh",
+   "dependsOn": [],
+   "ownsFiles": [
+    "backend/migrations/0007_roles.php",
+    "backend/src/Repository.php",
+    "backend/src/Domain.php",
+    "backend/src/Rules.php",
+    "backend/src/GuestView.php",
+    "backend/src/Clubs.php",
+    "backend/src/Actors.php",
+    "backend/src/Settings.php",
+    "dist/workspace.js",
+    "dist/engine.js",
+    "dist/guest-view.js",
+    "dist/profile-data.js",
+    "dist/i18n.js",
+    "dist/i18n/server-domain-en.js",
+    "dist/i18n/server-settings-en.js",
+    "dist/i18n/server-accounts-en.js",
+    "dist/i18n/server-athletes-en.js",
+    "dist/i18n/organizer-en.js",
+    "dist/i18n/athlete-en.js",
+    "dist/i18n/settings-en.js",
+    "tests/roles.test.mjs",
+    "tests/roles-parity.test.mjs",
+    "tests/php-bridge-roles.php",
+    "tests/php.test.mjs",
+    "tests/php-bridge.php",
+    "tests/engine.test.mjs",
+    "tests/workspace.test.mjs",
+    "tests/community.test.mjs",
+    "tests/php-bridge-community.php",
+    "tests/migrations.test.mjs",
+    "tests/i18n.test.mjs",
+    "tests/xss-scan.test.mjs",
+    "tests/domain.http.test.mjs",
+    "tests/helpers/fixture-domain.php"
+   ],
+   "description": "Migration 0007 (§9.1): users.organizer, organizer_blocked_at, organizer_trusted_at/_by; profiles.owner_user_id with a non-unique index, profiles.rev; clubs.verified, created_by, created_at, merged_into and the 'unaffiliated' club row; tournaments.created_at, hidden_by, hidden_from, hide_reason, self_entry, rev; app_meta.staff_rev (set to revision); the entry_withdrawals table; floor including member clubs and merged clubs.\n\nRepository (§4.3):\n- load and rows read and write the new columns, and rows() fills in missing keys so install.php and seed-athletes.php keep working;\n- rows() skips members; transaction($fn,$actor) injects the actor; read-only organizers and flags maps;\n- persist() uses plain INSERT for new keys and UPDATE…WHERE for existing ones, maps 1062 to 409, deletes profiles missing from the result after entries and draws (throwing if rowCount is 0), and writes stamps and withdrawal tombstones;\n- organizerSnapshot($userId,$today), profileRow(), and a guestTournaments join for community/trusted and the current club name and verified state.\n\nDomain and workspace.js parity:\n- helpers organizer, staffIds, staffProfile, community, trusted, manages, managesProfile(u,a,db?), outsideEntry, canEnter(u,t,db?), canCreateTournament;\n- Domain::stale plus central stamping in execute (§5.8);\n- the publicData visibility matrix (§5.2) with the hidden-tournament self-entry rule;\n- changes to tournament.save, profile.save, profile.archive, entry.save (editor in community tournaments, identity kept on self-entries, club override) and entry.remove (owner branch first, tombstones);\n- new commands profile.forget, athlete.save, athlete.archive, athlete.forget, entry.self (drawn-category and minor/trust gates), club.save, club.merge, club.adopt, tournament.hide (reason, hiddenFrom, withdrawSelf);\n- PHP-only forgetMember, forgetProfile, detach and retain; pure athleteFields;\n- constants per §5.4; CONTACT pattern with shared test cases; unified 404 literals for member actors.\n\nOther PHP and JS:\n- Clubs.php: key() and pick() (pure; pending club name when quotas are used up);\n- Actors::of;\n- Settings.php stub: effective() computes the derived keys from the config only;\n- Rules::sameClub, used in makeDraw;\n- GuestView: sparse community/trusted fields, upcoming() excludes untrusted community tournaments, bracket slots keep {initials, club} with club null for unverified and '' for unaffiliated, summary.clubs skips unaffiliated, and new public categoryList() and bracket();\n- JS mirrors in workspace.js, engine.js (makeDraw, clubConflicts, fingerprintCounts), guest-view.js and profile-data.js (clubKey);\n- initialWorkspace: unaffiliated club, verified flags, staffRev:1, demo-organizer and demo-athlete accounts and profile, selfEntry:true on t-winter-2027.\n\ni18n and tests: register every new dictionary in i18n.js and in the exact DICTIONARY_SOURCES list; add athlete-view.js and athlete-data.js to NOT_UI; extend the xss-scan scope to future modules; fill server-domain-en.js; parity, unit and HTTP tests per §12.",
+   "acceptance": [
+    "All existing tests are green without assertion changes (php.test exact-key and stale-write cases, workspace.test, http.test concurrency [200,409]).",
+    "roles-parity: same statuses and normalised state in PHP and JS for every command and actor; messages are equal for new paths; known old differences are listed; publicData equals publicWorkspace for each actor on a rich data set; Domain::stale agrees with JS.",
+    "roles.test covers the §5.2 matrix, the outsideEntry truth table, limit semantics (drafts and hidden excluded, finished before the date refused, paused publishing), CONTACT cases, entry.self gates (saved draw, minor in an untrusted tournament), the owner withdraw branch (open 200, closed 403), athlete.save (age 16 rule, 5 profiles, single self, identity lock), Clubs::pick (Cyrillic, Kraków/Krakow, merged, unaffiliated, pending name), the self-entry club override and identity keep, tournament.hide with hiddenFrom restore and tombstones, and forgetProfile/detach finishing when a bracket has results.",
+    "domain.http on MariaDB and MySQL: club name collisions (Straße/Strasse, Kraków/Krakow) through account.save and profile.save give 409 and leave the original row unchanged; persist deletes a profile row, or the transaction rolls back; stamps are stored; migrate twice gives exit 0; rollback-floor gives 7 with community data and lower without.",
+    "engine.test: unaffiliated pairs have cost 0; community.test: Clubs::key equals clubKey; i18n.test lists the new dictionaries, has no collisions, and every new server message has an EN entry.",
+    "php -l and node --check pass on every new file."
+   ]
+  },
+  {
+   "id": "settings-backend",
+   "section": "§3.1–§3.7, §9.2",
+   "title": "app_settings, central effective config, paid switch decision, Admin settings API",
+   "wave": 2,
+   "model": "opus",
+   "effort": "high",
+   "dependsOn": [
+    "data-domain"
+   ],
+   "ownsFiles": [
+    "backend/migrations/0008_settings.php",
+    "backend/src/Settings.php",
+    "backend/routes/settings.php",
+    "backend/src/Config.php",
+    "backend/src/Routes.php",
+    "backend/src/RouteContext.php",
+    "backend/src/Billing.php",
+    "backend/config.example.php",
+    "dist/i18n/server-settings-en.js",
+    "tests/settings.test.mjs",
+    "tests/php-bridge-settings.php",
+    "tests/settings.http.test.mjs",
+    "tests/helpers/fixture-settings.php"
+   ],
+   "description": "- Migration 0008 (app_settings, no starting row, no floor).\n- Settings.php, real implementation: get, normalize, save with a version check, idempotent effective() with signup, payments, organizers, supportEmail and stripeCheck, the derived keys, degraded states and fallback when the table is missing.\n- Central overlay: Routes::dispatch computes effective for session, upload and peek-with-cookie routes and for routes flagged 'settings'=>true, passes the PDO into RouteContext, RouteContext::$config is the effective config and RouteContext::$file the raw one; public-config gets 'settings'=>true. Config: signup_force_off default.\n- Billing: freePeriodSet with groups A (free-signup exempt) and B (Access::compute with enforce=true gives no full access); requireFrom with scope free-signup extended to group B; keep sets group B exempt as free-signup; checkout refuses 409 while enforce is false; summary and state get the effective config through the context.\n- routes/settings.php: admin-settings (view §8.2 with groups, organizersPending, limits, the last 50 account_audit rows), admin-settings-save (version, Stripe check outside the transaction, test-mode confirmation, free_period_decision with counts, support e-mail with old to new value in the audit note, organizers on/paused), admin-stripe-check (6/h).\n- Guard test for raw switch reads.",
+   "acceptance": [
+    "settings.test: full §3.3 matrix through the bridge, idempotence of effective(), normalize, save validation; the guard test finds no raw reads of billing_enforce, signup_enabled, support_email or organizers outside the allowed files.",
+    "settings.http: no row means config behaviour; off→free gives new accounts free-signup; free→paid with the Stripe stub covers prices ok, stripe_not_ready, test_mode, free_period_decision with group A and group B counts (an Admin-created member in free mode is in group B), keep and requireFrom (<14 days gives 422), and a paid→free→paid cycle; degraded when billing_enabled is false; missing table gives no 500; stale version gives 409; non-admin gives 403; history is listed.",
+    "With payments=paid stored in the database and billing_enforce=false in the file, billing-sync, me and command agree on access.",
+    "Guest chat and public routes without a cookie open no extra database connection (asserted with a connection counter or timing fixture)."
+   ]
+  },
+  {
+   "id": "accounts-backend",
+   "section": "§3.7, §4.3–§4.6, §5.5, §6.6–§6.7, §8.1",
+   "title": "Member bootstrap/command for organizers, signup with roles without lock, step-up, Admin member actions, cleanup and retention jobs, chat lobby",
+   "wave": 2,
+   "model": "opus",
+   "effort": "xhigh",
+   "dependsOn": [
+    "data-domain"
+   ],
+   "ownsFiles": [
+    "backend/public/api/index.php",
+    "backend/routes/core.php",
+    "backend/routes/accounts.php",
+    "backend/src/Members.php",
+    "backend/src/Accounts.php",
+    "backend/src/Auth.php",
+    "backend/src/Chat.php",
+    "backend/jobs/accounts.php",
+    "backend/jobs/community.php",
+    "dist/i18n/server-accounts-en.js",
+    "tests/roles.http.test.mjs",
+    "tests/helpers/fixture-roles.php"
+   ],
+   "description": "index.php:\n- Settings::effective right after the PDO opens;\n- bootstrap for a member organizer: step-up check, organizerSnapshot plus publicData(Actors::of), the ?t&rev unchanged short-circuit, 1500/h per session with unchanged answers not counted;\n- command for a member: ORGANIZER_TYPES, step-up, 60/min and 1200/h per account, global member-tx bucket of 120/min, 402, transaction with the actor and flags; account_audit after tournament.hide, club.*, profile.forget;\n- account.password forbidden for members.\n\nAuth: ws {at,last} set in enter(); 401 code 'reauth' after 30 min idle or 12 h; organizer-unlock using the login limits.\n\nMembers:\n- signup with roles and athlete: validation before any transaction (Domain::athleteFields, Clubs::pick on clubs read-only), then one Members::tx for user, profile, billing (free-signup marker), new club (plain INSERT; on 1062 re-read the club) and the profiles row via Repository::profileRow; organizer-enable-ip-day 3 per /64; duplicate-e-mail limit 5/h per /64 that gives 429 for every outcome;\n- adminAction create in free mode marks free-signup;\n- new actions organizer (block, hideTournaments with withdrawSelf), organizer-trust, organizer-bulk (up to 50, done/failed); adminList filters organizers, organizers-pending, athletes, free-signup and ownerOf;\n- erase calls Repository::transaction with Domain::forgetMember after confirmEnd and Stripe deletion, before the member transaction.\n\nRoutes: roles route (10/h, block 403, running tournaments 409); me with caps, athletes, signupMode, selfEntry and pendingOrganizers for the Admin; public-config fields.\n\nChat: the lobby skips untrusted community tournaments except the viewer's own; o:2 for an untrusted organizer.\n\nJobs: jobs/accounts.php gets NOT EXISTS conditions for profiles, tournaments and clubs; jobs/community.php runs community-retention through Domain::retain, calling effective first.",
+   "acceptance": [
+    "roles.http: signup is atomic with roles (a bad athlete creates no account); mass-assignment fields are ignored; signup with an athlete finishes while another connection holds app_meta FOR UPDATE; the club quota fallback gives an unaffiliated athlete with a pending name; the duplicate-e-mail limit returns 429 for every outcome.",
+    "Organizer flow over HTTP: tournament, limits, finished before the date refused, paused publishing, profile with a new club and guardian consent, entry, check-in with a club override, draw, result, #screen poll with unchanged.",
+    "Revision isolation: an organizer looping at the rate limit plus athlete entries in tournament A never cause 409 on an editor's checkin.save in tournament B; the global member bucket returns 429 with Retry-After and staff are unaffected.",
+    "Step-up: reauth after a simulated idle period, organizer-unlock restores access, chat and athlete routes are unaffected.",
+    "JSON leak scan for organizer, editor and club finds 0 hits of foreign names, birth dates and ids; organizerSnapshot publicData equals the full-load publicData.",
+    "Admin over HTTP: trust/untrust, block with hide, bulk action, ownerOf, filters, pendingOrganizers count; account_audit rows are written.",
+    "Account deletion of an athlete and of an organizer: the profiles rows are gone or anonymised with owner_user_id NULL; deletion succeeds when the bracket has other results; accounts-cleanup skips accounts with community data; community-retention anonymises past the cutoff.",
+    "The chat lobby has no untrusted community tournaments and o is 2 for an untrusted organizer."
+   ]
+  },
+  {
+   "id": "athlete-backend",
+   "section": "§6.1–§6.3, §7, §8.1",
+   "title": "AthleteView and athlete routes, public clubs, safe seed-athletes",
+   "wave": 2,
+   "model": "opus",
+   "effort": "high",
+   "dependsOn": [
+    "data-domain"
+   ],
+   "ownsFiles": [
+    "backend/src/AthleteView.php",
+    "backend/routes/athletes.php",
+    "dist/athlete-view.js",
+    "backend/bin/seed-athletes.php",
+    "dist/i18n/server-athletes-en.js",
+    "tests/athlete-view.test.mjs",
+    "tests/php-bridge-athlete.php",
+    "tests/athletes.http.test.mjs",
+    "tests/helpers/fixture-athletes.php"
+   ],
+   "description": "- AthleteView::project (pure) and build(PDO) with the exact field list from §7.4: profiles, entries with categories, drawn flag, position and bracket via GuestView::categoryList, withdrawn tombstones, open list with community/trusted/organizer and per-profile entered/blocked, club display from the clubs join, minor and locked flags. JS mirror athlete-view.js.\n- routes/athletes.php: public-clubs (verified and not merged, 2000, cache 300 s); athlete (peek); athlete-save, athlete-archive (20/h); athlete-forget (password, 5/h); athlete-entry (30/h, global member bucket, 402 in paid mode); athlete-withdraw (no full access needed). All writes go through Repository::transaction with the actor and the current revision.\n- seed-athletes.php: demo clubs get verified=false and created_by=seeding admin; --remove deletes only staff-created profiles without an owner in demo clubs and refuses with an instruction otherwise.",
+   "acceptance": [
+    "athlete-view.test: PHP and JS projections are equal (states, positions, category codes, exact keys, no other person's data).",
+    "athletes.http: age rule for under-16 self, 5-profile cap, single self, identity lock (409); athlete-entry returns open 200; closed/no selfEntry/past date 403; hidden, draft and missing give byte-identical 404; repeat 409; saved draw in the category 409; minor in an untrusted tournament 409; disallowed event 422; withdraw open 200 and closed 403; tombstone after an organizer withdrawal; athlete-forget removes or anonymises the profile; paid mode gives entry 402 while withdraw, save, forget and athlete return 200; public-clubs lists only verified clubs.",
+    "seed-athletes --remove with a community profile in a demo club refuses and changes nothing; a normal seed and remove round trip still works."
+   ]
+  },
+  {
+   "id": "organizer-frontend",
+   "section": "§4.6 (client), §10.4, §10.7",
+   "title": "Organizer in app.js, registry/me, club picker, chat badge, demo upgrade and mount points",
+   "wave": 2,
+   "model": "opus",
+   "effort": "high",
+   "dependsOn": [
+    "data-domain"
+   ],
+   "ownsFiles": [
+    "dist/app.js",
+    "dist/registry.js",
+    "dist/me.js",
+    "dist/client.js",
+    "dist/club-picker.js",
+    "dist/chat.js",
+    "dist/chat-boot.js",
+    "dist/index.html",
+    "dist/workspace.css",
+    "dist/athlete-boot.js",
+    "dist/settings-boot.js",
+    "dist/athlete.css",
+    "dist/settings.css",
+    "dist/i18n/organizer-en.js",
+    "tests/organizer-ui.test.mjs",
+    "tests/registry.test.mjs",
+    "tests/workspace.test.mjs",
+    "tests/chat-client.test.mjs"
+   ],
+   "description": "- app.js:\n  - communityOnly(user) in shell, render, #screen polling and rerenderLanguage; #screen polls through Client.bootstrap({t,rev}) and ignores unchanged answers;\n  - handleError: a 401 with reauth opens a password modal, calls organizer-unlock and retries once;\n  - tournamentsPage: first-run card, Admin/editor filter (all/staff/community/hidden), optgroup select, badges, 'Kopiuj link do zapisów', data-tournament-admin mount;\n  - tournamentForm: organizer defaults to open with selfEntry, new note text, hidden banner with the reason;\n  - profileForm with club-picker and guardian consent for members under 16; checkModal club field for self-entries with a warning that the draw will be dropped; entryForm privacy notice in community tournaments; club display from clubName(clubId) or the snapshot;\n  - ui.bracket(publicCategory,{highlight}) returning SafeHtml; data-athlete-cta mount in guestPage; imports of athlete-boot.js and settings-boot.js (created empty); demo buttons for organizer and athlete.\n- registry: defaultPage(role,user), visible(user) in allows and navItems. me.js: demoMe with caps and athletes.\n- client.js: bootstrap parameters and an idempotent upgrade of a stored demo (unaffiliated club, verified, selfEntry, rev, staffRev, demo member accounts).\n- club-picker.js: radio group plus an ARIA 1.2 combobox, or a native select below 300 clubs, with a 'Czy chodzi o…?' match.\n- chat.js renders o:2 as 'Organizator (społeczność)'; chat-boot.js adds the member role to event-chat.\n- index.html links athlete.css and settings.css.\n- EN keys go to organizer-en.js.",
+   "acceptance": [
+    "organizer-ui.test: communityOnly, defaultPage(role,user) and visible behave as specified; club-picker keyboard (arrows, Enter, Escape, Home/End) and its result shapes {id}/{name}/{none:true}; copy-link fallback; reauth modal retries once; tournamentForm defaults per role.",
+    "workspace.test: upgrading a pre-release stored demo object is idempotent and enables the organizer and athlete demo logins.",
+    "chat-client.test: o:2 badge text; registry.test: event-chat is visible for a member with a tournament in the workspace.",
+    "i18n and xss-scan are green for all touched modules; existing UI tests have no assertion changes."
+   ]
+  },
+  {
+   "id": "account-frontend",
+   "section": "§4.5, §10.1–§10.2",
+   "title": "Signup with roles and athlete step, landing, Roles tab, join and promo copy",
+   "wave": 3,
+   "model": "opus",
+   "effort": "high",
+   "dependsOn": [
+    "accounts-backend",
+    "athlete-backend",
+    "organizer-frontend"
+   ],
+   "ownsFiles": [
+    "dist/account-flow.js",
+    "dist/account-boot.js",
+    "dist/athlete-form.js",
+    "dist/account.css",
+    "dist/i18n/accounts-en.js",
+    "dist/promo.js",
+    "tests/account-ui.test.mjs",
+    "tests/i18n.test.mjs",
+    "tests/home-embed.test.mjs"
+   ],
+   "description": "- Step 1: new lead and the roles fieldset with the §4.5 captions; #signup?as&t stored in sessionStorage.\n- Step 2: 'Dalej' when the athlete role is ticked.\n- Athlete step (athlete-form.js, shared with the Roles tab): required 'Kogo zgłaszasz?' (Siebie / Moje dziecko lub podopiecznego), name prefilled only for Siebie, measures, club-picker, empty consent slot, under-16 self message without a workaround hint.\n- signup body with roles and athlete; a club-pending notice after reload.\n- Landing: landing(me, stored) replaces goChat (organizer → #tournaments, athlete → #guest?t with the entry modal or #starts, others → chat, paid without access → plan step); step label from roles and me.caps.\n- Roles tab: organizer toggle (blocked text with the support address); athletes list with add (up to 5), edit, archive, and forget with password; roleName ('Opiekun zawodnika').\n- account-boot: joinCard role benefits and bannerInfo for organizers and athletes.\n- promo.js ACCESS: athlete CTA 'Załóż konto zawodnika i zgłoś się' for open selfEntry tournaments, without the club-account sentence.\n- Update the promo assertions in i18n.test and home-embed.test; this is the only assertion change allowed.",
+   "acceptance": [
+    "account-ui.test: signupSteps, athleteBody, athleteError (same messages as the server), landing for each role and stored target, roleName, dynamic step labels, focus after step change, Roles tab states including the blocked organizer.",
+    "The under-16 self message never tells the user to tick the guardian option; the name is prefilled only for 'Siebie'.",
+    "i18n test is green with updated promo assertions; no other existing assertions change; the 390 px layout has no horizontal scroll (Playwright check in account-ui)."
+   ]
+  },
+  {
+   "id": "athlete-frontend",
+   "section": "§7.3–§7.6, §10.3, §10.7",
+   "title": "Moje starty, entry modal, member preview CTA, demo athlete adapter",
+   "wave": 3,
+   "model": "opus",
+   "effort": "high",
+   "dependsOn": [
+    "athlete-backend",
+    "organizer-frontend"
+   ],
+   "ownsFiles": [
+    "dist/athlete-boot.js",
+    "dist/athlete-flow.js",
+    "dist/athlete-data.js",
+    "dist/athlete.css",
+    "dist/i18n/athlete-en.js",
+    "dist/client.js",
+    "tests/athlete-ui.test.mjs"
+   ],
+   "description": "- #starts page (roles member, visible caps.athlete): profile switcher, profile card, 'Moje zgłoszenia' with the §7.6 statuses, edit/withdraw (confirm modal), read-only bracket via ui.bracket with the own slot highlighted, 'Wycofane' tombstones, 'Otwarte turnieje' with community badges and the minor-untrusted explanation; 60 s refresh while visible; menu badge for the next 7 days.\n- Entry modal: profile choice; events with ineligible or drawn ones shown as visible text with the reason (aria-describedby); category preview; measures with 'Zapisz też w profilu'; privacy notice for every tournament with the correct audience and the public-bracket sentence; empty consent slot.\n- Member preview CTA in [data-athlete-cta] (enter / entered / 'Dodaj dane zawodnika' link).\n- 402 goes to billing.\n- athlete-data.js: eligibility and category preview built on engine.js.\n- client.js: athleteRequest demo adapter using athlete-view.js and execute.",
+   "acceptance": [
+    "athlete-ui.test: allowed events and category preview, drawn and ineligible reasons as text, card states for each status including withdrawn by organizer and by Admin and tournament paused, canWithdraw/canEdit, withdraw confirm text, notice text for staff and community tournaments.",
+    "Demo: the athlete demo can enter t-winter-2027 and withdraw locally.",
+    "xss-scan and i18n are green; screen reader names exist for every control (Playwright accessibility snapshot)."
+   ]
+  },
+  {
+   "id": "admin-frontend",
+   "section": "§3.5, §5.5, §10.5",
+   "title": "Settings page, Clubs page, tournament admin actions, Members extensions",
+   "wave": 3,
+   "model": "opus",
+   "effort": "high",
+   "dependsOn": [
+    "settings-backend",
+    "accounts-backend",
+    "organizer-frontend"
+   ],
+   "ownsFiles": [
+    "dist/settings-boot.js",
+    "dist/admin-settings.js",
+    "dist/admin-clubs.js",
+    "dist/settings.css",
+    "dist/i18n/settings-en.js",
+    "dist/admin-members.js",
+    "dist/members.css",
+    "dist/i18n/members-en.js",
+    "tests/settings-ui.test.mjs",
+    "tests/members-ui.test.mjs"
+   ],
+   "description": "- #settings: three signup modes plus the existing-accounts payments toggle; Stripe status and check; support e-mail; free-period groups A/B with the bulk requireFrom; organizers on/paused switch with the pending count link; history list. Decision and test-mode dialogs use ui.modal.\n- #clubs: filters (unverified/all/merged), profile counts, creator type; verify, rename, merge (including into unaffiliated); pending club names with adopt.\n- [data-tournament-admin]: hide with a reason and the withdrawSelf option, restore, show organizer, trust organizer.\n- #members: badges (organizer, confirmed, blocked, athlete, free-signup), filters (organizers, organizers-pending with the nav badge from features.pendingOrganizers, athletes, free-signup), trust/untrust, block or restore organizer with hide, row selection and the bulk 'Zablokuj i ukryj turnieje'.\n- All API values go into the DOM through h and setHtml.",
+   "acceptance": [
+    "settings-ui.test: mode mapping, disabled paid option without Stripe, the decision dialog shows both group counts and sends keep/requireFrom correctly, the test-mode confirmation, history rendering.",
+    "members-ui.test: badges, filters, bulk selection payload and the done/failed summary, trust buttons, the pending badge.",
+    "xss-scan covers admin-settings.js, admin-clubs.js and settings-boot.js; i18n has no untranslated keys."
+   ]
+  },
+  {
+   "id": "integration-qa",
+   "section": "§11, §12, §13, §16",
+   "title": "Cross-slice integration, browser QA, performance budget, security review, documentation",
+   "wave": 4,
+   "model": "opus",
+   "effort": "xhigh",
+   "dependsOn": [
+    "data-domain",
+    "settings-backend",
+    "accounts-backend",
+    "athlete-backend",
+    "organizer-frontend",
+    "account-frontend",
+    "athlete-frontend",
+    "admin-frontend"
+   ],
+   "ownsFiles": [
+    "tests/integration.http.test.mjs",
+    "tests/qa-browser.test.mjs",
+    "tests/perf.http.test.mjs",
+    "README.md",
+    "INSTALL-PL.md",
+    "DEPLOY-PL.md",
+    "HANDOFF.md",
+    "VALIDATION.md"
+   ],
+   "description": "- Contract tests between same-wave slices: effective config inside RouteContext and the account/athlete routes; Actors::of; transaction with an actor; organizerSnapshot; Clubs::pick in signup.\n- Browser scenarios from §12 on phone and desktop, PL and EN.\n- Performance budget at 5,000 profiles and 200 tournaments (load < 400 ms, organizerSnapshot < 50 ms, unchanged bootstrap < 20 ms).\n- Walk the §11 checklist item by item with evidence.\n- Seam fixes in any file, each listed in the commit message.\n- Documentation:\n  - README: roles, visibility matrix, trusting organizers;\n  - INSTALL-PL: signup_force_off, app_settings, the new seed-athletes behaviour;\n  - DEPLOY-PL: §3.3 matrix, abuse procedure (pause, bulk block), 0007 floor;\n  - HANDOFF: state and §15 questions;\n  - VALIDATION: results and the budget.",
+   "acceptance": [
+    "All test suites are green on MariaDB 10.6 and MySQL 8.0, including the existing ones without assertion changes beyond the listed exceptions.",
+    "Every §11 checklist item is ticked with a pointer to its test or check.",
+    "qa-browser passes the §12 scenarios at 390 px and on desktop without horizontal scroll; the club picker and entry modal are keyboard-operable and have accessible names.",
+    "The performance budget is met and recorded in VALIDATION.md and in the diagnostics output.",
+    "The documentation describes the owner steps from §13 in plain Polish."
+   ]
+  }
+ ],
+ "openQuestions": [
+  {
+   "question": "O17: Can one parent account hold several athlete profiles (siblings), or strictly one profile per account?",
+   "recommendedDefault": "Yes, up to 5 profiles per account (at most one 'self', the rest 'guardian'). Setting the ATHLETES_PER_ACCOUNT constant to 1 restores one profile per account without a model change.",
+   "blocking": false
+  },
+  {
+   "question": "O19: May a self-registered organizer (e.g. a coach) enter their own athletes into other people's open tournaments?",
+   "recommendedDefault": "Yes, but only into tournaments that accept self-entries and belong to staff or a confirmed organizer. The organizer sees only their own entries there.",
+   "blocking": false
+  },
+  {
+   "question": "O18/R16: Should minors (under 18) be blocked from self-entering tournaments of organizers the Admin has not yet confirmed, and should such tournaments stay off the homepage and the chat lobby?",
+   "recommendedDefault": "Yes. The tournaments still publish immediately at their own URL and in the athletes' list, with a 'community, unconfirmed organizer' badge. The Admin confirms organizers with one button from a counted queue.",
+   "blocking": false
+  },
+  {
+   "question": "O1: Can club representatives and editors enter staff athletes (mostly children) into community tournaments?",
+   "recommendedDefault": "Only into tournaments of confirmed organizers, with editors limited to profiles they created and a privacy notice shown.",
+   "blocking": false
+  },
+  {
+   "question": "O20: How long are community athlete data (profiles added by organizers, community entries) kept after the athlete's last tournament?",
+   "recommendedDefault": "24 months (RETENTION_MONTHS), then anonymised. To be confirmed in the legal session.",
+   "blocking": false
+  },
+  {
+   "question": "O14: Will the owner wait for legal texts (privacy policy, terms, guardian consent) before switching signup to 'Otwarta, bezpłatna'?",
+   "recommendedDefault": "Strongly recommended: deploy now with signup off, run the legal session, then open signup in the panel.",
+   "blocking": false
+  },
+  {
+   "question": "O21: Is it acceptable that organizers must re-enter their password for organizer tools after 30 minutes idle and at least every 12 hours, while chat stays signed in?",
+   "recommendedDefault": "Yes, the same limits as staff sessions.",
+   "blocking": false
+  }
+ ]
+}
