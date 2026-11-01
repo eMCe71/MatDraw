@@ -74,10 +74,11 @@ return [
  'trusted_proxies' => [],
 
  // --- Payments (Stripe) ----------------------------------------------------------------------------------------
- // Switches (enable in this order, see DEPLOY-PL.md): billing_enabled shows plans and allows checkout;
- // billing_enforce requires payment for full access and needs billing_enabled=true. After the first save in the panel
- // "Ustawienia" the panel decides whether payments are required ("Otwarta, płatna" needs billing_enabled=true and a
- // successful Stripe check); billing_enabled, billing_mode and the Stripe keys always stay here.
+ // Switches (enable in this order, see DEPLOY-PL.md): billing_enabled makes Stripe available (plans, the Stripe check and
+ // "Otwarta, płatna" in the panel "Ustawienia"); checkout opens only while payments are required: billing_enforce until
+ // the first save in the panel, then the panel's payments mode (paid). billing_enforce requires payment for full access
+ // and needs billing_enabled=true; after the first save it is only the starting value ("Otwarta, płatna" needs
+ // billing_enabled=true and a successful Stripe check). billing_enabled, billing_mode and the Stripe keys always stay here.
  'billing_enabled' => false,
  'billing_enforce' => false,
  // 'test' or 'live'; must match the key prefix (rk_test_/rk_live_) and the mode of Stripe events.

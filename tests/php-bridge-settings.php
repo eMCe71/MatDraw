@@ -5,7 +5,7 @@
 //             connection (twice: idempotence) and on its own result, Settings::flags, the number of queries (cache per PDO).
 //  normalize  {cases:[{data, config}]}: Settings::normalize.   defaults {cases:[config]}.   mode {cases:[data]}.
 //  save       {now, cases:[input]}: Settings::save input checks; a valid input reaches the database ('db').
-//  needs      {}: Routes::needsSettings of every registered route without a cookie and with a session cookie.
+//  needs      {}: [auth, Routes::needsSettings without a cookie, with a session cookie, with a bad one, user] of every route.
 //  dispatch   {name, route, cookie?}: Routes::dispatch of one test route (the registry is replaced) with a database that
 //             cannot be opened ('nodriver:'), so any connection attempt answers 500. Prints the response and "STATUS <code>".
 declare(strict_types=1);
@@ -66,7 +66,7 @@ $out=match($in['job']){
  'mode'=>array_map(fn($d)=>Settings::mode($d),$in['cases']),
  'save'=>array_map(fn($b)=>$attempt(fn()=>Settings::save(new FailingPdo(),Config::DEFAULTS,['id'=>'admin'],$b,(int)$in['now'])),$in['cases']),
  'needs'=>(function(){
-  $out=[];foreach(Routes::all() as $name=>$r)$out[$name]=[$r['auth'],Routes::needsSettings($name,$r,null),Routes::needsSettings($name,$r,str_repeat('a',26)),Routes::needsSettings($name,$r,'bad cookie')];
+  $out=[];foreach(Routes::all() as $name=>$r)$out[$name]=[$r['auth'],Routes::needsSettings($name,$r,null),Routes::needsSettings($name,$r,str_repeat('a',26)),Routes::needsSettings($name,$r,'bad cookie'),$r['user']];
   return $out;
  })(),
 };

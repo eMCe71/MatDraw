@@ -89,7 +89,7 @@ test('Routes::needsSettings: session and upload routes always, peek routes only 
   assert.deepEqual([none,cookie,bad],want,name+' ('+mode+')');
  }
  for(const name of ['public-chat','public-chat-channels','chat-feed','avatar','admin-settings','admin-settings-save','admin-stripe-check','public-config','stripe-webhook'])assert.ok(all[name],name+' is registered');
- assert.deepEqual(all['public-chat'].slice(1),[false,false,false],'guest chat never opens a connection for the settings');
+ assert.deepEqual(all['public-chat'].slice(1,4),[false,false,false],'guest chat never opens a connection for the settings');
  assert.deepEqual(all['admin-settings'][0],'peek');assert.deepEqual(all['admin-settings-save'][0],'session');
 });
 
@@ -120,14 +120,17 @@ const RAW_ENTRY={'backend/bin/install.php':'installer','backend/bin/migrate.php'
  'backend/bin/stripe-sync.php':'payment sync (reads no switch)','backend/bin/cron.php':'every job calls Settings::effective itself','backend/bin/seed-athletes.php':'demo data',
  'backend/routes/accounts.php':'the 413/415 message of an upload (Avatars::reject)','backend/bootstrap.php':'defines it','backend/config.example.php':'documentation'};
 // Files of slices of the same wave that add Settings::effective (PLAN-REJESTRACJA-ROLE §3.2, slice accounts-backend): their
-// findings are reported as TODO until that slice is merged, then enforced like every other file.
+// findings are reported as TODO only while the file has no Settings::effective call yet; once that slice is merged (the
+// file calls it), they are enforced like every other file without editing this test.
 const PENDING={'backend/public/api/index.php':'accounts-backend','backend/jobs/accounts.php':'accounts-backend'};
+const pendingOpen=(file,files)=>!!PENDING[file]&&!/Settings::effective\(/.test(strip(files[file]??''));
+const strip=src=>src.replace(/\/\*[\s\S]*?\*\//g,'').replace(/^\s*\/\/.*$/gm,'');
 const CONFIG_BASE=/^(\$(c|cfg|config|conf|eff|file)|\$(ctx|this)->(config|file)|matdraw_config\(\))$/;
 /** Findings for {path: source}: raw switch reads and entry points without the overlay. */
 function guard(files){
  const out=[];const read=new RegExp(String.raw`(\$[A-Za-z_]\w*(?:->\w+)*|matdraw_config\(\))\s*\[\s*'(${SWITCHES.join('|')})'\s*\]`,'g');
  for(const [file,src] of Object.entries(files)){
-  const code=src.replace(/\/\*[\s\S]*?\*\//g,'').replace(/^\s*\/\/.*$/gm,'');const overlay=/Settings::effective\(/.test(code);
+  const code=strip(src);const overlay=/Settings::effective\(/.test(code);
   if(!ANY.has(file))for(const m of code.matchAll(read)){
    const [,base,key]=m;if(!CONFIG_BASE.test(base))continue;// $db['organizers'] (workspace map), request bodies, rows
    const raw=/(^\$file$|->file$|^matdraw_config)/.test(base);
@@ -142,7 +145,7 @@ const tree=dir=>readdirSync(dir).flatMap(f=>{const p=dir+'/'+f;return statSync(p
 
 test('guard: the switches are read only from the effective configuration (Settings::effective), never from config.php directly',t=>{
  const files=Object.fromEntries(tree('backend').map(f=>[f,readFileSync(f,'utf8')]));
- const found=guard(files),pending=found.filter(f=>PENDING[f.split(':')[0]]),rest=found.filter(f=>!PENDING[f.split(':')[0]]);
+ const found=guard(files),open=f=>pendingOpen(f.split(':')[0],files),pending=found.filter(open),rest=found.filter(f=>!open(f));
  assert.deepEqual(rest,[]);
  if(pending.length)t.todo(pending.map(f=>f+' (until '+PENDING[f.split(':')[0]]+' is merged)').join('; '));
  // The one place of the overlay for registry routes, and the raw file kept apart in RouteContext.
@@ -159,4 +162,74 @@ test('guard: planted violations are found',()=>{
   'backend/bin/z.php':"$c=matdraw_config();Access::of($pdo,$u,$c);",
   'backend/src/Settings.php':"$c['organizers'];",
  }),["backend/routes/x.php: $ctx->file['billing_enforce'] reads config.php directly","backend/jobs/x.php: $c['billing_enforce'] without Settings::effective","backend/bin/z.php: matdraw_config() without Settings::effective"]);
+});
+
+// ---- Guard: a route that reaches a switch gets the overlay on every path to its handler (§3.2) ---------------------------
+// The guard above finds raw reads; this one finds a route whose handler reads a switch through $ctx->config (directly or
+// through a method of backend/src that reads one, at any depth) while a guest reaches it without the overlay: public and
+// webhook routes without 'settings'=>true (or Routes::SETTINGS), peek routes for optional or anonymous users. Settings and
+// Config read config.php by design (the overlay itself and the file check): a method calling Settings::effective computes
+// the overlay itself and is not a reader.
+const OVERLAY_CLASSES=new Set(['Settings','Config']);
+const SWITCH_READ=new RegExp(String.raw`(\$(?:c|cfg|config|conf|eff)|\$(?:ctx|this)->config)\s*\[\s*'(${SWITCHES.join('|')})'\s*\]`);
+// Routes a guest reaches without the overlay although a method they call reads a switch, with the reason that is safe.
+const GUEST_SAFE={'chat-feed':'Chat::peekViewer reads access only for a live session, whose cookie computes the overlay'};
+/** Class::method of backend/src files that read a switch of their configuration, directly or through another such method. */
+function switchReaders(srcFiles){
+ const methods={};
+ for(const [file,src] of Object.entries(srcFiles)){
+  const cls=file.split('/').pop().replace(/\.php$/,'');if(OVERLAY_CLASSES.has(cls))continue;
+  for(const part of strip(src).split(/\n (?=(?:(?:public|private|protected) )?(?:static )?function \w+\()/)){const m=part.match(/^(?:(?:public|private|protected) )?(?:static )?function (\w+)\(/);if(m)methods[cls+'::'+m[1]]=part;}
+ }
+ const calls=(body,cls,ref)=>{const [c,m]=ref.split('::');return new RegExp(String.raw`(?<![\w\\])${c}::${m}\(`).test(body)||c===cls&&new RegExp(String.raw`(?:self|static)::${m}\(`).test(body);};
+ const readers=new Set(Object.keys(methods).filter(k=>SWITCH_READ.test(methods[k])));
+ for(let grew=true;grew;){grew=false;for(const [k,body] of Object.entries(methods))if(!readers.has(k)&&[...readers].some(r=>calls(body,k.split('::')[0],r))){readers.add(k);grew=true;}}
+ return readers;
+}
+/** name => source of each route definition of backend/routes files (a route starts with "\n '<name>'=>[" at the top level). */
+function routeSpans(routeFiles){
+ const out={};
+ for(const src of Object.values(routeFiles))for(const part of strip(src).split(/\n (?='[a-z][a-z0-9-]*'=>\[)/).slice(1))out[part.match(/^'([a-z0-9-]+)'/)[1]]=part;
+ return out;
+}
+/** Findings for route and src sources and the registry {name: [auth, needsSettings without a cookie, …, user]}. */
+function routeGuard(routeFiles,srcFiles,registry){
+ const readers=[...switchReaders(srcFiles)],out=[];
+ for(const [name,span] of Object.entries(routeSpans(routeFiles))){
+  const hits=[...(SWITCH_READ.test(span)?['$ctx->config']:[]),...readers.filter(r=>new RegExp(String.raw`(?<![\w\\])${r}\(`).test(span))];
+  if(!hits.length)continue;
+  if(!registry[name]){out.push(`${name}: not registered`);continue;}
+  const [mode,none,,,user]=registry[name];
+  const guest=mode==='public'||mode==='webhook'||mode==='peek'&&['optional','anon'].includes(user);
+  if(guest&&!none&&!GUEST_SAFE[name])out.push(`${name}: ${hits.join(', ')} without the effective configuration for a guest`);
+ }
+ return out;
+}
+const sources=dir=>Object.fromEntries(tree(dir).map(f=>[f,readFileSync(f,'utf8')]));
+
+test('guard: every route that reads a switch gets the effective configuration on each path to its handler',{skip},()=>{
+ const registry=bridge({job:'needs'}),routeFiles=sources('backend/routes'),srcFiles=sources('backend/src');
+ assert.deepEqual(routeGuard(routeFiles,srcFiles,registry),[]);
+ const readers=switchReaders(srcFiles);
+ for(const m of ['Access::compute','Billing::state','Members::signupOpen','Chat::viewer'])assert.ok(readers.has(m),m+' is known to read a switch');
+ assert.ok(![...readers].some(m=>/^(Settings|Config)::/.test(m)),'the overlay itself is not a reader');
+ assert.ok(SWITCH_READ.test(routeSpans(routeFiles)['public-config']),'public-config reads switches (and gets the overlay)');
+ for(const name of Object.keys(GUEST_SAFE))assert.ok(registry[name],name+' is registered');
+});
+test('guard: planted route violations are found',()=>{
+ const route=(name,auth,body,extra='')=>`\n '${name}'=>['method'=>'GET','auth'=>'${auth}'${extra},'handler'=>fn(RouteContext $ctx):array=>${body}],`;
+ const routeFiles={'backend/routes/x.php':'<?php\nreturn ['+route('x-public','public',"['s'=>$ctx->config['signup_enabled']]")+route('x-flagged','public',"['s'=>$ctx->config['signup_enabled']]",",'settings'=>true")
+  +route('x-helper','public','Foo::bar($ctx->config)')+route('x-member','peek',"['s'=>$ctx->config['support_email']]")+route('x-guest','peek','Foo::bar($ctx->config)',",'user'=>'optional'")
+  +route('x-chat','public','ChatSettings::get($ctx->pdo())')+route('x-own','public','Chat::trust($ctx->pdo(),$ctx->config)')+route('x-hook','webhook',"Billing::hook($ctx->config)")+'\n];'};
+ const srcFiles={'backend/src/Foo.php':"<?php\nfinal class Foo {\n public static function bar(array $c):bool{return self::inner($c);}\n private static function inner(array $c):bool{return !empty($c['billing_enforce']);}\n}",
+  'backend/src/Settings.php':"<?php\nfinal class Settings {\n public static function effective(?PDO $pdo,array $c):array{return ['s'=>$c['signup_enabled']];}\n}",
+  'backend/src/ChatSettings.php':"<?php\nfinal class ChatSettings {\n public static function get(PDO $pdo):array{return [];}\n}",
+  'backend/src/Chat.php':"<?php\nfinal class Chat {\n public static function trust(PDO $pdo,array $c):bool{return Settings::effective($pdo,$c)['organizers']==='on';}\n public static function get(PDO $pdo,array $c):bool{return $c['organizers']==='on';}\n}",
+  'backend/src/Billing.php':"<?php\nfinal class Billing {\n public static function hook(array $c):array{return Access::compute(null,[],$c,0);}\n}",
+  'backend/src/Access.php':"<?php\nfinal class Access {\n public static function compute(?array $row,array $u,array $cfg,int $now):array{return empty($cfg['billing_enforce'])?[]:[1];}\n}"};
+ const registry={'x-public':['public',false,false,false,null],'x-flagged':['public',true,true,true,null],'x-helper':['public',false,false,false,null],'x-member':['peek',false,true,false,'required'],
+  'x-guest':['peek',false,true,false,'optional'],'x-chat':['public',false,false,false,null],'x-own':['public',false,false,false,null],'x-hook':['webhook',false,false,false,null]};
+ assert.deepEqual([...switchReaders(srcFiles)].sort(),['Access::compute','Billing::hook','Chat::get','Foo::bar','Foo::inner']);
+ assert.deepEqual(routeGuard(routeFiles,srcFiles,registry),["x-public: $ctx->config without the effective configuration for a guest","x-helper: Foo::bar without the effective configuration for a guest",
+  "x-guest: Foo::bar without the effective configuration for a guest","x-hook: Billing::hook without the effective configuration for a guest"]);
 });
