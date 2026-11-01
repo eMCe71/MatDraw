@@ -1,7 +1,7 @@
 // Organizer in the existing interface (PLAN-REJESTRACJA-ROLE §4.6, §10.4, §10.7): roles in the registry, the club picker (pure parts and,
 // in a browser, the keyboard), the password confirmation that retries a request once, and the structure of app.js. Browser checks
 // (Playwright + Chromium) run with MATDRAW_BROWSER_TESTS=1: the static demo (organizer, editor, copy link, club picker) and the API mode
-// against a stub server (reauth prompt at start-up, a wrong and a right password, cancelling).
+// against a stub server (reauth prompt at start-up, a wrong and a right password, cancelling; the hall screen's polling under page.clock).
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
@@ -131,8 +131,8 @@ test('review round 1: registered pages with visible(user) render, the club of an
  assert.match(form,/const lockClub=!!id&&user\.role!=='admin';/);assert.match(form,/disabled:lockClub\}\)\)\+\(lockClub\?`<p class="muted small span-two club-locked">\$\{T\('Klub zawodnika może zmienić Administrator\.'\)\}<\/p>`:''\)/);
  assert.match(app,/if\(picker&&old\?\.clubId&&workspace\.user\.role!=='admin'\)club=\{id:old\.clubId\};else if\(old\?\.clubId===UNAFFILIATED&&club\?\.none\)club=\{id:UNAFFILIATED\};/,'"Niezrzeszony" again keeps the pending club name');
  assert.match(app,/for\(const el of \[form,form\.closest\('\.modal'\)\]\)if\(el\)el\.dataset\.revision=workspace\.revision;\}/,'after entry.save the retry of the check-in uses the new revision');
- assert.match(app,/location\.hash\.startsWith\('#screen'\)&&fullView\(workspace\.user,state\.tournament\)&&!screenPaused\)\{try\{/);
- assert.match(app,/catch\(error\)\{if\(error\?\.status===401&&error\.code==='reauth'\)screenPaused=true;await handleError\(error\);\}\}\},15000\);/,'a cancelled prompt on the hall screen stops the polling');
+ assert.match(app,/location\.hash\.startsWith\('#screen'\)&&fullView\(workspace\.user,state\.tournament\)&&!screenPaused&&!unlocking&&!screenBusy\)\{screenBusy=true;try\{/,'no tick while a prompt is open or a tick still waits (review round 2)');
+ assert.match(app,/catch\(error\)\{if\(error\?\.status===401&&error\.code==='reauth'\)screenPaused=true;await handleError\(error\);\}finally\{screenBusy=false;\}\}\},15000\);/,'a cancelled prompt on the hall screen stops the polling');
  assert.match(app,/addEventListener\('hashchange',\(\)=>\{document\.body\.classList\.remove\('print-preview'\);screenPaused=false;/);assert.match(app,/await Client\.unlock\(new FormData\(form\)\.get\('password'\)\);screenPaused=false;unlockFinish/);
  const chat=readFileSync(DIST+'chat-boot.js','utf8');assert.match(chat,/id:'event-chat'[^\n]*visible:u=>!registry\.communityOnly\(u\)/);
 });
@@ -275,5 +275,62 @@ test('demo in a browser: a page with visible(user) renders for its user, #event-
   await editSave('qa-pending',async()=>{await page.check('#profile-form [data-cp-mode][value="list"]');await page.selectOption('#profile-form [data-cp-select]',club);});
   p=await stored('qa-pending');assert.deepEqual([p.clubId,p.pendingClubName],[club,undefined],'another club replaces it');
   assert.deepEqual(problems,[]);
+ }finally{await browser.close();server.close();}
+});
+
+test('review round 2, demo in a browser: a check-in that fails after the club was corrected is retried without a 409 and without a second entry.save',{skip:!chromium&&'MATDRAW_BROWSER_TESTS=1 and Playwright needed',timeout:120000},async()=>{
+ const {server,url}=await serve(),browser=await chromium.launch().catch(e=>{server.close();throw e;}),problems=[];
+ try{
+  const ctx=await browser.newContext({viewport:{width:1440,height:900},locale:'pl-PL',serviceWorkers:'block'}),page=await ctx.newPage();page.on('pageerror',e=>problems.push(e.message));page.on('console',m=>{if(m.type()==='error')problems.push(m.text().slice(0,200));});
+  await page.goto(url);await page.waitForSelector('.login-page');await page.click('[data-action="demo-login"][data-role="organizer"]');await page.waitForSelector('.app-shell');
+  // The organizer's own tournament with an adult athlete's self-entry (club "Niezrzeszony", waiting for the check-in).
+  const club=await page.evaluate(()=>{const key='matdraw.workspace.v2',db=JSON.parse(localStorage.getItem(key)),club=db.clubs.find(c=>c.id!=='unaffiliated'&&!c.mergedInto);
+   db.profiles.push({id:'qa-self',name:'Ola Samodzielna',clubId:'unaffiliated',sex:'F',birthDate:'1995-04-02',weight:58,height:168,gradeType:'cup',grade:6,events:['forms'],champion:false,createdBy:'demo-athlete',createdAt:1793484000,archived:false,ownerId:'demo-athlete',relation:'self'});
+   db.tournaments.push({id:'qa-t',name:'Puchar Kontroli',city:'Opole',date:'2027-05-15',mat:'Mata 1',status:'open',createdBy:'demo-organizer',selfEntry:true,rev:1,entries:[{id:'qa-self',profileId:'qa-self',clubId:'unaffiliated',name:'Ola Samodzielna',club:'Niezrzeszony',sex:'F',age:32,weight:58,height:168,gradeType:'cup',grade:6,champion:false,events:['forms'],presence:'pending',actualWeight:null,self:true}],draws:{},activity:[]});
+   db.revision++;localStorage.setItem(key,JSON.stringify(db));sessionStorage.setItem('matdraw.activeTournament','qa-t');return club.id;});
+  await page.evaluate(()=>{location.hash='#checkin';});await page.reload();await page.waitForSelector('[data-action="check-athlete"][data-id="qa-self"]');
+  const stored=()=>page.evaluate(()=>{const db=JSON.parse(localStorage.getItem('matdraw.workspace.v2')),t=db.tournaments.find(t=>t.id==='qa-t');return {entry:t.entries[0],activity:t.activity.map(a=>a.text),revision:db.revision};});
+  const before=await stored();
+  await page.click('[data-action="check-athlete"][data-id="qa-self"]');await page.waitForSelector('#check-form');
+  await page.check('#check-form [data-cp-mode][value="list"]');await page.selectOption('#check-form [data-cp-select]',club);await page.fill('#check-form [name=actualWeight]','');
+  await page.click('button[form="check-form"]');await page.waitForFunction(()=>document.querySelector('#check-form .form-error')?.textContent.length>0);
+  assert.equal(await page.locator('#check-form .form-error').innerText(),'Podaj wagę od 10 do 250 kg.','the check-in fails, the dialog stays');
+  let s=await stored();assert.deepEqual([s.entry.clubId,s.entry.presence,s.revision],[club,'pending',before.revision+1],'entry.save went through, checkin.save did not');
+  await page.fill('#check-form [name=actualWeight]','58.4');await page.click('button[form="check-form"]');
+  await page.waitForFunction(()=>!document.querySelector('#check-form')||/\S/.test(document.querySelector('#check-form .form-error').textContent));
+  assert.equal(await page.locator('#check-form').count(),0,'the retry saves: '+(await page.locator('#check-form .form-error').count()?await page.locator('#check-form .form-error').innerText():''));
+  s=await stored();assert.deepEqual([s.entry.clubId,s.entry.presence,s.entry.actualWeight,s.revision],[club,'present',58.4,before.revision+2]);
+  assert.equal(s.activity.filter(x=>x.startsWith('Zmieniono klub w zgłoszeniu: ')).length,1,'entry.save ran once');assert.equal(s.activity.filter(x=>x.startsWith('Kontrola startowa: ')).length,1);
+  await ctx.close();assert.deepEqual(problems,[]);
+ }finally{await browser.close();server.close();}
+});
+
+test('review round 2, API mode in a browser: the hall screen polls once behind an open password prompt, a cancel pauses it, a new category hash resumes it',{skip:!chromium&&'MATDRAW_BROWSER_TESTS=1 and Playwright needed',timeout:120000},async()=>{
+ const user={id:'u-org',clubId:null,email:'org@example.test',role:'member',active:true,organizer:true,caps:{organizer:true,organizerBlocked:false,organizerTrusted:false,athlete:false}};
+ const ws={schemaVersion:2,revision:7,user,clubs:[{id:'unaffiliated',name:'Niezrzeszony',verified:true}],users:[],profiles:[],tournaments:[{id:'t1',name:'Turniej Organizatora',city:'Opole',date:'2099-03-14',mat:'Mata 1',status:'open',createdBy:'u-org',selfEntry:true,rev:7,community:true,trusted:true,hidden:false,hideReason:null,entries:[],draws:{},activity:[]}]};
+ const log=[];let expired=false;
+ const api=(route,method,body)=>{log.push(route);
+  if(route==='session')return [200,{user:{...user,caps:undefined},csrf:'c1'}];
+  if(route==='bootstrap')return expired?[401,{error:'Potwierdź hasło, aby otworzyć narzędzia organizatora.',code:'reauth'}]:[200,ws];
+  if(route==='organizer-unlock'){if(body?.password!=='Prawidlowe-Haslo-2026')return [422,{error:'Nieprawidłowe obecne hasło.'}];expired=false;return [200,{ok:true,csrf:'c2'}];}
+  if(route==='public-config')return [200,{signup:false,billing:false,support:'hello@matbravo.com'}];
+  return [404,{error:'Nie ma takiej operacji.'}];};
+ const {server,url}=await serve(api),browser=await chromium.launch().catch(e=>{server.close();throw e;}),problems=[];
+ try{
+  const ctx=await browser.newContext({viewport:{width:1280,height:720},locale:'pl-PL',serviceWorkers:'block'}),page=await ctx.newPage();page.on('pageerror',e=>problems.push(e.message));
+  await page.clock.install();await page.goto(url+'#screen?tournament=t1&category=a');await page.waitForSelector('.screen-empty');
+  const boots=()=>log.filter(r=>r==='bootstrap').length,tick=async(n=1)=>{for(let i=0;i<n;i++){await page.clock.fastForward(15000);await sleep(250);}};
+  await tick();const start=boots();assert.ok(start>=2,'the screen polls');
+  // The step-up expires on an unattended projector: one tick asks, the following ticks wait without queueing retries.
+  expired=true;await tick();await page.waitForSelector('#unlock-form');assert.equal(boots(),start+1);
+  await tick(4);assert.equal(boots(),start+1,'no bootstrap while the prompt is open');
+  await page.keyboard.press('Escape');await page.waitForFunction(()=>!document.querySelector('#unlock-form'));
+  await tick(4);assert.equal(boots(),start+1,'a cancelled prompt pauses the polling');assert.equal(await page.locator('#unlock-form').count(),0);
+  // Another category resumes it; the password confirmed in the new prompt retries that one request once, then the polling goes on.
+  await page.evaluate(()=>{location.hash='#screen?tournament=t1&category=b';});await tick();await page.waitForSelector('#unlock-form');assert.equal(boots(),start+2);
+  await tick(2);assert.equal(boots(),start+2);
+  await page.fill('#unlock-form [name=password]','Prawidlowe-Haslo-2026');await page.click('button[form="unlock-form"]');await page.waitForFunction(()=>!document.querySelector('#unlock-form'));await sleep(250);
+  assert.equal(boots(),start+3,'the waiting tick runs once more');await tick();assert.equal(boots(),start+4,'polling goes on after the unlock');
+  await ctx.close();assert.deepEqual(problems,[]);
  }finally{await browser.close();server.close();}
 });
