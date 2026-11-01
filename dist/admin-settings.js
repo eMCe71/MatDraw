@@ -46,10 +46,14 @@ export function saveBody(view,fields,{allowTestMode=false,confirmTestMode=false,
  return {version:Number.isInteger(view?.version)?view.version:0,...fields,...(test?{allowTestMode:true,confirmTestMode:true}:{}),...(freePeriod?{freePeriod}:{})};
 }
 /** The Stripe check state of a view (contract (b)): stale (the Stripe configuration changed since the last check) and paused (payments
- * are required by the settings, but paid sign-up and enforcement wait for a fresh passing check). A view without stripeCheck: neither. */
+ * are required by the settings, but paid sign-up and enforcement wait for a fresh passing check). A view without stripeCheck: neither.
+ * Paused follows the server's own signal, effective.degraded 'stripe-check' (Settings::effective); without effective, a check that was
+ * made (checkedAt) and failed or went stale. A check that never ran pauses nothing: the server enforces payments then (R1.2). */
 export function stripeState(v){
  const c=v?.stripeCheck;if(!c||typeof c!=='object')return {stale:false,paused:false};
- const stale=c.stale===true;return {stale,paused:v?.payments==='paid'&&(stale||c.ok!==true)};
+ const stale=c.stale===true,e=v?.effective;
+ const paused=e&&typeof e==='object'&&'degraded' in e?e.degraded==='stripe-check':v?.payments==='paid'&&c.checkedAt!=null&&(stale||c.ok!==true);
+ return {stale,paused};
 }
 /** The decision about accounts of the free period (§3.4 point 5): keep, or require payment from a date at least 14 days ahead. */
 export function decisionBody(choice,date,today=warsawToday()){
@@ -270,19 +274,22 @@ const ACTS={
  retry:()=>load(),
  pending:()=>ui().navigate('members',{filter:'organizers-pending'}),
  'test-go':el=>busy(el,()=>pending&&save(el,pending.fields,{...pending.extra,allowTestMode:true},pending.done)),
- 'stripe-check':el=>busy(el,async()=>{
-  let check=null;
-  try{check=(await io.request('admin-stripe-check',{method:'POST',body:{}}))?.stripeCheck||null;}
-  catch(error){check=error?.data?.stripeCheck||null;if(!check){toast(translateMessage(error.message));return;}}
-  // A fresh check is no longer stale (contract (b)); the server's next view says the same.
-  if(st.view)st.view={...st.view,stripe:{...st.view.stripe,check},...(st.view.stripeCheck&&check?{stripeCheck:{...st.view.stripeCheck,ok:check.ok===true,stale:false,mode:check.mode==='live'||check.mode==='test'?check.mode:st.view.stripeCheck.mode??null}}:{})};
-  paint();root()?.querySelector('[data-set-act="stripe-check"]')?.focus?.();toast(check?.ok?T('Stripe działa.'):checkError(check?.error)||T('Stripe zwrócił błąd.'));
- }),
+ 'stripe-check':el=>checkStripe(el),
  'bulk-go':el=>busy(el,async()=>{
   const r=await io.request('admin-billing-action',{method:'POST',body:bulkBody(el.dataset.setDate)});
   closeModal();toast(T('Zmieniono konta: {n}',{n:r?.count??0}));await load();
  })
 };
+/** The Stripe check button: admin-stripe-check, the result at once, then the server's view again. */
+export const checkStripe=el=>busy(el,async()=>{
+  let check=null;
+  try{check=(await io.request('admin-stripe-check',{method:'POST',body:{}}))?.stripeCheck||null;}
+  catch(error){check=error?.data?.stripeCheck||null;if(!check){toast(translateMessage(error.message));return;}}
+  // The result at once; then the server's view again, so stale, effective and degraded match what applies now (R1.2).
+  if(st.view)st.view={...st.view,stripe:{...st.view.stripe,check}};
+  paint();toast(check?.ok?T('Stripe działa.'):checkError(check?.error)||T('Stripe zwrócił błąd.'));
+  await load();root()?.querySelector('[data-set-act="stripe-check"]')?.focus?.();
+});
 const FORMS={
  mode:(form)=>{
   const f=new FormData(form),fields=changedFields(st.view,modeFields(String(f.get('mode')||modeOf(st.view)),{paymentsOn:f.get('payments')==='paid'}));

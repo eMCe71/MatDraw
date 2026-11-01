@@ -236,17 +236,42 @@ test('contract (c): a 409 with confirmTestMode asks "Otworzyć mimo to?" and its
  assert.ok(/'test-go':el=>busy\(el,\(\)=>pending&&save\(el,pending\.fields,\{\.\.\.pending\.extra,allowTestMode:true\}/.test(await import('node:fs').then(fs=>fs.readFileSync(new URL('../dist/admin-settings.js',import.meta.url),'utf8'))),'the dialog button sends allowTestMode');
 });
 test('contract (b): a stale Stripe check says "sprawdź ponownie" and that paid sign-up and enforcement wait for a passing check',()=>{
- const fresh={ok:true,stale:false,checkedAt:'2026-10-30T10:00:00Z',mode:'test'};
+ const fresh={ok:true,stale:false,checkedAt:'2026-10-30T10:00:00Z',mode:'test'},DEG={effective:{mode:'off',degraded:'stripe-check'}};
  assert.deepEqual(S.stripeState(VIEW()),{stale:false,paused:false},'no stripeCheck (older server): nothing');
  assert.deepEqual(S.stripeState(VIEW({stripeCheck:fresh,payments:'paid'})),{stale:false,paused:false});
- assert.deepEqual(S.stripeState(VIEW({stripeCheck:{...fresh,stale:true},payments:'paid'})),{stale:true,paused:true});
+ assert.deepEqual(S.stripeState(VIEW({stripeCheck:{...fresh,stale:true},payments:'paid',...DEG})),{stale:true,paused:true});
  assert.deepEqual(S.stripeState(VIEW({stripeCheck:{...fresh,stale:true}})),{stale:true,paused:false},'payments not required: nothing is paused');
- assert.deepEqual(S.stripeState(VIEW({stripeCheck:{ok:false,stale:false,checkedAt:null,mode:null},payments:'paid',signup:'on'})),{stale:false,paused:true},'never checked or failed');
- const stale=S.pageView(VIEW({signup:'on',payments:'paid',mode:'paid',stripeCheck:{...fresh,stale:true}})).html;
+ // R1.2: a check that never ran pauses nothing (the server enforces payments then: Settings::effective degrades only after a check).
+ const never={ok:false,stale:false,checkedAt:null,mode:null};
+ assert.deepEqual(S.stripeState(VIEW({stripeCheck:never,payments:'paid',signup:'on',effective:{mode:'paid',degraded:null}})),{stale:false,paused:false},'never checked: not paused');
+ assert.deepEqual(S.stripeState(VIEW({stripeCheck:never,payments:'paid',signup:'on',effective:undefined})),{stale:false,paused:false},'never checked, no effective: not paused');
+ assert.doesNotMatch(S.pageView(VIEW({signup:'on',payments:'paid',mode:'paid',stripeCheck:never,effective:{mode:'paid',degraded:null}})).html,/wstrzymane, dopóki/);
+ // A failed check: the server's degraded signal decides; without effective, a made and failed check pauses.
+ assert.deepEqual(S.stripeState(VIEW({stripeCheck:{...fresh,ok:false},payments:'paid',signup:'on',...DEG})),{stale:false,paused:true},'failed check, server degraded');
+ assert.deepEqual(S.stripeState(VIEW({stripeCheck:{...fresh,ok:false},payments:'paid',signup:'on',effective:undefined})),{stale:false,paused:true},'failed check, no effective');
+ assert.deepEqual(S.stripeState(VIEW({stripeCheck:{...fresh,ok:false},payments:'paid',signup:'on',effective:{mode:'off',degraded:'billing-missing'}})),{stale:false,paused:false},'another degradation has its own alert');
+ const stale=S.pageView(VIEW({signup:'on',payments:'paid',mode:'paid',stripeCheck:{...fresh,stale:true},...DEG})).html;
  assert.match(stale,/class="set-alert" role="alert"><strong>Konfiguracja Stripe zmieniła się od ostatniego sprawdzenia — sprawdź ponownie<\/strong> Płatna rejestracja i wymaganie płatności są wstrzymane, dopóki nowa kontrola Stripe nie przejdzie\./);
  assert.match(stale,/data-set-form="mode">[\s\S]*Płatna rejestracja i wymaganie płatności są wstrzymane[\s\S]*Zapisz tryb rejestracji/,'the sign-up section says it too');
  assert.doesNotMatch(S.pageView(VIEW({signup:'on',payments:'paid',mode:'paid',stripeCheck:fresh})).html,/sprawdź ponownie|wstrzymane, dopóki/);
  english(()=>assert.match(S.pageView(VIEW({stripeCheck:{...fresh,stale:true}})).html,/The Stripe configuration has changed since the last check — check again/));
+});
+test('R1.2: "Sprawdź Stripe" shows the result and then loads the server view again (stale, effective and degraded from the server)',async()=>{
+ const log=[],sent=[];const checked={at:1700000000,ok:true,mode:'test',prices:{pln:true,usd:true},error:null};
+ const after=VIEW({version:4,signup:'on',payments:'paid',mode:'paid',effective:{mode:'paid',degraded:null},stripe:{enabled:true,mode:'test',check:checked},stripeCheck:{ok:true,stale:false,checkedAt:'2023-11-14T22:13:20+00:00',mode:'test'}});
+ const replies=[{ok:true,stripeCheck:checked},after];
+ registry.provide('ui',{toast:m=>log.push('toast:'+m)});
+ globalThis.document={querySelector:()=>null};
+ const io={...S.io};S.io.request=async(route,o)=>{sent.push(route);return replies.shift();};
+ try{
+  S.state.view=VIEW({signup:'on',payments:'paid',mode:'paid',effective:{mode:'off',degraded:'stripe-check'},stripeCheck:{ok:true,stale:true,checkedAt:'2023-11-14T22:13:20+00:00',mode:'test'}});
+  assert.deepEqual(S.stripeState(S.state.view),{stale:true,paused:true});
+  const button={disabled:false,isConnected:true};await S.checkStripe(button);
+  assert.deepEqual(sent,['admin-stripe-check','admin-settings'],'the view is loaded again after the check');
+  assert.equal(log[0],'toast:Stripe działa.');
+  assert.equal(S.state.view,after,'the server view replaces the local one');assert.deepEqual(S.stripeState(S.state.view),{stale:false,paused:false});
+  assert.equal(button.disabled,false);
+ }finally{Object.assign(S.io,io);delete globalThis.document;S.state.view=null;}
 });
 test('confirm organizer on a tournament card: a blocked organizer is reported, not confirmed',()=>{
  assert.deepEqual(C.trustOutcome({id:'m',caps:{organizer:true,organizerTrusted:true}}),{ok:true,message:'Organizator potwierdzony.'});
