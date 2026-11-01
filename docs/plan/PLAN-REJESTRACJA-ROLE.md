@@ -1053,6 +1053,9 @@ Przegląd z 2026-11-01 zgłosił 55 ustaleń w trzech soczewkach. Każde sprawdz
   - `admin-frontend`: przełącznik „Wymagaj potwierdzenia organizatorów” z krótkim opisem skutków na stronie `#settings`.
 - **Dane plasterków** (pełne opisy, listy plików, kryteria akceptacji) są w `docs/plan/PLAN-REJESTRACJA-ROLE.slices.json`; plasterek czyta swój wpis.
 - **Adres pomocy:** `hello@matbravo.com` jako wartość startowa `supportEmail` (D4).
+- **Decyzje właściciela z 2026-11-01 (po planie v2):**
+  - **`organizers.trustRequired` ma domyślnie `false`**, czyli pełną automatykę (D2). Przełącznik w panelu zostaje na wypadek nadużyć.
+  - **Jeden profil zawodnika na konto (`ATHLETES_PER_ACCOUNT = 1`).** Rodzaj profilu to nadal „ja” albo „moje dziecko/podopieczny”, dlatego pytanie „Kogo zgłaszasz?” zostaje, a komunikat dla osób poniżej 16 lat zakładających profil „ja” także. Interfejs nie pokazuje dodawania kolejnych profili. Kod może zachować model wielu profili, ale stała i walidacja serwera pilnują limitu 1.
 
 ## Załącznik A. Nowe ustawienia
 
