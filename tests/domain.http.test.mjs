@@ -19,14 +19,18 @@ before(()=>fixture('reset-limits'));
 test('migrate.php twice exits 0; --rollback-floor is 7 with each kind of community data and lower without',{skip},()=>{
  for(let i=0;i<2;i++){const r=migrate([]);assert.equal(r.code,0,r.err);assert.match(r.out,/^Schemat aktualny/);}
  const floor=()=>{const r=migrate(['--rollback-floor']);assert.equal(r.code,0,r.err);return Number(r.out.split('\n').pop());};
- const owner=fixture('member',{email:'floor.owner@domain.test'}),before=floor();assert.ok(before>=1&&before<7,String(before));
+ // Other files share this database and may already have left community data (sign-ups, athletes), so the command line is
+ // checked against its own start value, and the branches inside one rolled-back transaction that first takes the existing
+ // community rows out of the floor query: the result does not depend on the files run before.
+ const owner=fixture('member',{email:'floor.owner@domain.test'}),start=floor();
+ fixture('domain-floor',{kind:'owned-profile',userId:owner.id});assert.equal(floor(),7,'the command line sees community data');
  // Every branch of the floor query on the real database: an owned profile, a member's profile, tournament and club, a hidden
  // tournament, a merged club; a club created by staff (the demo clubs of seed-athletes) does not block.
- for(const kind of ['owned-profile','member-profile','member-tournament','hidden-tournament','member-club','merged-club']){
-  fixture('domain-floor',{kind,userId:owner.id});assert.equal(floor(),7,kind+' needs code from 0007 on');
-  fixture('domain-floor',{kind,remove:true});assert.equal(floor(),before,kind+' removed');
- }
- fixture('domain-floor',{kind:'staff-club'});assert.equal(floor(),before,'a staff club does not block');fixture('domain-floor',{kind:'staff-club',remove:true});
+ const probe=fixture('domain-floor-probe',{userId:owner.id});assert.ok(probe.before>=1&&probe.before<7,JSON.stringify(probe));
+ for(const kind of ['owned-profile','member-profile','member-tournament','hidden-tournament','member-club','merged-club'])assert.deepEqual(probe.kinds[kind],[7,probe.before],kind+' needs code from 0007 on, removed it does not');
+ assert.deepEqual(probe.kinds['staff-club'],[probe.before,probe.before],'a staff club does not block');
+ assert.equal(floor(),7,'the probe rolled back: the committed row is still there');
+ fixture('domain-floor',{kind:'owned-profile',remove:true});assert.equal(floor(),start,'back to the start value');assert.ok(start===7||start===probe.before,String(start));
  assert.deepEqual(fixture('domain-row',{table:'clubs',id:'unaffiliated'}),{id:'unaffiliated',name:'Niezrzeszony',verified:1,created_by:null,created_at:null,merged_into:null},'Clubs::ensure created the row in the first workspace transaction');
 });
 
