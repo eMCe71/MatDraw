@@ -345,6 +345,28 @@ test('athlete step: "Kogo zgłaszasz?" is required and first, the name is prefil
  const locked=String(athlete.athleteFieldsHtml(athlete.newAthlete(p),{id:'t',clubs:[],today:TODAY}));
  assert.match(locked,/name="birthDate"[^>]* disabled aria-describedby="t-locked"/);assert.match(locked,/name="sex" required disabled/);assert.match(locked,/Klub, datę urodzenia i płeć zmienisz po turnieju/);
 });
+test('a locked profile with a pending club name saves its other fields: the club goes as \'unaffiliated\', the pending name stays',async()=>{
+ const {initialWorkspace,execute}=await import('../dist/workspace.js');
+ const PENDING={id:'unaffiliated',name:'',verified:true,unaffiliated:true,pending:'Klub Oczekujący'};
+ const f=athlete.newAthlete({id:'p1',name:'Ola',birthDate:'2017-09-12',sex:'F',weight:30,height:130,gradeType:'cup',grade:9,relation:'guardian',locked:true,club:PENDING});
+ assert.deepEqual(f.club,{name:'Klub Oczekujący'},'the disabled picker still shows the pending name');
+ assert.deepEqual(athlete.athleteBody(f).club,{id:'unaffiliated'},'locked: the club it has now');
+ assert.deepEqual(athlete.athleteBody({...f,locked:false}).club,{name:'Klub Oczekujący'},'unlocked: the pending name is tried again');
+ assert.deepEqual(athlete.athleteBody(athlete.newAthlete({id:'p1',locked:true,club:{id:'c1',name:'KS',verified:true,unaffiliated:false,pending:null}})).club,{id:'c1'});
+ // Against the domain (workspace.js mirrors Domain athlete.save): a child of a parent, unaffiliated with a pending name, entered
+ // in an open tournament; the daily quota of new clubs is free again, so a {name} would create a club and be refused (409).
+ let db=initialWorkspace();db.users.push({id:'parent',clubId:null,email:'parent@example.test',role:'member',active:true,authVersion:1,organizer:false,organizerBlockedAt:null,organizerTrustedAt:null});
+ const run=(actor,type,p)=>{const r=execute(db,actor,type,p);db=r.db;return r.result;};
+ const date=new Date(Date.now()+90*864e5).toISOString().slice(0,10);
+ const tid=run('demo-admin','tournament.save',{name:'Zapisy Otwarte',city:'Opole',date,mat:'Mata 1',status:'open',selfEntry:true}).id;
+ const id=run('parent','athlete.save',{...athlete.athleteBody({...f,id:null,locked:false,club:{none:true}})}).id;
+ db.profiles.find(a=>a.id===id).pendingClubName='Klub Oczekujący';
+ run('parent','entry.self',{tournamentId:tid,profileId:id,events:['forms']});
+ assert.throws(()=>execute(db,'parent','athlete.save',{id,...athlete.athleteBody({...f,locked:false,weight:'31'})}),e=>e.status===409,'the old body: a new club is a change of the club');
+ run('parent','athlete.save',{id,...athlete.athleteBody({...f,weight:'31'})});
+ const saved=db.profiles.find(a=>a.id===id);
+ assert.equal(saved.weight,31);assert.equal(saved.clubId,'unaffiliated');assert.equal(saved.pendingClubName,'Klub Oczekujący','the pending name is kept');
+});
 test('athlete body and errors: the server\'s fields and messages (Domain::athleteFields mirror), under 16 "Siebie" without a workaround',()=>{
  assert.deepEqual(athlete.athleteBody(FULL),{name:'Zosia Kowalska',birthDate:'2014-05-05',sex:'F',weight:40.5,height:150,gradeType:'cup',grade:8,club:{none:true},relation:'guardian'});
  assert.deepEqual(Object.keys(athlete.athleteBody({...FULL,ownerId:'x',champion:true,events:['fight']})).sort(),['birthDate','club','grade','gradeType','height','name','relation','sex','weight'],'a closed list of fields');
@@ -376,7 +398,9 @@ test('landing after the sign-up (§10.1, UX-3): plan while payments are required
  assert.deepEqual(flow.landing(memberMe({athlete:true,organizer:true},[ZOSIA])),{page:'tournaments',params:null},'both roles: the organizer tools');
  assert.deepEqual(flow.landing(memberMe({athlete:true,organizer:true},[ZOSIA]),{as:'athlete',t:null}),{page:'starts',params:null},'started as an athlete');
  assert.deepEqual(flow.landing(memberMe({athlete:true},[ZOSIA]),{as:'athlete',t:'t-1'}),{page:'guest',params:{t:'t-1',enter:'1'}},'back to the tournament with the entry window');
- assert.deepEqual(flow.landing(memberMe(),{as:'athlete',t:'t-1'}),{page:'guest',params:{t:'t-1'}},'no athlete profile: the preview without the entry window');
+ assert.deepEqual(flow.landing(memberMe(),{as:'athlete',t:'t-1'}),{page:'chat',params:null},'"Zawodnik" unticked: the target is not used');
+ assert.deepEqual(flow.landing(memberMe({organizer:true}),{as:'athlete',t:'t-1'}),{page:'tournaments',params:null},'only "Organizator" ticked after the athlete offer: the organizer tools');
+ assert.deepEqual(flow.landing(memberMe({organizer:true,athlete:true},[ZOSIA]),{as:'athlete',t:'t-1'}),{page:'guest',params:{t:'t-1',enter:'1'}},'both roles from the offer: the tournament');
  assert.deepEqual(flow.landing(memberMe({athlete:true}),{as:'athlete',t:'../x'}),{page:'starts',params:null},'a malformed id is ignored');
  assert.deepEqual(flow.landing(paid(memberMe({athlete:true})),{as:'athlete',t:'t-1'}),{page:'signup',params:{step:'3'}},'the plan first');
  assert.deepEqual(flow.landing(paid(memberMe({athlete:true})),{as:'athlete',t:'t-1'},{later:true}),{page:'guest',params:{t:'t-1',enter:'1'}},'"later" skips the plan');
@@ -714,7 +738,23 @@ test('demo in a browser: the "Role" tab of the parent and of the organizer, PL a
    assert.deepEqual(await page2.$$eval('#acct-athlete-form [name="grade"] option',o=>o.map(x=>x.value)),['','1','2','3','4','5','6','7','8','9'],'dan grades 1-9');
    await noOverflow(page2,'demo roles organizer form '+w+' '+lang);await shot(page2,`demo-roles-organizer-form-${lang}-${w}`);
    await page2.click('[data-acct-act="athlete-cancel"]');await page2.waitForSelector('[data-acct-act="athlete-add"]');
+   // #profile?tab=roles&add=1 (the athlete call to action) opens the form once: add=1 leaves the address, so "Anuluj" followed by
+   // a re-render of the page (language switch) does not open it again; then= stays for the way back until "Anuluj".
+   await page2.evaluate(()=>{location.hash='#profile?tab=roles&add=1&then=t-winter-2027';});await page2.waitForSelector('#acct-athlete-form');
+   assert.equal(await page2.evaluate(()=>location.hash),'#profile?tab=roles&then=t-winter-2027','add=1 is consumed');
+   await page2.click('[data-acct-act="athlete-cancel"]');await page2.waitForSelector('[data-acct-act="athlete-add"]');
+   assert.equal(await page2.evaluate(()=>location.hash),'#profile?tab=roles','"Anuluj" drops then');
+   const other=lang==='pl'?'en':'pl';await page2.click(`[data-set-lang="${other}"]`);await page2.waitForSelector('[data-acct-act="athlete-add"]');
+   assert.equal(await page2.locator('#acct-athlete-form').count(),0,'the cancelled form stays closed after a re-render');
+   await page2.click(`[data-set-lang="${lang}"]`);await page2.waitForSelector('[data-acct-act="athlete-add"]');
    await ctx2.close();
+   // A sign-up target is dropped once the signed-out sign-up is left, so a later plain sign-up does not land on that tournament.
+   const ctx3=await browser.newContext({viewport:{width:w,height:hh}});const page3=await ctx3.newPage();watch(page3,errors);
+   await page3.goto(url+'#signup?as=athlete&t=t-winter-2027');await page3.waitForSelector('[data-acct-public]');
+   assert.equal(JSON.parse(await page3.evaluate(()=>sessionStorage.getItem('matdraw.signup.target'))||'null')?.t,'t-winter-2027');
+   await page3.evaluate(()=>{location.hash='';});await page3.waitForFunction(()=>!document.querySelector('[data-acct-public]'));
+   assert.equal(await page3.evaluate(()=>sessionStorage.getItem('matdraw.signup.target')),null,'left: the target is gone');
+   await ctx3.close();
   }
   assert.deepEqual(errors,[]);
  }finally{await browser.close();server.close();}

@@ -149,14 +149,15 @@ export const STEP_LABELS={account:'Konto',profile:'Profil',athlete:'Zawodnik',pl
 export const stepLabel=(steps,key)=>({n:Math.max(1,steps.indexOf(key)+1),total:steps.length,name:STEP_LABELS[key]||''});
 /**
  * Where a new account lands (§10.1, UX-3) instead of the chat for everyone: {page, params}. Payments required without full
- * access: the plan step (page 'signup'), unless later (the "later" button). Then a tournament the sign-up started from (target
- * t, #signup?as=athlete&t=…): its preview (#guest?t=…; enter=1 asks the athlete module to open the entry window for an athlete);
- * an organizer: #tournaments (the first-run card), unless the sign-up started as an athlete; an athlete: #starts; others: chat.
+ * access: the plan step (page 'signup'), unless later (the "later" button). Then an athlete whose sign-up started from a tournament
+ * (target t, #signup?as=athlete&t=…): its preview with the entry window (#guest?t=…&enter=1); an organizer: #tournaments (the
+ * first-run card), unless the sign-up started as an athlete; an athlete: #starts; others: chat. A target t of an account without
+ * the athlete role (it unticked "Zawodnik") is ignored, so an organizer still gets #tournaments.
  */
 export function landing(me,stored=null,{later=false}={}){
  const caps=me?.user?.caps||{},t=typeof stored?.t==='string'&&TOURNAMENT_ID.test(stored.t)?stored.t:null;
  if(!later&&me?.billing?.enabled&&me.access?.full===false)return {page:'signup',params:{step:'3'}};
- if(t)return {page:'guest',params:caps.athlete?{t,enter:'1'}:{t}};
+ if(t&&caps.athlete)return {page:'guest',params:{t,enter:'1'}};
  if(caps.organizer&&(stored?.as!=='athlete'||!caps.athlete))return {page:'tournaments',params:null};
  if(caps.athlete)return {page:'starts',params:null};
  return {page:'chat',params:null};
@@ -639,7 +640,11 @@ export async function mount(page,el){
   if(notice==='roles-saved')ui()?.toast?.(T('Zapisano role.'));
   // #profile?tab=roles&add=1(&then=<t>) from the athlete call to action: the form for the first athlete profile opens at once.
   const q=registry.parseRoute(location.hash).params;
-  if(m&&q.get('tab')==='roles'&&q.get('add')==='1'&&rolesState(m).canAdd&&S.roles.mode!=='edit'){S.roles=newRoles();S.roles.mode='edit';S.roles.f=newAthlete();loadClubs().then(()=>{if(S.roles.mode==='edit')repaintRoles();});}
+  // add=1 is consumed here (the address keeps tab and then): a later render (language, another ui.render) does not open it again.
+  if(m&&q.get('tab')==='roles'&&q.get('add')==='1'){
+   const then=q.get('then');try{history.replaceState(null,'',registry.routeHash('profile',{tab:'roles',...(then&&TOURNAMENT_ID.test(then)?{then}:{})}));}catch{}
+   if(rolesState(m).canAdd&&S.roles.mode!=='edit'){S.roles=newRoles();S.roles.mode='edit';S.roles.f=newAthlete();loadClubs().then(()=>{if(S.roles.mode==='edit')repaintRoles();});}
+  }
  }
  if(page==='billing'){const p=takePaymentMessage();if(p)S.payment=p;const ret=readReturn();if(ret&&!S.ret?.running){startReturn(ret);return;}}
  render(page,el);
@@ -774,7 +779,7 @@ async function onClick(event){
   else if(act==='organizer-toggle')await toggleOrganizer(el);
   else if(act==='athlete-add')await openAthlete(null);
   else if(act==='athlete-edit')await openAthlete(el.dataset.id);
-  else if(act==='athlete-cancel'){S.roles=newRoles();repaint();document.querySelector('[data-acct-act="athlete-add"],[data-acct-act="athlete-edit"]')?.focus();}
+  else if(act==='athlete-cancel'){S.roles=newRoles();if(/[?&](add|then)=/.test(location.hash))history.replaceState(null,'',registry.routeHash('profile',{tab:'roles'}));repaint();document.querySelector('[data-acct-act="athlete-add"],[data-acct-act="athlete-edit"]')?.focus();}
   else if(act==='athlete-archive')await archiveAthlete(el);
   else if(act==='athlete-forget')openForget(el.dataset.id);
   else if(act==='to-chat'){S.ret=null;goChat();}
@@ -799,11 +804,14 @@ function wire(){
  document.addEventListener('submit',onSubmit);document.addEventListener('input',onInput);document.addEventListener('change',onChange);
  document.addEventListener('click',onClick);document.addEventListener('keydown',onKey);
  // A finished return screen stays while the plan page is re-rendered (language) and is dropped once another page is shown.
- registry.on('painted',({view,page}={})=>{
+ registry.on('painted',({view,page,memberPreview=false}={})=>{
   if(view==='app'&&page!=='billing'){S.payment='';if(S.ret&&!S.ret.running)S.ret=null;if(page!=='signup')S.portal='';}
   // Shared devices (plan §8.3 point 8): the typed e-mail, password and profile of a sign-up that was left (Back, logo, another hash)
   // are forgotten, and so is an unsaved profile draft once another page is shown (a language re-render keeps the same page).
   if(!(view==='public'&&page==='signup'))S.signup=newSignup();
+  // A sign-up target (#signup?as&t) is dropped once the signed-out sign-up is left (home, login, guest preview, another public page):
+  // a later sign-up in the same tab must not land on that tournament. Signed-in pages keep it for land() (plan step, "later").
+  if(view==='login'||view==='public'&&page!=='signup'||view==='guest'&&!memberPreview)clearTarget();
   if(!(view==='app'&&page==='profile')){S.draft=null;S.draftFor=null;S.roles=newRoles();}
  });
  registry.on('logout',()=>{S.signup=newSignup();S.draft=null;S.draftFor=null;S.ret=null;S.del=null;S.payment='';S.portal='';S.roles=newRoles();S.clubs=null;});

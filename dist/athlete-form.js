@@ -21,7 +21,8 @@ const GRADES={cup:[10,9,8,7,6,5,4,3,2,1],dan:[1,2,3,4,5,6,7,8,9]};
 
 // ---- Pure helpers (tests/account-ui.test.mjs) ----
 /** Fields of the form: empty for a new athlete (relation unanswered), or from an AthleteView profile (§7.4) when it is edited.
- * A pending club name (the quota of new clubs was used up) comes back as a new name, so saving tries to create it again. */
+ * A pending club name (the quota of new clubs was used up) comes back as a new name, so saving tries to create it again; a locked
+ * profile (entries in tournaments not yet held) cannot change its club, so athleteBody() sends 'unaffiliated' for it instead. */
 export function newAthlete(profile=null){
  if(!profile)return {id:null,relation:null,name:'',birthDate:'',sex:'',weight:'',height:'',gradeType:'cup',grade:'',club:null,prefilled:null,locked:false};
  const c=profile.club||{},club=typeof c.pending==='string'&&c.pending?{name:c.pending}:c.unaffiliated||c.id===UNAFFILIATED?{none:true}:typeof c.id==='string'&&c.id?{id:c.id}:null;
@@ -46,10 +47,14 @@ export function minorSelf(f,today=warsawToday()){
 }
 const num=v=>{const s=String(v??'').trim().replace(',','.');if(s==='')return null;const n=Number(s);return Number.isFinite(n)?n:null;};
 /** Body of signup.athlete and athlete-save (§8.2): {name, birthDate, sex, weight, height, gradeType, grade, club, relation};
- * numbers as numbers (a comma is a decimal point), empty fields as null (the server answers with its own message). */
+ * numbers as numbers (a comma is a decimal point), empty fields as null (the server answers with its own message).
+ * A locked profile keeps its club: its pending name (the disabled picker shows it as a new name) is sent as {id:'unaffiliated'},
+ * the club it has now, so Domain athlete.save sees no club change and keeps pendingClubName (a {name} could create a new club
+ * once the daily quota frees up and then be refused as a change of a locked field). */
 export function athleteBody(f){
+ const club=f?.locked&&typeof f.club?.name==='string'?{id:UNAFFILIATED}:f?.club??null;
  return {name:String(f?.name??'').trim(),birthDate:f?.birthDate||null,sex:['M','F'].includes(f?.sex)?f.sex:null,weight:num(f?.weight),height:num(f?.height),
-  gradeType:['cup','dan'].includes(f?.gradeType)?f.gradeType:null,grade:num(f?.grade),club:f?.club??null,relation:['self','guardian'].includes(f?.relation)?f.relation:null};
+  gradeType:['cup','dan'].includes(f?.gradeType)?f.gradeType:null,grade:num(f?.grade),club,relation:['self','guardian'].includes(f?.relation)?f.relation:null};
 }
 /** The first problem of the fields as an Error with the server's message (Domain::athleteFields, translated when shown), or null. */
 export function athleteError(f,today=warsawToday()){
