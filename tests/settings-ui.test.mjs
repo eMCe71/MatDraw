@@ -152,11 +152,27 @@ test('clubs: filters, profile counts and creator type; pending names grouped by 
  assert.ok(!/data-clb-act="(?:rename|merge|verify)"/.test(C.clubRow({club:{id:'m',name:'M'},state:'merged',profiles:0,creator:'unknown',into:'X'}).html),'a merged club has no actions');
 });
 
+test('Kluby focus target after a command: the same action of the same club, another action of it, else the selected filter (adopt has no id)',()=>{
+ const b=(act,id,extra={})=>({dataset:{clbAct:act,...(id?{clbId:id}:{}),...extra},disabled:!!extra.off});
+ const filter={dataset:{clbAct:'filter',clbFilter:'unverified'}};
+ const doc=list=>({querySelectorAll:()=>list,querySelector:sel=>sel==='[data-clb-filter][aria-pressed="true"]'?filter:null});
+ const rows=[filter,b('verify','c1'),b('rename','c1'),b('merge','c1'),b('rename','c2'),b('adopt',null,{clbKey:'uks smok'})];
+ assert.equal(C.focusTarget(doc(rows),{id:'c1',act:'rename'}),rows[2]);
+ assert.equal(C.focusTarget(doc(rows),{id:'c2',act:'verify'}),rows[4],'another action of the same club');
+ assert.equal(C.focusTarget(doc(rows),{id:'c9',act:'verify'}),filter,'the club left the list');
+ assert.equal(C.focusTarget(doc(rows),{id:null,act:'adopt-go'}),filter,'adopt-go carries only data-clb-key: the selected filter, never <body>');
+ assert.equal(C.focusTarget(doc([filter,b('rename','c1',{off:true})]),{id:'c1',act:'rename'}),filter,'a disabled control is skipped');
+});
+
 test('tournament card tools: hide (community), restore, show and confirm the organizer only while confirmation is required',()=>{
  const admin={role:'admin'};
  assert.deepEqual(C.toolsFor({id:'t',community:true,trusted:true,createdBy:'m'},admin),['hide','owner'],'trustRequired off: every organizer counts as confirmed');
  assert.deepEqual(C.toolsFor({id:'t',community:true,trusted:false,createdBy:'m'},admin),['hide','owner','trust']);
  assert.deepEqual(C.toolsFor({id:'t',community:true,trusted:false,hidden:true,createdBy:'m'},admin),['restore','owner','trust']);
+ // Integration QA (F3): a blocked organizer (sparse organizerBlocked:true) cannot be confirmed from the card; absent means unknown.
+ assert.deepEqual(C.toolsFor({id:'t',community:true,trusted:false,createdBy:'m',organizerBlocked:true},admin),['hide','owner']);
+ assert.deepEqual(C.toolsFor({id:'t',community:true,trusted:false,hidden:true,createdBy:'m',organizerBlocked:true},admin),['restore','owner']);
+ assert.deepEqual(C.toolsFor({id:'t',community:true,trusted:false,createdBy:'m',organizerBlocked:false},admin),['hide','owner','trust']);
  assert.deepEqual(C.toolsFor({id:'t',community:false},admin),[]);assert.deepEqual(C.toolsFor({id:'t',community:false,hidden:true},admin),['restore']);
  assert.deepEqual(C.toolsFor({id:'t',community:true},{role:'editor'}),[]);
  assert.deepEqual(C.hideBody('t1',{reason:'  Fałszywy   turniej ',withdrawSelf:true}),{ok:true,payload:{tournamentId:'t1',hidden:true,reason:'Fałszywy turniej',withdrawSelf:true}});

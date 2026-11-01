@@ -58,7 +58,8 @@ export const adoptBody=g=>({name:g.name,profileIds:[...g.profileIds]});
 export function toolsFor(t,user){
  if(user?.role!=='admin'||!t)return [];
  const out=[];if(t.hidden)out.push('restore');else if(t.community)out.push('hide');
- if(t.community){out.push('owner');if(t.trusted===false&&typeof t.createdBy==='string')out.push('trust');}
+ // A blocked organizer (sparse organizerBlocked:true from the server) cannot become trusted: no "trust" action then.
+ if(t.community){out.push('owner');if(t.trusted===false&&typeof t.createdBy==='string'&&t.organizerBlocked!==true)out.push('trust');}
  return out;
 }
 /** tournament.hide payload: hidden with the cleaned reason (at most 200 characters) and withdrawSelf, or restored. */
@@ -132,7 +133,7 @@ const paint=()=>{const el=root();if(el)setHtml(el,pageView(ws(),st));};
 export function mountClubsPage(el=root()){
  if(!el||el.dataset.clbMounted)return;el.dataset.clbMounted='1';
  if(!st.touched&&!clubRows(ws(),{filter:'unverified'}).length)st.filter='all';
- paint();
+ paint();applyFocus();
 }
 /** Fills every [data-tournament-admin] of the tournaments page. */
 export function mountTournamentTools(){
@@ -140,6 +141,7 @@ export function mountTournamentTools(){
  for(const el of document.querySelectorAll('[data-tournament-admin]')){
   const t=w.tournaments.find(x=>x.id===el.dataset.tournamentAdmin);setHtml(el,toolsView(t,w.user));
  }
+ applyFocus();
 }
 const openModal=(title,body,actions)=>ui().modal(title,body,actions);
 const closeModal=()=>ui().closeModal();
@@ -147,9 +149,24 @@ const clubById=id=>ws()?.clubs?.find(c=>c.id===id)||null;
 const tournamentById=id=>ws()?.tournaments?.find(t=>t.id===id)||null;
 const submitOf=form=>document.querySelector('button[type=submit][form="'+form.id+'"]')||form.querySelector('button[type=submit]');
 /** Runs a workspace command and re-renders (the page mounts again after 'painted'); errors go through ui.handleError (409 reloads). */
+/** The control that should hold the keyboard focus after a command re-renders the page: the same action of the same club or
+ * tournament (a dialog form stands for the button that opened it), else another action of that row or card, else the selected
+ * filter. An action without a club or tournament id (adopt-go of a pending name: the row leaves the list) goes to the selected
+ * filter. Without it the focus fell to <body> after every verify, merge, hide, restore or adopt. */
+const FORM_ACT={rename:'rename',merge:'merge',hide:'t-hide'};
+export function focusTarget(doc,{id,act}){
+ const same=id?[...doc.querySelectorAll('[data-clb-act]')].filter(b=>b.dataset.clbId===id&&!b.disabled):[];
+ return same.find(b=>b.dataset.clbAct===act)||same[0]||doc.querySelector('[data-clb-filter][aria-pressed="true"]')||null;
+}
+// The page and the card tools mount again after 'painted' through a dynamic import (settings-boot.js): the target waits for that
+// mount (at most 3 s, so a later visit does not grab the focus).
+let focusAfter=null;
+const refocus=target=>{focusAfter=target?{...target,until:Date.now()+3000}:null;};
+function applyFocus(){const t=focusAfter;if(!t||typeof document==='undefined')return;focusAfter=null;if(Date.now()>t.until)return;const el=focusTarget(document,t);if(el)el.focus();}
 async function command(el,type,payload,done){
- const button=el?.matches?.('form')?submitOf(el):el;if(button)button.disabled=true;
- try{await ui().commit(type,payload);closeModal();ui().render();toast(done);}
+ const form=el?.matches?.('form'),button=form?submitOf(el):el;if(button)button.disabled=true;
+ const target={id:el?.dataset?.clbId||null,act:form?FORM_ACT[el.dataset.clbForm]:el?.dataset?.clbAct};
+ try{await ui().commit(type,payload);closeModal();ui().render();refocus(target);toast(done);}
  catch(error){await ui().handleError(error,el?.matches?.('form')?el:null);}
  finally{if(button?.isConnected)button.disabled=false;}
 }

@@ -232,17 +232,23 @@ export const pendingSave=()=>pending;
 export async function save(el,fields,extra={},done=T('Zapisano ustawienia.')){
  if(!st.view)return;
  if(!Object.keys(fields).length){say(el,T('Nic nie zmieniono.'));return;}
+ // The panel's form the save started from (a dialog's button carries none: the pending save remembers it), for the focus afterwards.
+ const origin=originOf(el)||pending?.origin||null;
  const r=await attempt(st.view,fields,extra);
- if(r.ok){pending=null;st.view=r.view;closeIfOpen();paint();toast(done);if(touchesPending(fields))io.refreshMe();return;}
- pending={fields,extra,done};
+ if(r.ok){pending=null;st.view=r.view;closeIfOpen();paint();refocus(origin);toast(done);if(touchesPending(fields))io.refreshMe();return;}
+ pending={fields,extra,done,origin};
  if(r.kind==='test_mode'){openModal(T('Stripe w trybie testowym'),h`<p class="modal-lead">${r.message}</p><p class="muted small">${T('W trybie testowym karty testowe przechodzą, a prawdziwe płatności nie. Przełącz Stripe na tryb live w config.php przed prawdziwym otwarciem płatności.')}</p><div class="form-error" role="alert"></div>`,
   all(btn(T('Anuluj'),'close'),btn(T('Potwierdzam tryb testowy'),'test-go','primary')));return;}
  if(r.kind==='decision'){openModal(T('Konta z okresu bezpłatnego'),decisionView(r.counts),all(btn(T('Anuluj'),'close'),h`<button class="btn primary" type="submit" form="set-decision-form">${T('Zapisz decyzję')}</button>`),true);return;}
- const plan=refusalPlan(r.kind,{dialog:dialogOpen()});pending=plan.keep?{fields,extra,done}:null;
+ const plan=refusalPlan(r.kind,{dialog:dialogOpen()});pending=plan.keep?{fields,extra,done,origin}:null;
  if(plan.close)closeIfOpen();
  if(plan.reload){await load();toast(r.message);return;}
  say(el,r.message);
 }
+/** data-set-form of the panel form el belongs to (the dialog forms 'decision' and the modal buttons do not count). */
+export const originOf=el=>{const f=el?.closest?.('form[data-set-form]');return f&&!f.closest('#modal-root')?f.dataset.setForm:null;};
+/** After a save the whole panel is drawn again: the keyboard focus goes back to the submit button of the form it started from. */
+function refocus(origin){if(!origin)return;const b=root()?.querySelector(`form[data-set-form="${origin}"] button[type="submit"]`);if(b&&typeof b.focus==='function')b.focus();}
 const dialogOpen=()=>!!document.querySelector('#modal-root .modal');
 const closeIfOpen=()=>{if(dialogOpen())closeModal();};
 const busy=async(el,fn)=>{const b=el?.matches?.('form')?document.querySelector('button[type=submit][form="'+el.id+'"]')||el.querySelector('button[type=submit]'):el;if(b)b.disabled=true;try{await fn();}catch(error){say(el,translateMessage(error.message));}finally{if(b?.isConnected)b.disabled=false;}};
@@ -265,7 +271,7 @@ const ACTS={
 const FORMS={
  mode:(form)=>{
   const f=new FormData(form),fields=changedFields(st.view,modeFields(String(f.get('mode')||modeOf(st.view)),{paymentsOn:f.get('payments')==='paid'}));
-  if(stopsPayments(st.view,fields)){pending={fields,extra:{},done:T('Zapisano ustawienia.')};openModal(T('Płatności przestaną być wymagane'),h`<p class="modal-lead">${T('Osoby z aktywną subskrypcją dalej płacą. Zatrzymaj subskrypcje w panelu Członkowie albo w Stripe, jeśli tak zdecydujesz.')}</p><div class="form-error" role="alert"></div>`,all(btn(T('Anuluj'),'close'),btn(T('Zapisz tryb rejestracji'),'confirm-go','primary')));return;}
+  if(stopsPayments(st.view,fields)){pending={fields,extra:{},done:T('Zapisano ustawienia.'),origin:'mode'};openModal(T('Płatności przestaną być wymagane'),h`<p class="modal-lead">${T('Osoby z aktywną subskrypcją dalej płacą. Zatrzymaj subskrypcje w panelu Członkowie albo w Stripe, jeśli tak zdecydujesz.')}</p><div class="form-error" role="alert"></div>`,all(btn(T('Anuluj'),'close'),btn(T('Zapisz tryb rejestracji'),'confirm-go','primary')));return;}
   return busy(form,()=>save(form,fields));
  },
  support:(form)=>busy(form,()=>save(form,changedFields(st.view,{supportEmail:String(new FormData(form).get('supportEmail')||'').trim()}),{},T('Zapisano adres pomocy.'))),

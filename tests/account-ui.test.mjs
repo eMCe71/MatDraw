@@ -768,6 +768,9 @@ test('PHP build in a browser: sign-up with the roles, the athlete step, landing 
  const app=API.replace(/api\/index\.php$/,''),browser=await chromium.launch(),errors=[],stubPort=Number(new URL(API).port)+1;
  const stub=async(op,body={})=>{const r=await fetch(`http://127.0.0.1:${stubPort}/__control`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({op,...body})});return r.json();};
  const tour=fixture('tournament',{name:'E2E Zapisy Zawodników',date:'2031-05-10',status:'open'}).id;
+ // Self-entry on (integration QA, F6): the landing after the Checkout then shows the athlete's call to action and opens the window.
+ {const {Client}=await import('./helpers/http-client.mjs');const admin=new Client();await admin.login('admin@test.example','AdminForTests2026!');
+  await admin.cmd('tournament.save',{id:tour,name:'E2E Zapisy Zawodników',city:'Warszawa',date:'2031-05-10',mat:'Mata 1',status:'open',selfEntry:true});}
  const title=page=>page.evaluate(()=>[document.activeElement?.id,document.querySelector('.acct-steps-label')?.textContent]);
  try{
   for(const [w,hh,lang] of [[1440,900,'pl'],[390,844,'en']]){
@@ -829,10 +832,22 @@ test('PHP build in a browser: sign-up with the roles, the athlete step, landing 
     assert.equal(await page.locator('.acct-return [data-acct-act="to-chat"]').count(),1,'the chat stays the second choice');
     assert.equal(JSON.parse(await page.evaluate(()=>sessionStorage.getItem('matdraw.signup.target'))||'null')?.t,tour,'the target survives the Checkout');
     await noOverflow(page,'return '+w);
+    // The entry window is asked for with enter=1 (the tournament takes self-entries, so the window opens and consumes the flag).
+    const visited=[],seen=f=>{if(f===page.mainFrame())visited.push(f.url());};page.on('framenavigated',seen);
     await page.click('[data-acct-act="to-landing"]');
     await page.waitForFunction(t=>location.hash.startsWith('#guest?t='+t),tour,{timeout:20000});
-    assert.equal(new URLSearchParams(await page.evaluate(()=>location.hash.split('?')[1])).get('enter'),'1','the entry window is asked for');
+    await page.waitForSelector('#ath-entry-form',{timeout:20000});page.off('framenavigated',seen);
+    assert.ok(visited.some(u=>u.includes('#guest?t='+tour+'&enter=1')),'the entry window is asked for: '+visited.join(' '));
     assert.equal(await page.evaluate(()=>sessionStorage.getItem('matdraw.signup.target')),null,'the target is used once');
+    // F6: the paid member's preview opens the entry window once (enter=1 consumed) over the athlete's call to action.
+    assert.equal(await page.evaluate(()=>location.hash),'#guest?t='+tour,'enter=1 is consumed');
+    assert.match(await page.textContent('#modal-root .modal'),/Zosia Kowalska/);
+    assert.equal(await page.locator(`[data-athlete-cta] [data-action="athlete-enter"][data-id="${tour}"]`).count(),1,'the call to action under the window');
+    await page.click('#modal-root [data-action="close-modal"].btn');await page.waitForSelector('#ath-entry-form',{state:'detached'});
+    // Once: the closed window does not come back (the preview repaints after the workspace and the member data load).
+    await page.waitForTimeout(1500);
+    assert.equal(await page.locator('#ath-entry-form').count(),0,'the entry window does not open again');
+    assert.equal(await page.evaluate(()=>location.hash),'#guest?t='+tour,'enter=1 stays consumed');
    }else{await page.click('[data-acct-act="later"]');await page.waitForFunction(()=>location.hash.startsWith('#tournaments'),null,{timeout:20000});}
    // The "Role" tab of the new account.
    await page.goto(app+'#profile?tab=roles');await page.waitForSelector('.acct-role [data-acct-act="organizer-toggle"]',{timeout:20000});
@@ -870,6 +885,8 @@ test('PHP build in a browser: sign-up with the roles, the athlete step, landing 
     // The preview is drawn (its call-to-action slot belongs to the athlete module and may still be empty, so only attached).
     await page.waitForSelector(`[data-athlete-cta][data-tournament-id="${tour}"]`,{state:'attached',timeout:20000});
     assert.equal(await page.locator('.access-card').count(),0,'the member preview, not the guest sign-up offer');
+    // F6: the tournament takes self-entries, so the new athlete data give the "Zgłoś się" call to action at once.
+    await page.waitForSelector(`[data-athlete-cta] [data-action="athlete-enter"][data-id="${tour}"]`,{timeout:20000});
    }
    await ctx.close();
   }

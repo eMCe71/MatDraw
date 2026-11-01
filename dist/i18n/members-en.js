@@ -185,6 +185,7 @@ export default {
  'Pokaż wszystkich':'Show everyone',
  'Organizator turnieju (może tworzyć własne turnieje)':'Tournament organiser (can create own tournaments)',
  'Ukryj też jego nadchodzące turnieje (wszystkie jego turnieje: {n})':'Also hide their upcoming tournaments (all their tournaments: {n})',
+ 'Ukryj też jego nadchodzące turnieje ({n})':'Also hide their upcoming tournaments ({n})',
  'Powód ukrycia (widzi go organizator)':'Reason for hiding (shown to the organiser)',
  'Powód może mieć najwyżej 200 znaków.':'The reason can have at most 200 characters.',
  'Ukryte zostaną nadchodzące turnieje tej osoby razem ze zgłoszeniami samych zawodników.':'This person\'s upcoming tournaments will be hidden, together with the entries athletes made themselves.',

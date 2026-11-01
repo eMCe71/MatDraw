@@ -441,6 +441,16 @@ test('trust, untrust, block and restore of the organizer role, the account block
  assert.ok(!/checked/.test(members.hideFields({tournaments:2},false).html));assert.equal(members.hideFields({}).html??members.hideFields({}),'','no option without tournaments');
 });
 
+test('integration QA (F3): the hide option gives the exact number of upcoming tournaments when the server sends it, none at 0',()=>{
+ // upcomingTournaments (sparse): the upcoming tournaments not hidden yet, exactly the ones Members::hideTournaments hides.
+ const exact=members.hideFields({tournaments:5,upcomingTournaments:2}).html;
+ assert.match(exact,/Ukryj też jego nadchodzące turnieje \(2\)/);assert.ok(!/wszystkie jego turnieje/.test(exact));assert.match(exact,/data-mem-reason/);
+ const none=members.hideFields({tournaments:5,upcomingTournaments:0});assert.equal(none.html??none,'','no checkbox when nothing would be hidden');
+ assert.match(members.hideFields({tournaments:5,upcomingTournaments:'2'}).html,/wszystkie jego turnieje: 5/,'a malformed count falls back to the total');
+ assert.deepEqual([members.hideCount({upcomingTournaments:3}),members.hideCount({tournaments:4}),members.hideCount(null)],[{exact:true,n:3},{exact:false,n:4},{exact:false,n:0}]);
+ setLanguage('en',{persist:false});try{assert.match(members.hideFields({upcomingTournaments:1}).html,/Also hide their upcoming tournaments \(1\)/);}finally{setLanguage('pl',{persist:false});}
+});
+
 test('bulk action: the payload of the selected rows and the done/failed summary',()=>{
  const {bulkCall,bulkSummary,bulkSummaryView,bulkBar,BULK_MAX}=members;
  assert.equal(BULK_MAX,50);
