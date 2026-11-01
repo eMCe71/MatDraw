@@ -38,6 +38,11 @@ function athlete(prefix,over={}){
 const selfEntry=(a,tournamentId)=>{const r=fixture('domain-run',{actor:a.id,type:'entry.self',payload:{tournamentId,profileId:a.profileId,events:['forms']}});assert.equal(r.status,200,JSON.stringify(r));return r;};
 const tour=(c,id)=>c.data.tournaments.find(t=>t.id===id);
 const audit=since=>fixture('roles-audit',{since});
+/**
+ * Puts back what fixture roles-settings changed. roles-settings-restore skips the app_settings row when there was none
+ * before (old.row null reads as "no table" there), so that row, which only roles-settings wrote, is deleted here.
+ */
+const restoreSettings=s=>{fixture('roles-settings-restore',{old:s.old});if(s.old.row===null)fixture('settings-reset');};
 const admin=async()=>{const c=await signIn(...ADMIN);await c.load();return c;};
 const adminList=async(a,body)=>{const r=await a.req('admin-members',{filter:'all',page:1,...body});assert.equal(r.status,200,JSON.stringify(r.data));return r.data;};
 const adminMember=async(a,body,status=200)=>{const r=await a.req('admin-member',body);assert.equal(r.status,status,JSON.stringify(r.data));return r.data;};
@@ -162,7 +167,7 @@ test('organizer: tournament, limits, finished before the date, paused publishing
   if(s.flags.organizers==='paused'&&s.flags.trustRequired)error(r,409,'Publikowanie nowych turniejów społeczności jest chwilowo wstrzymane przez Administratora.');else assert.equal(r.status,200);
   await c2.load();await c2.cmd('tournament.save',T({name:'Roboczy',status:'draft'}));
   await c.cmd('tournament.save',{...T({name:'Turniej Organizatora'}),id:t,city:'Opole Wieś'});
- }finally{fixture('roles-settings-restore',{old:s.old});}
+ }finally{restoreSettings(s);}
  // A child added by the organizer needs the guardian's consent; a new club is unverified.
  const club='Klub Organizatora '+uniq('k'),kid={name:'Dziecko Testowe',birthDate:day(-365*10-30),sex:'F',weight:35,height:140,gradeType:'cup',grade:8,events:['forms'],clubName:club};
  error(await command(c,'profile.save',kid),422,'Zaznacz, że masz zgodę rodzica lub opiekuna na podanie danych zawodnika.');
@@ -380,7 +385,7 @@ test('Administrator: confirm organizers, take the role with hidden tournaments, 
   assert.deepEqual(cmdRows.map(x=>x.slice(0,2)),[['tournament.hide',o.id],['tournament.hide',o.id],['club.save',null],['profile.forget',o.id]]);
   assert.match(cmdRows[0][2],new RegExp('^hidden '+t4+' · Do Ukrycia Komendą$'));assert.match(cmdRows[1][2],/^restored /);assert.equal(cmdRows[3][2],kc+' deleted');
   assert.ok(!cmdRows.some(x=>(x[2]??'').includes('Do Zapomnienia')),'no athlete names in notes');
- }finally{fixture('roles-settings-restore',{old:s.old});}
+ }finally{restoreSettings(s);}
 });
 
 test('account deletion forgets community data; brackets with results do not block it; accounts-cleanup skips community data; community-retention',{skip},async()=>{
@@ -451,5 +456,5 @@ test('chat lobby: no untrusted community tournaments except the own; o is 2 for 
   // A blocked organizer's tournaments leave the lobby again (except for himself).
   await adminMember(a,{action:'organizer',userId:o.id,blocked:true});
   assert.equal(!!(await listed(reader)),false);assert.ok(await listed(oc));assert.equal((await feed()).o,2);
- }finally{fixture('roles-settings-restore',{old:s.old});fixture('chat-settings',{reset:true});}
+ }finally{restoreSettings(s);fixture('chat-settings',{reset:true});}
 });
