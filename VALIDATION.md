@@ -2,20 +2,19 @@
 
 This file says what was tested, how it can be repeated, and what can only be verified on the real server. Commands are in `README.md` ("Tests and the local harness"); the owner's checklist is `HANDOFF.md`.
 
-> **PLACEHOLDER: final numbers of the release with the organizer and athlete roles (migrations 0007-0009). NOT YET FILLED IN.**
-> The numbers of the previous release below (2026-10-31) do not describe this release. The final run of this release fills in this table (commit, counts and engines exactly as measured; do not copy numbers from other rows).
+> **Final numbers of the release with the organizer and athlete roles (migrations 0007-0009), measured 2026-11-01.**
 >
 > | Item | Result for this release |
 > |---|---|
-> | Commit measured | TO BE FILLED IN |
-> | Unit (Node + PHP bridges), `PHP_BIN=... node --test` over the non-HTTP files | TO BE FILLED IN (tests, pass, fail, skipped) |
-> | HTTP on the local MariaDB 10.11 (`bash scripts/test-http.sh ...`, every `tests/*.http.test.mjs`) | TO BE FILLED IN |
-> | Browser (Playwright, Chromium): `qa-browser`, `account-ui` with the PHP build, `athlete-ui`, `organizer-ui`, `settings-ui`, `members-ui`, `pwa-*` | TO BE FILLED IN |
-> | Deploy scripts, `tests/deploy/deploy-script-test.sh` | TO BE FILLED IN |
-> | CI run (GitHub Actions) on MySQL 8.0 and MariaDB 10.6, back-compat job | TO BE FILLED IN (run number, result) |
-> | Performance budget at 5,000 profiles and 200 tournaments (`perf.http.test.mjs`): `load()` < 400 ms, `organizerSnapshot` < 50 ms, unchanged `bootstrap` < 20 ms | TO BE FILLED IN (measured values) |
-> | Checklist of plan section 11 (`docs/plan/PLAN-REJESTRACJA-ROLE.md`), each item with its test or check | TO BE FILLED IN (pointer to the evidence) |
-> | Review findings of this release and their status | TO BE FILLED IN |
+> | Commit measured | `11406ef` (branch `claude/quirky-einstein-sgelzm`; later commits on the branch change only this file) |
+> | Unit (Node + PHP bridges) and static browser tests, `MATDRAW_BROWSER_TESTS=1 PHP_BIN=... node --test --test-concurrency=2` over every non-HTTP file | 446 tests: 443 pass, 0 fail, 3 skipped (the skipped ones are the PHP-build browser parts of `account-ui` and `qa-roles-browser`; they run in the HTTP row) |
+> | HTTP on the local MariaDB 10.11.14 (`MATDRAW_BROWSER_TESTS=1 bash scripts/test-http.sh 8700 … tests/*.http.test.mjs tests/account-ui.test.mjs tests/qa-roles-browser.test.mjs`) | `tests/http.test.mjs` 2/2, then 180/180 (all 13 `*.http.test.mjs` files, including `final-review.http.test.mjs`, plus the PHP-build browser flows), 0 skipped |
+> | Browser (Playwright, Chromium) | Inside the two rows above: the static-demo files (`qa-browser`, `athlete-ui`, `organizer-ui`, `settings-ui`, `members-ui`, `account-ui` demo part, `pwa-*`, `home-embed`, `xss-scan`) in the unit row, the PHP-build flows of `account-ui` and `qa-roles-browser` in the HTTP row; all pass. One load-related timeout of `pwa-build` was seen once by a reviewer while an HTTP suite ran in parallel; it passed 9/9 when rerun alone and in this run |
+> | Deploy scripts, `tests/deploy/deploy-script-test.sh` | 30/30 steps |
+> | CI run (GitHub Actions) on MySQL 8.0 and MariaDB 10.6, back-compat job | Run #101 on `11406ef`: all green: JS and PHP tests, HTTP on **MySQL 8.0** and **MariaDB 10.6**, back-compat (old code on the new schema) on both engines, deploy-script test, browser job, build (the merged state `75b1f0a` before the integration round: run #100, all green) |
+> | Performance budget at 5,071 profiles and 325 tournaments (`perf.http.test.mjs`, local MariaDB) | `load()` 49.5 ms (budget 400), `organizerSnapshot` 30.4 ms (50), unchanged query 0.2 ms (20); organizer `bootstrap?t&rev` unchanged under 20 ms (median of 15); full organizer bootstrap 49 ms, 841 KB |
+> | Checklist of plan section 11 (`docs/plan/PLAN-REJESTRACJA-ROLE.md`) | Covered by `integration.http.test.mjs` (roles section: raw-JSON leak scan of organizer, editor, club, athlete and guest payloads; every admin route 403 for members and other staff), `roles.http`, `athletes.http`, `settings.http`, `contract.http`, `domain.http`, `final-review.http`, `isolation.http`, `roles.test.mjs` (capability matrix), `roles-parity.test.mjs` (PHP/JS), `settings.test.mjs`, and the security lens of the final review (two organizers, a guardian with an 11-year-old, an adult athlete and staff data on a real build: no foreign names, birth dates, profile ids or club names in any payload; CSRF and Origin checks on every new POST route; step-up after 30 minutes; XSS payloads in about 40 pages without CSP, nothing executed). A per-item evidence list for the 34 points is not written yet; it follows with the next release |
+> | Review findings of this release and their status | Final 5-lens review (security, settings and payments, domain, deploy, UX): 15 major findings confirmed by independent verifiers, 15 minor notes. All fixed with regression tests, in two fix branches with two adversarial review rounds each, one integration round and a final review (verdict: approve). Exceptions: B3 (account deletion keeps the athlete's full name in results of tournaments that took place) stays by owner decision O7 for this release, with a warning and an opt-in to initials in the deletion dialog; the owner decided on 2026-11-01 that the next release turns it into initials everywhere (HANDOFF §0.9). B13 (the global brake on new community tournaments does nothing while `trustRequired` is off) is by design of the owner's "full automation" decision. Known polish for later: the profiles database still offers "Zgłoś" for a profile already entered in the chosen tournament |
 >
 > **Final numbers of the previous release (2026-10-31, commit `4f9317a`, the state that went to production as `a67ad42`):**
 > - **Unit (Node + PHP bridges):** `PHP_BIN=… node --test` over every non-HTTP test file — 287 tests, 276 pass, 0 fail, 11 skipped (the skipped ones need `MATDRAW_TEST_URL` or `MATDRAW_BROWSER_TESTS` and run in the rows below).
