@@ -1,7 +1,9 @@
 /* Community state of the signed-in person ("me", plan §4.3 and §8.5): profile, access, billing and feature flags.
  * API mode: GET me after 'ready' and 'login', after the tab becomes visible again (at most every 5 minutes) and after a payment
  * prompt (402). A server without the me route (404) means community features are off, without an error message.
- * Demo mode: the demo accounts are staff/free with complete fictional profiles; edits stay in localStorage.
+ * Demo mode: the demo accounts are staff/free with complete fictional profiles; edits stay in localStorage. The role
+ *   fields have the server's shapes (PLAN-REJESTRACJA-ROLE §8.1, §8.2): user.caps, athletes, features.signupMode ('off':
+ *   no sign-up in the demo), features.selfEntry and features.pendingOrganizers for the Administrator (Client.demoAccount).
  * Sign-out on a shared device: purgeSession() clears per-tab drafts and tells other tabs ('reset' on the BroadcastChannel). */
 import {registry} from './registry.js';
 import * as Client from './client.js';
@@ -24,9 +26,10 @@ function demoMe(user){
  if(!user)return null;
  const base={publicId:'Demo'+String(user.id).replace(/[^A-Za-z0-9]/g,'').slice(-8).padStart(8,'0'),username:'demo',firstName:'Demo',lastName:'Konto',sports:['taekwondo'],clubText:null,...DEMO_PROFILES[user.id]};
  const stored=demoStored(user.id),profile={country:'PL',showClub:false,nameDisplay:'initial',avatar:null,usernameChangeAt:null,mustChangePassword:false,...base,...stored,publicId:base.publicId,complete:true};
- return {user:{id:user.id,clubId:user.clubId??null,email:user.email,role:user.role,active:true},profile,
+ const roles=Client.demoAccount(user.id);
+ return {user:{id:user.id,clubId:user.clubId??null,email:user.email,role:user.role,active:true,caps:roles.caps},profile,
   access:{full:true,state:user.role==='admin'?'staff':'free',until:null,canPost:true,block:null,mutedUntil:null},
-  billing:{enabled:false},features:{signup:false,avatars:'data-url',chat:true},demo:true};
+  billing:{enabled:false},features:{signup:false,avatars:'data-url',chat:true,...roles.features},athletes:roles.athletes,demo:true};
 }
 /** Demo only: saves profile fields for the signed-in demo account and refreshes me. */
 export function saveDemoProfile(patch){

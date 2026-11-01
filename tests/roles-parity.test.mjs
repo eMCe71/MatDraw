@@ -329,7 +329,7 @@ test('Rules::sameClub equals sameClub; unaffiliated athletes are never separated
  const athletes=Array.from({length:8},(_,i)=>({id:'u'+i,club:i<6?'Niezrzeszony':'Klub A',clubId:i<6?UNAFFILIATED:'cA',champion:false}));
  assert.deepEqual(bridge({job:'drawCost',athletes,runs:20}),Array(20).fill(0),'two athletes of Klub A always meet another club or an unaffiliated athlete; unaffiliated pairs cost nothing');
 });
-test('Settings::effective (wave 1 stub): derived keys, idempotent, flags',{skip},()=>{
+test('Settings::effective over config.php alone (no app_settings row): derived keys, idempotent, flags',{skip},()=>{
  const base={signup_enabled:false,billing_enabled:false,billing_enforce:false,support_email:''};
  const cases=[base,{...base,signup_enabled:true},{...base,signup_enabled:true,billing_enabled:true,billing_enforce:true},{...base,signup_enabled:true,billing_enforce:true},{...base,signup_enabled:true,signup_force_off:true,support_email:'pomoc@x.test'},{...base,organizers:'paused',organizers_trust_required:false}];
  const out=bridge({job:'settings',cases});

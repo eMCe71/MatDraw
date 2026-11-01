@@ -6,12 +6,16 @@
 //   Chat (class present = chat installed); chat_settings.data.on (§2.4) switches posting off from the Admin panel
 //   Billing::currencyFor(PDO,$config,$row,$country,$userId): plan currency incl. the Admin override (billing-backend)
 //   BillingSync::lazy(PDO,$config,$userId) after the response (only once it was sent), when next_sync_at is due (billing-backend)
-// Roles (PLAN-REJESTRACJA-ROLE §4.4, §8.1), sparse so accounts without a role keep the exact shape above: user.caps
-// (Actors::of, only when one cap is true), athletes [{profileId,name,relation,archived}] (only when the account has
-// athlete profiles) and, for the Administrator, features.pendingOrganizers (only when organizers wait for the
-// confirmation and the confirmation is required, Settings::flags). The sign-up mode is features.signup with
-// billing.enabled && billing.enforce (off | free | paid), exactly signup_mode of Settings::effective.
-// public-config is flagged 'settings' (the central overlay of Routes::dispatch computes the effective config for it).
+// Roles (PLAN-REJESTRACJA-ROLE §4.4, §8.1, §8.2): me always carries user.caps {organizer, organizerBlocked,
+// organizerTrusted, athlete} (Actors::of for members; all false for staff, who get no member roles in v1), athletes
+// [{profileId,name,relation,archived}] (an empty list without athlete profiles; one profile at most since the owner
+// decision of §17), features.signupMode 'off'|'free'|'paid' (signup_mode of Settings::effective, the overlay that
+// Routes::dispatch computes for this peek route, never config.php), features.selfEntry true (the server takes self
+// entries, §7) and, for the Administrator only, features.pendingOrganizers: the organizers awaiting confirmation (one
+// COUNT), 0 while the confirmation is not required (organizers.trustRequired=false, §17: nothing waits for it).
+// login, session and the member bootstrap keep their sparse caps (Accounts::withCaps): only me carries the full contract.
+// public-config is flagged 'settings' (the central overlay of Routes::dispatch computes the effective config for it) and
+// adds signupMode (the same value as me) and roles:true (this server has the member roles, §8.1).
 declare(strict_types=1);
 use MatDraw\{Access,Accounts,Actors,Billing,BillingSync,Capabilities,Chat,ChatModeration,Jobs,Members,RouteContext,Routes,Settings};
 
@@ -20,8 +24,12 @@ $avatarMode=static function(array $c):string{
  if(empty($c['avatars_enabled'])||!class_exists(Capabilities::class)||!method_exists(Capabilities::class,'avatarMode'))return 'off';
  $m=Capabilities::avatarMode($c);return in_array($m,['gd-webp','gd-jpeg'],true)?$m:'off';
 };
+/** signup_mode of the effective configuration (Settings::effective always sets it; 'off' guards a missing value). */
+$signupMode=static fn(array $c):string=>in_array($c['signup_mode']??null,['off','free','paid'],true)?$c['signup_mode']:'off';
+/** caps of an account without member roles (staff, §4.2): every cap false. */
+$noCaps=['organizer'=>false,'organizerBlocked'=>false,'organizerTrusted'=>false,'athlete'=>false];
 return [
- 'me'=>['method'=>'GET','auth'=>'peek','user'=>'required','handler'=>function(RouteContext $ctx)use($avatarMode):array{
+ 'me'=>['method'=>'GET','auth'=>'peek','user'=>'required','handler'=>function(RouteContext $ctx)use($avatarMode,$signupMode,$noCaps):array{
   $c=$ctx->config;$pdo=$ctx->pdo();$u=$ctx->user();$now=time();
   $p=Accounts::profile($pdo,$u['id']);$row=Access::row($pdo,$u['id']);$access=Access::compute($row,$u,$c,$now);
   $complete=Accounts::profileComplete($p);$mustChange=$p['pw_reset_at']!==null;
@@ -46,24 +54,25 @@ return [
   // once the response has been sent (Jobs::afterSent), never before it: Jobs::maybe does not flush when sampling skips it.
   $syncDue=!empty($c['billing_enabled'])&&$row!==null&&$row['stripe_customer_id']!==null&&$row['next_sync_at']!==null&&(int)$row['next_sync_at']<=$now;
   $userId=$u['id'];$actor=$u['role']==='member'?Actors::of($pdo,$u):null;$athletes=$actor&&$actor['athletes']?Accounts::athletes($pdo,$u['id']):[];
-  $pending=$u['role']==='admin'&&Settings::flags($c)['trustRequired']?Members::pendingOrganizers($pdo):0;
+  $admin=$u['role']==='admin';$pending=$admin&&Settings::flags($c)['trustRequired']?Members::pendingOrganizers($pdo):0;
   register_shutdown_function(static function()use($pdo,$c,$syncDue,$userId){
    Jobs::maybe($pdo,$c);
    if($syncDue&&class_exists(BillingSync::class)&&method_exists(BillingSync::class,'lazy'))Jobs::afterSent(static fn()=>BillingSync::lazy($pdo,$c,$userId),'MatDraw billing lazy');
   });
-  return ['user'=>Accounts::withCaps($u,$actor),
+  return ['user'=>Accounts::withCaps($u,null)+['caps'=>$actor['caps']??$noCaps],
    'profile'=>['publicId'=>$p['public_id'],'username'=>$p['username'],'firstName'=>$p['first_name'],'lastName'=>$p['last_name'],'country'=>$p['country'],
     'sports'=>array_values(array_filter(explode(',',(string)$p['sports']),'strlen')),'clubText'=>$p['club_text'],'showClub'=>(bool)$p['show_club'],'nameDisplay'=>$p['name_display'],
     'avatar'=>is_string($p['avatar'])&&$p['avatar']!==''?substr($p['avatar'],0,12):null,'complete'=>$complete,'usernameChangeAt'=>$changeAt,'mustChangePassword'=>$mustChange],
    'access'=>$access+['canPost'=>$block===null,'block'=>$block,'mutedUntil'=>$mutedUntil],
    'billing'=>$billing,
-   'features'=>['signup'=>!empty($c['signup_enabled']),'avatars'=>$avatarMode($c),'chat'=>$chat]+($pending>0?['pendingOrganizers'=>$pending]:[])]+($athletes?['athletes'=>$athletes]:[]);
+   'features'=>['signup'=>!empty($c['signup_enabled']),'avatars'=>$avatarMode($c),'chat'=>$chat,'signupMode'=>$signupMode($c),'selfEntry'=>true]+($admin?['pendingOrganizers'=>$pending]:[]),
+   'athletes'=>$athletes];
  }],
  // Switches for the guest pages (§4.3, §6.10): signup is false in invite-only mode; billing means a price is shown
- // (payments enabled and enforced). No secrets and no Stripe mode.
- 'public-config'=>['method'=>'GET','auth'=>'public','settings'=>true,'handler'=>function(RouteContext $ctx)use($avatarMode):array{
+ // (payments enabled and enforced); signupMode and roles of §8.1. No secrets, no personal data and no Stripe mode.
+ 'public-config'=>['method'=>'GET','auth'=>'public','settings'=>true,'handler'=>function(RouteContext $ctx)use($avatarMode,$signupMode):array{
   $c=$ctx->config;header('Cache-Control: public, max-age=60');
-  return ['signup'=>!empty($c['signup_enabled']),'billing'=>!empty($c['billing_enabled'])&&!empty($c['billing_enforce']),'amounts'=>$c['billing_amounts'],
-   'avatars'=>$avatarMode($c)!=='off','support'=>is_string($c['support_email'])&&$c['support_email']!==''?$c['support_email']:null];
+  return ['signup'=>!empty($c['signup_enabled']),'signupMode'=>$signupMode($c),'billing'=>!empty($c['billing_enabled'])&&!empty($c['billing_enforce']),'amounts'=>$c['billing_amounts'],
+   'avatars'=>$avatarMode($c)!=='off','support'=>is_string($c['support_email'])&&$c['support_email']!==''?$c['support_email']:null,'roles'=>true];
  }],
 ];

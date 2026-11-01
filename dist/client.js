@@ -1,5 +1,5 @@
 import {CONFIG} from './runtime-config.js';
-import {initialWorkspace,execute,publicWorkspace,DomainError} from './workspace.js';
+import {initialWorkspace,execute,publicWorkspace,DomainError,organizer,trustedOrganizer} from './workspace.js';
 import {guestUpcoming,guestTournament,warsawToday} from './guest-view.js';
 import {emit} from './registry.js';
 const KEY='matdraw.workspace.v2',SESSION='matdraw.session.v2';
@@ -87,10 +87,29 @@ async function publicFetch(params,{signal,timeout=8000}={}){
  }finally{clearTimeout(timer);signal?.removeEventListener?.('abort',stop);}
 }
 async function publicApi(params){const {status,data}=await publicFetch(params);if(status<200||status>299)throw failure(data,status);return data;}
+/** public-config of the demo: the keys of the server (PLAN-REJESTRACJA-ROLE §8.1). The demo has no sign-up (signupMode 'off',
+ * §10.7) and no payments; amounts are the defaults of config.php; roles: the demo has the member roles. */
+const DEMO_PUBLIC_CONFIG=()=>({signup:false,signupMode:'off',billing:false,amounts:{pln:899,usd:299},avatars:false,support:null,roles:true});
+const NO_CAPS={organizer:false,organizerBlocked:false,organizerTrusted:false,athlete:false};
+/** Demo only: the role fields of me for demo account userId (§8.1, §8.2, the shapes of the me route), from this browser's
+ * demo data: caps {organizer, organizerBlocked, organizerTrusted, athlete} (as Actors::build; all false for staff),
+ * athletes [{profileId,name,relation,archived}] of the account (by id), signupMode 'off' (no sign-up in the demo, §10.7),
+ * selfEntry true (self entries run on the demo data, §10.7) and, for the Administrator only, pendingOrganizers: active
+ * organizers not blocked and not confirmed, 0 while the confirmation is not required (db.flags.trustRequired=false, §17). */
+export function demoAccount(userId){
+ if(!isDemo)throw new Error('Ta funkcja jest niedostępna w wersji demonstracyjnej.');
+ read();const u=db?.users.find(x=>x.id===userId)||null,member=u?.role==='member';
+ const owned=member?db.profiles.filter(p=>p.ownerId===userId).sort((a,b)=>a.id<b.id?-1:a.id>b.id?1:0):[];
+ const caps=member?{organizer:organizer(u),organizerBlocked:u.organizerBlockedAt!=null,organizerTrusted:u.organizerTrustedAt!=null,athlete:owned.some(p=>!p.archived)}:{...NO_CAPS};
+ const athletes=owned.map(p=>({profileId:p.id,name:typeof p.name==='string'?p.name:'',relation:['self','guardian'].includes(p.relation)?p.relation:null,archived:!!p.archived}));
+ const features={signupMode:'off',selfEntry:true};
+ if(u?.role==='admin')features.pendingOrganizers=db.users.filter(x=>x.role==='member'&&x.active&&organizer(x)&&!trustedOrganizer(db,x.id)).length;
+ return {caps,athletes,features};
+}
 /** Public GET without cookies (plan §8.4): {status,data} for every HTTP answer (204 gives data null), so callers can read 429/503.
  * Network failure, timeout (default 8 s) and non-JSON answers throw; an aborted signal rethrows the AbortError. */
 export async function publicGet(params,options={}){
- if(isDemo){if(params?.route==='public-config')return {status:200,data:{signup:false,billing:false,avatars:false,support:null}};throw new Error('Ta funkcja jest niedostępna w wersji demonstracyjnej.');}
+ if(isDemo){if(params?.route==='public-config')return {status:200,data:DEMO_PUBLIC_CONFIG()};throw new Error('Ta funkcja jest niedostępna w wersji demonstracyjnej.');}
  return publicFetch(params,options);
 }
 const demoTournaments=()=>{read();return db?.tournaments||[];};
