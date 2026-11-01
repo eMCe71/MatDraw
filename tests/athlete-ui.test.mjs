@@ -66,7 +66,7 @@ test('the window shows impossible events as text with the reason (no disabled in
  const t={id:'t1',name:'Puchar <Testowy>',city:'Opole',date:'2030-06-20',community:false,trusted:true,organizer:null,drawn:[classify({...CHILD,age:12},'hogo').id],profiles:[{id:'p1',entered:false,blocked:null}]};
  const html=String(flow.entryHtml({tournament:t,profile:CHILD,profiles:[CHILD],item:null,update:false}));
  assert.ok(!/disabled/.test(html),'no disabled fields that screen readers skip');
- assert.match(html,/<p class="ath-event ath-event-off" id="ath-ev-soft">.*Walki soft \/ kalaki.*Niedostępne: Konkurencja niedostępna w tej grupie wieku/);
+ assert.match(html,/<p class="ath-event ath-event-off" id="ath-ev-soft">.*Walki soft \/ kalaki.*<small>Niedostępna w tej grupie wiekowej<\/small>/);
  assert.match(html,/id="ath-ev-hogo">.*Niedostępne: losowanie tej kategorii już się odbyło\. Zgłoszenie może dodać organizator\./);
  const described=html.match(/data-ath-events-box aria-describedby="([^"]+)"/)[1].split(' ');
  assert.deepEqual(described,['ath-ev-soft','ath-ev-hogo','ath-ev-semi','ath-ev-light','ath-ev-power']);
@@ -81,7 +81,7 @@ test('the window shows impossible events as text with the reason (no disabled in
  const item={profileId:'p1',tournament:t,entry:{events:['special'],weight:31,height:131,gradeType:'cup',grade:8},canEdit:true};
  const edit=String(flow.entryHtml({tournament:t,profile:CHILD,profiles:[CHILD],item,update:true}));
  assert.match(edit,/value="special" checked/);assert.match(edit,/name="weight"[^>]*value="31"/);assert.match(edit,/data-update="yes"/);
- inLanguage('en',()=>{const en=text(flow.entryHtml({tournament:t,profile:CHILD,profiles:[CHILD],item:null,update:false}));assert.match(en,/Not available: Event not available in this age group/);assert.match(en,/Also save in the profile/);});
+ inLanguage('en',()=>{const en=text(flow.entryHtml({tournament:t,profile:CHILD,profiles:[CHILD],item:null,update:false}));assert.match(en,/Not available in this age group/);assert.doesNotMatch(en,/Not available: Event not available/);assert.match(en,/Also save in the profile/);});
 });
 
 test('privacy notice for every tournament: staff, confirmed and unconfirmed community organizers (with the organizer name)',()=>{
@@ -152,6 +152,36 @@ test('"Moje starty": the card of every status (§7.6) including paused, withdraw
  inLanguage('en',()=>{const en=cards(flow.startsHtml(view,{today:TODAY}));assert.match(text(en.Obecna),/Attendance confirmed · weight 31\.5 kg/);assert.match(text(en.Ukryty),/Tournament paused/);});
 });
 
+test('final review F6, F9: an underfilled category is neutral with what happens next; an unavailable event names its reason once',()=>{
+ const cat={code:'UF-01',event:'forms',title:'Układy formalne',subtitle:'Juniorki młodsze · kobiety · 10–7 Cup',state:'underfilled',drawn:false,position:null,bracket:null};
+ const item={profileId:'p1',tournament:{id:'t1',name:'Puchar',date:'2030-07-01',status:'open',available:true},entry:{events:['forms'],weight:30,height:130,gradeType:'cup',grade:9,presence:'pending'},canEdit:true,canWithdraw:true,categories:[cat]};
+ const html=String(flow.startsHtml({profiles:[CHILD],entries:[item],withdrawn:[],open:[]},{today:TODAY}));
+ assert.match(html,/<span class="badge neutral">Mało zawodników<\/span>/,'neutral, not a warning');assert.doesNotMatch(html,/Wymaga decyzji|badge warning/);
+ assert.match(html,/class="ath-cat-note">Na razie mało zawodników — o tej kategorii zdecyduje organizator przed losowaniem\. Nic nie musisz robić\./);
+ inLanguage('en',()=>assert.match(String(flow.startsHtml({profiles:[CHILD],entries:[item],withdrawn:[],open:[]},{today:TODAY})),/Few athletes so far<\/span>.*the organizer decides on this category before the draw/s));
+ assert.doesNotMatch(String(flow.startsHtml({profiles:[CHILD],entries:[{...item,categories:[{...cat,state:'pending'}]}],withdrawn:[],open:[]},{today:TODAY})),/ath-cat-note/);
+ // F9: the age-group refusal of the engine alone; other reasons after "Niedostępne:" with a small letter.
+ assert.equal(flow.offReason('Konkurencja niedostępna w tej grupie wieku'),'Niedostępna w tej grupie wiekowej');
+ assert.equal(flow.offReason('Kategorie Dan poniżej 16 lat nie są opisane'),'Niedostępne: kategorie Dan poniżej 16 lat nie są opisane');
+ assert.equal(flow.offReason('Brak kategorii dla wieku poniżej 7 lat'),'Niedostępne: brak kategorii dla wieku poniżej 7 lat');
+ inLanguage('en',()=>{assert.equal(flow.offReason('Konkurencja niedostępna w tej grupie wieku'),'Not available in this age group');assert.match(flow.offReason('Stopień Dan poza kategoriami specyfikacji'),/^Not available: [a-z]/);});
+ const off=String(flow.eventsHtml([{event:'soft',state:'ineligible',reason:'Konkurencja niedostępna w tej grupie wieku',category:null,note:null}],[]));
+ assert.match(off,/<small>Niedostępna w tej grupie wiekowej<\/small>/);assert.doesNotMatch(off,/Niedostępne: Konkurencja/);
+});
+test('final review F7: text colours of the athlete pages and the role/status badges reach 4.5:1 (WCAG 1.4.3)',async()=>{
+ const {readFileSync}=await import('node:fs');
+ const css=f=>readFileSync(DIST+f,'utf8');
+ const lum=hex=>{const n=hex.replace('#','').padEnd(6,'0');return [0,2,4].map(i=>parseInt(n.slice(i,i+2),16)/255).map(c=>c<=0.03928?c/12.92:((c+0.055)/1.055)**2.4).reduce((s,c,i)=>s+c*[0.2126,0.7152,0.0722][i],0);};
+ const ratio=(a,b)=>{const [x,y]=[lum(a),lum(b)].sort((p,q)=>q-p);return (x+0.05)/(y+0.05);};
+ const colorOf=(file,selector)=>{const m=new RegExp(selector.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'\\{[^}]*?(?:^|;|\\{)color:(#[0-9a-f]{6})','i').exec(css(file))||new RegExp(selector.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')+'\\{[^}]*color:(#[0-9a-f]{6})','i').exec(css(file));assert.ok(m,file+' '+selector);return m[1];};
+ for(const [file,selector,bg] of [['athlete.css','.ath-facts dt','#ffffff'],['athlete.css','.ath-section-head span','#f5f8fc'],['athlete.css','.ath-when','#ffffff'],['athlete.css','.ath-cat-name span','#fbfdff'],
+  ['athlete.css','.ath-note','#ffffff'],['athlete.css','.ath-event-off .ath-event-text>span','#f7f9fb'],['athlete.css','.ath-preview-empty','#f2f8fd'],['athlete.css','.ath-cat-note','#fbfdff'],
+  ['styles.css','.badge.neutral','#edf0f3'],['styles.css','.badge.warning','#faf0df'],['styles.css','.page-heading .eyebrow','#f5f8fc']]){
+  const c=colorOf(file,selector);assert.ok(ratio(c,bg)>=4.5,`${selector} ${c} on ${bg}: ${ratio(c,bg).toFixed(2)}`);
+ }
+ assert.match(css('athlete.css'),/\.ath-marks \.badge,\.ath-cat-head \.badge\{font-size:11px/,'badges of the athlete pages are 11px');
+ assert.match(css('members.css'),/\.mem-plan \.badge\{font-size:11px/,'role badges of Członkowie are 11px');
+});
 test('statuses, draw lines and tombstone texts; the withdraw question (§7.3)',()=>{
  const st=(item)=>data.entryStatus(item).code;
  assert.equal(st({tournament:{available:false,status:'open'},entry:{}}),'paused');
@@ -288,6 +318,22 @@ async function unnamed(page,selector){
  return snap.split('\n').filter(l=>/^\s*- (button|checkbox|textbox|spinbutton|combobox|radio|link)\b/.test(l)&&!/^\s*- \w+ "[^"]+"/.test(l)&&!/^\s*- link:/.test(l));
 }
 const overflow=page=>page.evaluate(()=>document.documentElement.scrollWidth-document.documentElement.clientWidth);
+/** Visible texts under root whose computed colour has less than 4.5:1 (3:1 for 24px or bold 18.66px) against the nearest opaque
+ * background (WCAG 2.x relative luminance), as 'ratio colour/background "text"'. */
+const lowContrast=(page,root)=>page.evaluate(root=>{
+ const rgb=s=>{const m=/rgba?\(([^)]+)\)/.exec(s);if(!m)return null;const [r,g,b,a=1]=m[1].split(',').map(Number);return {r,g,b,a};};
+ const lum=({r,g,b})=>[r,g,b].map(v=>v/255).map(c=>c<=0.03928?c/12.92:((c+0.055)/1.055)**2.4).reduce((s,c,i)=>s+c*[0.2126,0.7152,0.0722][i],0);
+ const bgOf=el=>{for(let e=el;e;e=e.parentElement){const c=rgb(getComputedStyle(e).backgroundColor);if(c&&c.a>=0.99)return c;}return {r:255,g:255,b:255,a:1};};
+ const out=[];
+ for(const el of document.querySelectorAll(root+' *')){
+  if(![...el.childNodes].some(n=>n.nodeType===3&&n.textContent.trim()))continue;
+  const st=getComputedStyle(el),box=el.getBoundingClientRect();if(st.visibility==='hidden'||!box.width||!box.height||el.closest('[hidden],.sr-only'))continue;
+  const fg=rgb(st.color),bg=bgOf(el);if(!fg)continue;const [x,y]=[lum(fg),lum(bg)].sort((p,q)=>q-p),ratio=(x+0.05)/(y+0.05);
+  const size=parseFloat(st.fontSize),large=size>=24||size>=18.66&&Number(st.fontWeight)>=700;
+  if(ratio<(large?3:4.5))out.push(ratio.toFixed(2)+' '+st.color+'/'+getComputedStyle(el).backgroundColor+' "'+el.textContent.trim().slice(0,40)+'"');
+ }
+ return out;
+},root);
 /** Adds three staff athletes to the child's category of t-winter-2027 and saves a draw (demo data in localStorage). */
 async function drawWinter(page){
  await page.evaluate(async()=>{
@@ -320,7 +366,16 @@ test('demo in a browser (PL 1440, EN 390): #starts, the entry window by keyboard
    await page.locator('.ath-open [data-action="athlete-enter"][data-id="t-winter-2027"]').focus();await page.keyboard.press('Enter');
    await page.waitForSelector('#ath-entry-form');
    assert.equal(await page.locator('#ath-entry-form input[name="events"][value="soft"]').count(),0,'an ineligible event is text, not a field');
-   assert.match(await page.locator('#ath-ev-soft').innerText(),lang==='pl'?/Niedostępne: Konkurencja niedostępna w tej grupie wieku/:/Not available: Event not available in this age group/);
+   assert.match(await page.locator('#ath-ev-soft').innerText(),lang==='pl'?/Niedostępna w tej grupie wiekowej/:/Not available in this age group/);
+   assert.deepEqual(await lowContrast(page,'.modal'),[],'every text of the window reaches 4.5:1');
+   // F3: an empty submit shows its message next to the events, in view, with the focus on the first event; a tick clears it.
+   await page.click('.modal-actions button[type="submit"]');
+   await page.waitForFunction(()=>/\S/.test(document.querySelector('#ath-events-error')?.textContent||''));
+   assert.match(await page.locator('#ath-events-error').innerText(),lang==='pl'?/Wybierz co najmniej jedną konkurencję\./:/Choose at least one event\./);
+   assert.equal(await page.evaluate(()=>document.activeElement?.matches('#ath-entry-form [data-ath-events] input[name="events"]')),true,'the focus is on the first event');
+   assert.equal(await page.evaluate(()=>{const r=document.querySelector('#ath-events-error').getBoundingClientRect(),body=document.querySelector('.modal-body')?.getBoundingClientRect()||{top:0,bottom:innerHeight};return r.top>=Math.max(0,body.top)-1&&r.bottom<=Math.min(innerHeight,body.bottom)+1;}),true,'the message is visible');
+   assert.ok((await page.getAttribute('[data-ath-events-box]','aria-describedby')).split(' ').includes('ath-events-error'),'the events group is described by the message');
+   assert.equal(await page.locator('#ath-entry-form .form-error:not([data-ath-error])').innerText(),'','the bottom box stays for server errors');
    assert.ok((await page.getAttribute('[data-ath-events-box]','aria-describedby')).split(' ').includes('ath-ev-soft'));
    assert.deepEqual(await unnamed(page,'.modal'),[],'every control of the entry window has a name');
    const snap=await page.locator('.modal').ariaSnapshot();
@@ -328,13 +383,24 @@ test('demo in a browser (PL 1440, EN 390): #starts, the entry window by keyboard
    assert.match(snap,lang==='pl'?/checkbox "Zapisz też w profilu/:/checkbox "Also save in the profile/);
    await page.locator('#ath-entry-form input[value="forms"]').focus();await page.keyboard.press('Space');
    await page.waitForFunction(()=>/10/.test(document.querySelector('[data-ath-preview]').textContent));
+   assert.equal(await page.locator('#ath-events-error').innerText(),'','ticking an event clears the message');
+   assert.ok(!(await page.getAttribute('[data-ath-events-box]','aria-describedby')||'').includes('ath-events-error'));
+   // A wrong measure: the message by the measures, aria-invalid and the focus on that field; a change clears it.
+   await page.fill('#ath-entry-form [name="weight"]','5');await page.click('.modal-actions button[type="submit"]');
+   await page.waitForFunction(()=>/\S/.test(document.querySelector('#ath-measures-error')?.textContent||''));
+   assert.equal(await page.evaluate(()=>document.activeElement?.getAttribute('name')),'weight');assert.equal(await page.getAttribute('#ath-entry-form [name="weight"]','aria-invalid'),'true');
+   await page.fill('#ath-entry-form [name="weight"]','42');
+   assert.equal(await page.locator('#ath-measures-error').innerText(),'');assert.equal(await page.getAttribute('#ath-entry-form [name="weight"]','aria-invalid'),null);
    assert.match(await page.locator('[data-ath-preview]').innerText(),lang==='pl'?/Juniorki młodsze · kobiety · 10–7 Cup/:/Younger juniors · female · 10th–7th Gup/);
    await page.fill('#ath-entry-form [name="grade"]','5');await page.waitForFunction(()=>/6–3|6th–3rd/.test(document.querySelector('[data-ath-preview]').textContent));
    assert.equal(await page.isChecked('#ath-entry-form input[value="forms"]'),true,'a measure change keeps the ticks');
    await page.fill('#ath-entry-form [name="grade"]','7');
    assert.equal(await overflow(page),0,'no horizontal scroll with the window open');
-   await page.click('.modal-actions button[type="submit"]');await page.waitForSelector('.ath-card');
+   await page.locator('.modal-actions button[type="submit"]').focus();await page.keyboard.press('Enter');await page.waitForSelector('.ath-card');
+   // F5: the focus lands on the new entry's card, not on <body>.
+   await page.waitForFunction(()=>document.activeElement?.id==='ath-entry-t-winter-2027',null,{timeout:5000});
    assert.match(await page.locator('.ath-card .ath-status').innerText(),lang==='pl'?/Zgłoszenie przyjęte/:/Entry accepted/);
+   assert.deepEqual(await lowContrast(page,'#main'),[],'every text of "Moje starty" reaches 4.5:1');
    assert.equal(await page.locator('.ath-card [data-action="athlete-withdraw"]').count(),1);
    // The member preview of the same tournament says the athlete is entered.
    await page.goto(url+'#guest?t=t-winter-2027');await page.waitForSelector('.ath-cta-done');
@@ -352,6 +418,7 @@ test('demo in a browser (PL 1440, EN 390): #starts, the entry window by keyboard
    await page.click('.ath-card [data-action="athlete-withdraw"]');await page.waitForSelector('[data-action="athlete-withdraw-confirm"]');
    assert.match(await page.locator('.modal-body').innerText(),lang==='pl'?/Wycofać zgłoszenie z Puchar Zimy 2027\? Po zamknięciu zapisów nie zgłosisz się ponownie\./:/Withdraw the entry from Puchar Zimy 2027\?/);
    await page.click('[data-action="athlete-withdraw-confirm"]');await page.waitForSelector('.ath-empty');
+   await page.waitForFunction(()=>['ath-gone-title','ath-entries-title'].includes(document.activeElement?.id),null,{timeout:5000});
    assert.equal(await page.locator('.ath-card').count(),0);
    assert.equal(await page.evaluate(()=>JSON.parse(localStorage.getItem('matdraw.workspace.v2')).tournaments.find(t=>t.id==='t-winter-2027').entries.some(e=>e.profileId==='demo-athlete-child')),false,'withdrawn in the local demo data');
    assert.deepEqual(await page.evaluate(()=>window.__csp),[]);

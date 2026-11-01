@@ -75,7 +75,7 @@ const unavailableText=reason=>reason==='finished'?T('Ten turniej już się odby�
 const BLOCKED=()=>T('Zgłoszenia osób niepełnoletnich do tego turnieju będą możliwe, gdy MatBravo potwierdzi organizatora.');
 const STATE_ICON={paused:'pause',finished:'trophy',absent:'alert',present:'check',closed:'clock',accepted:'check'};
 const STATE_TONE={paused:'warn',finished:'done',absent:'warn',present:'ok',closed:'wait',accepted:'ok'};
-const CATEGORY_STATE=()=>({finished:[T('Zakończona'),'success'],progress:[T('W toku'),'teal'],drawn:[T('Gotowa do rozegrania'),'teal'],pending:[T('Przed losowaniem'),'neutral'],underfilled:[T('Wymaga decyzji'),'warning'],list:[T('Lista startowa'),'neutral']});
+const CATEGORY_STATE=()=>({finished:[T('Zakończona'),'success'],progress:[T('W toku'),'teal'],drawn:[T('Gotowa do rozegrania'),'teal'],pending:[T('Przed losowaniem'),'neutral'],underfilled:[T('Mało zawodników'),'neutral'],list:[T('Lista startowa'),'neutral']});
 const categoryBadge=state=>{const states=CATEGORY_STATE(),[label,type]=states[state]||states.pending;return h`<span class="badge ${type}">${label}</span>`;};
 const clubText=(club,sex)=>!club?'':club.unaffiliated?(female(sex)?T('Niezrzeszona'):T('Niezrzeszony')):club.verified===false?T('{club} (klub czeka na weryfikację)',{club:club.name||T('Klub')}):String(club.name||'');
 const communityMarks=t=>t?.community?h`<span class="badge neutral">${T('Turniej społeczności')}</span>${t.trusted===false?h`<span class="badge warning">${T('Organizator niepotwierdzony')}</span>`:''}`:'';
@@ -93,7 +93,7 @@ function switcher(view,current){
 }
 function categoryItem(c,sex,open){
  const pos=positionStatus(c),line=positionText(pos,sex),bracket=c.bracket?ui()?.bracket?.(c,{highlight:Number.isInteger(c.position?.slot)?c.position.slot:null})??'':'';
- return h`<li class="ath-cat"><div class="ath-cat-head"><span class="category-code">${c.code}</span><span class="ath-cat-name"><strong>${ruleText(c.title)}</strong> <span>${ruleText(c.subtitle)}</span></span>${categoryBadge(c.state)}</div>${line?h`<p class="ath-pos ath-pos-${pos.code}">${icon(pos.code==='champion'||pos.code==='won'?'trophy':'bracket')}<span>${line}</span></p>`:''}${String(bracket)?h`<details class="ath-bracket"${open?h` open`:''}><summary>${T('Drabinka {code}',{code:c.code})}</summary>${bracket}</details>`:''}</li>`;
+ return h`<li class="ath-cat"><div class="ath-cat-head"><span class="category-code">${c.code}</span><span class="ath-cat-name"><strong>${ruleText(c.title)}</strong> <span>${ruleText(c.subtitle)}</span></span>${categoryBadge(c.state)}</div>${c.state==='underfilled'?h`<p class="ath-cat-note">${T('Na razie mało zawodników — o tej kategorii zdecyduje organizator przed losowaniem. Nic nie musisz robić.')}</p>`:''}${line?h`<p class="ath-pos ath-pos-${pos.code}">${icon(pos.code==='champion'||pos.code==='won'?'trophy':'bracket')}<span>${line}</span></p>`:''}${String(bracket)?h`<details class="ath-bracket"${open?h` open`:''}><summary>${T('Drabinka {code}',{code:c.code})}</summary>${bracket}</details>`:''}</li>`;
 }
 function entryCard(item,profile,today){
  const t=item.tournament||{},e=item.entry||{},s=entryStatus(item),sex=profile?.sex,title='ath-entry-'+t.id;
@@ -106,7 +106,7 @@ function entryCard(item,profile,today){
  const closedHint=coming&&t.status==='closed'&&!item.canWithdraw?h`<p class="ath-note">${T('Zapisy są zamknięte. Jeśli nie przyjedziesz, organizator oznaczy nieobecność przy kontroli startowej.')}</p>`:'';
  // Events the engine could not place (the organizer decides the category); only while categories are shown (recent tournaments).
  const cats=item.categories||[],placed=new Set(cats.map(c=>c.event)),loose=(cats.length||coming)&&e.presence!=='absent'?(e.events||[]).filter(ev=>!placed.has(ev)):[];
- return h`<article class="panel ath-card" aria-labelledby="${title}"><header class="ath-card-head"><div><h3 id="${title}">${t.name}</h3><p class="ath-when">${icon('calendar')}<span>${fmtDate(t.date)}</span>${t.city?h`<span aria-hidden="true">·</span>${icon('pin')}<span>${t.city}</span>`:''}</p></div><div class="ath-marks">${communityMarks(t)}</div></header><p class="ath-status ath-tone-${STATE_TONE[s.code]}">${icon(STATE_ICON[s.code])}<strong>${statusText(s,sex)}</strong></p>${closedHint}<dl class="ath-facts">${facts.map(([k,v])=>h`<div><dt>${k}</dt><dd>${v}</dd></div>`)}</dl>${cats.length||loose.length?h`<ul class="ath-cats" aria-label="${T('Kategorie')}">${cats.map((c,i)=>categoryItem(c,sex,i===0&&t.status!=='finished'))}${loose.map(ev=>h`<li class="ath-cat ath-cat-loose"><div class="ath-cat-head"><span class="ath-cat-name"><strong>${eventName(ev)}</strong> <span>${T('Kategorię ustali organizator')}</span></span></div></li>`)}</ul>`:''}<div class="ath-actions">${actions}</div></article>`;
+ return h`<article class="panel ath-card" aria-labelledby="${title}"><header class="ath-card-head"><div><h3 id="${title}" tabindex="-1">${t.name}</h3><p class="ath-when">${icon('calendar')}<span>${fmtDate(t.date)}</span>${t.city?h`<span aria-hidden="true">·</span>${icon('pin')}<span>${t.city}</span>`:''}</p></div><div class="ath-marks">${communityMarks(t)}</div></header><p class="ath-status ath-tone-${STATE_TONE[s.code]}">${icon(STATE_ICON[s.code])}<strong>${statusText(s,sex)}</strong></p>${closedHint}<dl class="ath-facts">${facts.map(([k,v])=>h`<div><dt>${k}</dt><dd>${v}</dd></div>`)}</dl>${cats.length||loose.length?h`<ul class="ath-cats" aria-label="${T('Kategorie')}">${cats.map((c,i)=>categoryItem(c,sex,i===0&&t.status!=='finished'))}${loose.map(ev=>h`<li class="ath-cat ath-cat-loose"><div class="ath-cat-head"><span class="ath-cat-name"><strong>${eventName(ev)}</strong> <span>${T('Kategorię ustali organizator')}</span></span></div></li>`)}</ul>`:''}<div class="ath-actions">${actions}</div></article>`;
 }
 function openCard(t,profile,selfEntry){
  const row=(t.profiles||[]).find(p=>p.id===profile?.id)||null,title='ath-open-'+t.id;
@@ -125,8 +125,8 @@ export function startsHtml(view,{today=warsawToday(),selfEntry=true,canAdd=true}
  if(!p)return h`<section class="panel empty-state">${ui()?.emptyMascot?.()??''}<h3>${T('Nie masz jeszcze danych zawodnika.')}</h3>${canAdd?h`<p>${T('Dodaj je w zakładce „Role” swojego konta, aby zgłaszać się do turniejów.')}</p><a class="btn primary" href="#profile?tab=roles&amp;add=1">${T('Dodaj dane zawodnika')}</a>`:h`<p>${T('Role są dostępne po otwarciu rejestracji.')}</p>`}</section>`;
  const entries=sortEntries((view.entries||[]).filter(x=>x.profileId===p.id),today),gone=(view.withdrawn||[]).filter(w=>w.profileId===p.id),open=view.open||[];
  return h`${switcher(view,p)}${profileCard(p)}
-<section class="ath-section" aria-labelledby="ath-entries-title"><div class="ath-section-head"><h2 id="ath-entries-title">${T('Moje zgłoszenia')}</h2></div>${entries.length?h`<div class="ath-list">${entries.map(x=>entryCard(x,p,today))}</div>`:h`<div class="panel ath-empty"><p><strong>${T('Nie masz jeszcze zgłoszeń.')}</strong> ${open.length?T('Wybierz turniej z listy „Otwarte turnieje” i zgłoś się.'):T('Gdy organizator otworzy zapisy, turniej pojawi się poniżej.')}</p></div>`}</section>
-${gone.length?h`<section class="ath-section" aria-labelledby="ath-gone-title"><div class="ath-section-head"><h2 id="ath-gone-title">${T('Wycofane')}</h2></div><ul class="panel ath-gone">${gone.map(w=>h`<li><div><strong>${w.tournament.name}</strong><span>${fmtDate(w.tournament.date)}</span></div><p>${icon('alert')}<span>${withdrawnText(w.by)}${fmtAt(w.at)?' · '+fmtAt(w.at):''}</span></p></li>`)}</ul></section>`:''}
+<section class="ath-section" aria-labelledby="ath-entries-title"><div class="ath-section-head"><h2 id="ath-entries-title" tabindex="-1">${T('Moje zgłoszenia')}</h2></div>${entries.length?h`<div class="ath-list">${entries.map(x=>entryCard(x,p,today))}</div>`:h`<div class="panel ath-empty"><p><strong>${T('Nie masz jeszcze zgłoszeń.')}</strong> ${open.length?T('Wybierz turniej z listy „Otwarte turnieje” i zgłoś się.'):T('Gdy organizator otworzy zapisy, turniej pojawi się poniżej.')}</p></div>`}</section>
+${gone.length?h`<section class="ath-section" aria-labelledby="ath-gone-title"><div class="ath-section-head"><h2 id="ath-gone-title" tabindex="-1">${T('Wycofane')}</h2></div><ul class="panel ath-gone">${gone.map(w=>h`<li><div><strong>${w.tournament.name}</strong><span>${fmtDate(w.tournament.date)}</span></div><p>${icon('alert')}<span>${withdrawnText(w.by)}${fmtAt(w.at)?' · '+fmtAt(w.at):''}</span></p></li>`)}</ul></section>`:''}
 <section class="ath-section" aria-labelledby="ath-open-title"><div class="ath-section-head"><h2 id="ath-open-title">${T('Otwarte turnieje')}</h2><span>${T('Zgłoszenia przyjmowane przez MatBravo')}</span></div>${open.length?h`<div class="panel ath-open-list">${open.map(t=>openCard(t,p,selfEntry))}</div>`:h`<div class="panel ath-empty"><p>${T('Teraz żaden turniej nie przyjmuje zgłoszeń od zawodników.')}</p></div>`}</section>`;
 }
 const features=()=>getMe()?.features||{};
@@ -202,9 +202,16 @@ export function eventsHtml(options,checked){
  return h`<div class="ath-events">${options.map(o=>{
   const id='ath-ev-'+o.event;
   if(o.state==='allowed')return h`<label class="checkbox-label ath-event"><input type="checkbox" name="events" value="${o.event}"${checked.includes(o.event)?h` checked`:''}${o.category||o.note?h` aria-describedby="${id}"`:''}><span class="ath-event-text"><span>${eventName(o.event)}</span>${o.category?h`<small id="${id}">${ruleText(o.category.subtitle)}</small>`:o.note?h`<small id="${id}">${translateMessage(o.note)}</small>`:''}</span></label>`;
-  return h`<p class="ath-event ath-event-off" id="${id}"><span class="ath-event-text"><span>${eventName(o.event)}</span><small>${o.state==='drawn'?T('Niedostępne: losowanie tej kategorii już się odbyło. Zgłoszenie może dodać organizator.'):T('Niedostępne: {reason}',{reason:translateMessage(o.reason)})}</small></span></p>`;
+  return h`<p class="ath-event ath-event-off" id="${id}"><span class="ath-event-text"><span>${eventName(o.event)}</span><small>${o.state==='drawn'?T('Niedostępne: losowanie tej kategorii już się odbyło. Zgłoszenie może dodać organizator.'):offReason(o.reason)}</small></span></p>`;
  })}</div>`;
 }
+// The engine's age-group refusal already says the event is unavailable: it is shown alone, without the unavailable prefix in front of
+// it; the other engine reasons follow that prefix starting with a small letter. The key is written with an escape (Polish text lives
+// in T() only).
+const AGE_GROUP_REASON='Konkurencja niedost\u0119pna w tej grupie wieku';
+const lowerFirst=s=>{const v=String(s??'');return v?v.charAt(0).toLocaleLowerCase(locale())+v.slice(1):v;};
+/** The text of an event that cannot be chosen, for the engine's (Polish) reason. */
+export const offReason=reason=>reason===AGE_GROUP_REASON?T('Niedostępna w tej grupie wiekowej'):T('Niedostępne: {reason}',{reason:lowerFirst(translateMessage(reason))});
 /** Ids of the events shown as unavailable text (the fieldset's aria-describedby). */
 export const offIds=options=>options.filter(o=>o.state!=='allowed').map(o=>'ath-ev-'+o.event).join(' ');
 /** Category preview of the chosen events (the subtitle of the engine: age group, sex, weight or height band). */
@@ -223,9 +230,9 @@ export function entryHtml(d){
  const who=d.profiles.length>1&&!d.update?h`<fieldset class="ath-who-pick"><legend>${T('Wybierz zawodnika')}</legend>${d.profiles.map(x=>h`<label class="checkbox-label"><input type="radio" name="profileId" value="${x.id}"${x.id===p.id?h` checked`:''}>${x.name}</label>`)}</fieldset>`:h`<p class="ath-who"><span class="avatar" aria-hidden="true">${initialsOf(p.name)}</span><span><strong>${p.name}</strong>${age!=null?h`<small>${T('Wiek w dniu zawodów: {n}',{n:age})}</small>`:''}</span></p>`;
  const off=offIds(options);
  return h`<p class="entry-event-name ath-event-name">${icon('trophy')} ${t.name} · ${fmtDate(t.date)}${t.city?' · '+t.city:''}</p><form id="ath-entry-form" data-tournament="${t.id}" data-profile="${p.id}" data-update="${d.update?'yes':''}" novalidate>${who}
-<fieldset class="ath-fieldset" data-ath-events-box${off?h` aria-describedby="${off}"`:''}><legend>${T('Konkurencje w tym turnieju')}</legend><div data-ath-events>${eventsHtml(options,checked)}</div></fieldset>
+<fieldset class="ath-fieldset" data-ath-events-box${off?h` aria-describedby="${off}"`:''}><legend>${T('Konkurencje w tym turnieju')}</legend><p class="form-error ath-field-error" id="ath-events-error" data-ath-error="events" role="alert"></p><div data-ath-events>${eventsHtml(options,checked)}</div></fieldset>
 <div class="ath-preview" aria-live="polite"><span class="ath-preview-title">${T('Kategoria')}</span><div data-ath-preview>${previewHtml(options,checked,measuresValid(m))}</div></div>
-<div class="form-grid ath-measures">${measureFields(m)}<label class="checkbox-label span-two ath-save-profile"><input type="checkbox" name="saveToProfile" checked><span>${T('Zapisz też w profilu')}<small>${T('Waga, wzrost i stopień zmienią się w Twoim profilu zawodnika. Wcześniejsze zgłoszenia zostają bez zmian.')}</small></span></label></div>
+<p class="form-error ath-field-error" id="ath-measures-error" data-ath-error="measures" role="alert"></p><div class="form-grid ath-measures">${measureFields(m)}<label class="checkbox-label span-two ath-save-profile"><input type="checkbox" name="saveToProfile" checked><span>${T('Zapisz też w profilu')}<small>${T('Waga, wzrost i stopień zmienią się w Twoim profilu zawodnika. Wcześniejsze zgłoszenia zostają bez zmian.')}</small></span></label></div>
 <div class="notice info-notice privacy-note ath-privacy">${icon('lock')}<span>${noticeTexts(t).map((s,i)=>h`${i?' ':''}${s}`)}</span></div>
 <div class="consent-slot" data-consent-slot hidden></div>
 <div class="form-error" role="alert"></div></form>`;
@@ -240,10 +247,47 @@ export async function openEntry(id,profileId,update){
  dialog={tournament,profile,profiles,item,update:!!update};
  ui().modal(update?T('Zmień zgłoszenie'):T('Zgłoszenie do turnieju'),entryHtml(dialog),h`<button type="button" class="btn secondary" data-action="close-modal">${T('Anuluj')}</button><button type="submit" class="btn primary" form="ath-entry-form">${update?T('Zapisz zmiany'):T('Zgłoś się')}</button>`,true);
 }
+const ERROR_FIELDS=['events','weight','height','gradeType','grade','profileId'];
+/** Removes the errors of the window (the field errors, their aria-invalid and aria-describedby, and the box at the bottom). */
+export function clearEntryErrors(form){
+ for(const el of form.querySelectorAll('.form-error'))el.textContent='';
+ for(const el of form.querySelectorAll('[aria-invalid]'))el.removeAttribute('aria-invalid');
+ for(const el of form.querySelectorAll('[aria-describedby="ath-measures-error"]'))el.removeAttribute('aria-describedby');
+ const set=form.querySelector('[data-ath-events-box]');if(set){const ids=(set.getAttribute('aria-describedby')||'').split(' ').filter(x=>x&&x!=='ath-events-error');if(ids.length)set.setAttribute('aria-describedby',ids.join(' '));else set.removeAttribute('aria-describedby');}
+}
+/** Shows a check of the window next to its fields (events or measures) and moves the focus there, so a phone shows it at once:
+ * the first enabled event (or the first wrong measure), then the message is scrolled into view. */
+export function showEntryError(form,kind,text,{measures=null}={}){
+ const box=form.querySelector(`[data-ath-error="${kind}"]`)||form.querySelector('.form-error:not([data-ath-error])');if(!box)return null;
+ box.textContent=text;
+ let focus=null;
+ if(kind==='events'){
+  const set=form.querySelector('[data-ath-events-box]');
+  if(set){const ids=(set.getAttribute('aria-describedby')||'').split(' ').filter(Boolean);if(!ids.includes(box.id))set.setAttribute('aria-describedby',[box.id,...ids].join(' '));}
+  focus=form.querySelector('[data-ath-events] input[name="events"]:not(:disabled)');
+ }else{
+  const bad=measureProblems(measures||formMeasures(form));
+  for(const name of bad){const input=form.elements[name];if(input){input.setAttribute('aria-invalid','true');input.setAttribute('aria-describedby',box.id);}}
+  focus=form.elements[bad[0]]||null;
+ }
+ try{focus?.focus?.({preventScroll:true});}catch{}
+ try{box.scrollIntoView?.({block:'nearest'});}catch{}
+ return focus;
+}
+/** The measure fields that are wrong (as measuresValid: weight 10–250, height 70–250, cup or dan, grade 1–10 cup / 1–9 dan). */
+export function measureProblems(m){
+ const n=v=>v===''||v==null?NaN:Number(v),out=[];
+ const w=n(m?.weight),hh=n(m?.height),g=n(m?.grade);
+ if(!(w>=10&&w<=250))out.push('weight');if(!(hh>=70&&hh<=250))out.push('height');
+ if(!['cup','dan'].includes(m?.gradeType))out.push('gradeType');if(!(Number.isInteger(g)&&g>=1&&g<=(m?.gradeType==='dan'?9:10)))out.push('grade');
+ return out.length?out:['weight'];
+}
 /** input/change inside the window: measures and the profile re-check the events (keeping the ticks), events refresh the preview. */
 export function entryChanged(form,target){
  if(!dialog||!form.isConnected)return;
  const name=target?.name;
+ // A change of what a check complained about takes the old message away (it would contradict the ticked event).
+ if(ERROR_FIELDS.includes(name))clearEntryErrors(form);
  if(name==='profileId'){const p=dialog.profiles.find(x=>x.id===target.value);if(p){dialog.profile=p;form.dataset.profile=p.id;}}
  const m=formMeasures(form),options=eventOptions(dialog.profile,m,dialog.tournament),checked=new FormData(form).getAll('events');
  if(['weight','height','gradeType','grade','profileId'].includes(name)){
@@ -252,24 +296,33 @@ export function entryChanged(form,target){
  }
  const preview=form.querySelector('[data-ath-preview]');if(preview)setHtml(preview,previewHtml(options,new FormData(form).getAll('events'),measuresValid(m)));
 }
-async function after(){
+/** After a change: the fresh view and call to action are drawn, then the keyboard focus goes to target() when the drawing removed
+ * the element that had it (the opener of the closed window), so it never falls back to <body>. */
+async function after(target=null){
  try{const view=await loadView({force:true});paintStarts(view,{force:true});const mount=document.querySelector('[data-athlete-cta]');if(mount)await mountCta(mount);}
  catch(error){if(error?.status===401)ui()?.handleError?.(error);}
+ const active=document.activeElement;
+ if(target&&(!active||active===document.body||!active.isConnected)&&!document.querySelector('#modal-root .modal'))target()?.focus?.();
 }
+/** Focus after an entry was sent or changed: its card in "Moje starty", else the call to action of the preview. */
+export const enteredTarget=id=>()=>document.getElementById('ath-entry-'+id)||document.querySelector('[data-athlete-cta] [data-action="athlete-edit"],[data-athlete-cta] a[href="#starts"],[data-athlete-cta] .ath-cta-copy strong');
+/** Focus after a withdrawal: the heading of the withdrawn list, else the heading of the own entries, else the preview's call to action. */
+export const withdrawnTarget=()=>document.getElementById('ath-gone-title')||document.getElementById('ath-entries-title')||document.querySelector('[data-athlete-cta] [data-action="athlete-enter"],[data-athlete-cta] .ath-cta-copy strong');
 /** Sends the window (athlete-entry). 401 and 402 go to ui.handleError (sign-in, payment prompt); other errors stay in the window. */
 export async function submitEntry(form,submit){
  if(busy||!dialog)return;
- const box=form.querySelector('.form-error'),f=new FormData(form),d=dialog,m=formMeasures(form),options=eventOptions(d.profile,m,d.tournament),events=chosenEvents(options,f.getAll('events'));
- if(box)box.textContent='';
- if(!measuresValid(m)){if(box)box.textContent=T('Sprawdź wagę (10–250 kg), wzrost (70–250 cm) i stopień.');return;}
- if(!events.length){if(box)box.textContent=T('Wybierz co najmniej jedną konkurencję.');return;}
+ const box=form.querySelector('.form-error:not([data-ath-error])'),f=new FormData(form),d=dialog,m=formMeasures(form),options=eventOptions(d.profile,m,d.tournament),events=chosenEvents(options,f.getAll('events'));
+ clearEntryErrors(form);
+ // Client checks are shown next to their fields with the focus there (the bottom box is below the fold on a phone).
+ if(!measuresValid(m)){showEntryError(form,'measures',T('Sprawdź wagę (10–250 kg), wzrost (70–250 cm) i stopień.'),{measures:m});return;}
+ if(!events.length){showEntryError(form,'events',T('Wybierz co najmniej jedną konkurencję.'));return;}
  busy=true;if(submit)submit.disabled=true;
  try{
   await Client.athleteRequest('athlete-entry',entryBody({tournamentId:d.tournament.id,profileId:d.profile.id,events,...m,saveToProfile:f.has('saveToProfile'),update:d.update}));
-  dialog=null;ui()?.closeModal?.();ui()?.toast?.(d.update?T('Zgłoszenie zmienione.'):T('Zgłoszenie wysłane.'));await after();
+  dialog=null;ui()?.closeModal?.();ui()?.toast?.(d.update?T('Zgłoszenie zmienione.'):T('Zgłoszenie wysłane.'));await after(enteredTarget(d.tournament.id));
  }catch(error){
   if(error?.status===401||error?.status===402){dialog=null;await ui()?.handleError?.(error,form);return;}
-  if(box)box.textContent=translateMessage(error?.message||'');
+  if(box){box.textContent=translateMessage(error?.message||'');try{box.scrollIntoView?.({block:'nearest'});}catch{}}
   if([403,404,409].includes(error?.status))loadView({force:true}).then(view=>paintStarts(view)).catch(()=>{});
  }finally{busy=false;if(submit?.isConnected)submit.disabled=false;}
 }
@@ -289,8 +342,8 @@ export async function action(name,el,id){
  }
  if(name==='athlete-withdraw-confirm'){
   if(busy)return;busy=true;el.disabled=true;
-  try{await Client.athleteRequest('athlete-withdraw',{tournamentId:id,profileId});ui()?.closeModal?.();ui()?.toast?.(T('Zgłoszenie wycofane.'));await after();}
-  catch(error){if(error?.status===401){ui()?.handleError?.(error);return;}ui()?.closeModal?.();ui()?.toast?.(translateMessage(error?.message||''));after();}
+  try{await Client.athleteRequest('athlete-withdraw',{tournamentId:id,profileId});ui()?.closeModal?.();ui()?.toast?.(T('Zgłoszenie wycofane.'));await after(withdrawnTarget);}
+  catch(error){if(error?.status===401){ui()?.handleError?.(error);return;}ui()?.closeModal?.();ui()?.toast?.(translateMessage(error?.message||''));after(()=>document.getElementById('ath-entry-'+id)||withdrawnTarget());}
   finally{busy=false;if(el.isConnected)el.disabled=false;}
   return;
  }
