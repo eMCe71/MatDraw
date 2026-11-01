@@ -14,10 +14,13 @@ use PDO;
  *    database collation (ß/ss) are caught by the unique key (1062 → 409 in Repository::persist, PS-11/DR-1).
  *  - pick(clubs, u, choice, now, counts): {none:true} or a name whose key means "no club" → 'unaffiliated'; {id} → that
  *    club (a merged one gives its target; unverified allowed); {name} → the club with the same key (also unverified,
- *    merged → target) or a new unverified club (verified when the Administrator creates it). When a member's daily quota
+ *    merged → target) or a new club, verified when staff create it (Administrator, editor: as in the release a67ad42, the
+ *    name shows in public brackets; final review B18) and unverified when a member does. When a member's daily quota
  *    (CLUBS_DAY_PER_USER, CLUBS_DAY_GLOBAL in Domain) is used up the choice becomes 'unaffiliated' with pendingClubName and
  *    notice 'club-pending' instead of an error (PS-9). Returns {clubId, newClub?, pendingClubName?, notice?}.
  *  - counts(clubs, u, now): the numbers pick() compares with the quotas (unverified clubs created in the last 24 h).
+ *  - roots(clubs): id => the id resolve() gives (the end of the merges), the id itself when it resolves to nothing; one pass
+ *    for many lookups (Domain: club accounts and draws read snapshots through merges, final review B7/B9).
  *  - ensure(pdo): the 'unaffiliated' row ("Niezrzeszony", verified). Repository::transaction calls it under the workspace
  *    lock and the sign-up calls it before choosing; migration 0007 does not insert it, so migrations change no rows.
  */
@@ -38,6 +41,11 @@ final class Clubs {
   for($hop=0;$hop<8&&isset($byId[$id]);$hop++){$c=$byId[$id];if(($c['mergedInto']??null)===null)return $c;$id=$c['mergedInto'];}
   return null;
  }
+ public static function roots(array $clubs):array {
+  $by=[];foreach($clubs as $c)$by[$c['id']]=$c['mergedInto']??null;$out=[];
+  foreach($by as $id=>$_){$cur=$id;$root=null;for($hop=0;$hop<8&&array_key_exists($cur,$by);$hop++){if($by[$cur]===null){$root=$cur;break;}$cur=$by[$cur];}$out[$id]=$root??$id;}
+  return $out;
+ }
  public static function counts(array $clubs,array $u,int $now):array {
   $user=0;$global=0;
   foreach($clubs as $c){if(($c['verified']??true)!==false||!is_numeric($c['createdAt']??null)||(int)$c['createdAt']<=$now-86400)continue;$global++;if(($c['createdBy']??null)===($u['id']??null))$user++;}
@@ -54,7 +62,7 @@ final class Clubs {
   if($member&&Domain::contact($name))throw new AppError('Nazwa nie może zawierać adresu strony, e-maila ani długiego numeru.');
   foreach($clubs as $c)if(self::key($c['name'])===$key&&($t=self::resolve($clubs,$c['id'])))return ['clubId'=>$t['id']];
   if($member&&(($counts['user']??0)>=Domain::CLUBS_DAY_PER_USER||($counts['global']??0)>=Domain::CLUBS_DAY_GLOBAL))return ['clubId'=>self::UNAFFILIATED,'pendingClubName'=>$name,'notice'=>'club-pending'];
-  $club=['id'=>Domain::id(),'name'=>$name,'verified'=>($u['role']??null)==='admin','createdBy'=>$u['id']??null,'createdAt'=>$now,'mergedInto'=>null];
+  $club=['id'=>Domain::id(),'name'=>$name,'verified'=>in_array($u['role']??null,Domain::STAFF,true),'createdBy'=>$u['id']??null,'createdAt'=>$now,'mergedInto'=>null];
   return ['clubId'=>$club['id'],'newClub'=>$club];
  }
  public static function ensure(PDO $pdo):void {

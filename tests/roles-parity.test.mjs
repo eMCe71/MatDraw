@@ -6,8 +6,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
-import {initialWorkspace,execute,publicWorkspace,stale,contact,pickClub,athleteFields,UNAFFILIATED} from '../dist/workspace.js';
-import {classify,makeDraw,sameClub} from '../dist/engine.js';
+import {initialWorkspace,execute,publicWorkspace,stale,contact,pickClub,athleteFields,drawAthletes,ageAt,UNAFFILIATED} from '../dist/workspace.js';
+import {classify,categories,makeDraw,sameClub,signature,firstPairs,clubConflicts,fingerprintCounts} from '../dist/engine.js';
 import {clubKey} from '../dist/profile-data.js';
 import {warsawToday} from '../dist/guest-view.js';
 const php=process.env.PHP_BIN;const skip=!php;
@@ -329,7 +329,8 @@ test('Clubs::key equals clubKey; Clubs::pick equals pickClub (Cyrillic, Kraków/
  const js=cases.map(c=>{try{const r=pickClub(c.clubs,c.u,c.choice,c.now,c.counts);if(r.newClub){r.newClub={...r.newClub,id:'NEW'};r.clubId='NEW';}return {status:200,result:r};}catch(e){return {status:e.status,error:e.message};}});
  assert.deepEqual(bridge({job:'pick',cases}),js);
  assert.deepEqual(js.slice(0,9).map(r=>r.result?.clubId??r.status),['c1','c1',404,UNAFFILIATED,'c1','c1','c2',UNAFFILIATED,UNAFFILIATED]);
- assert.deepEqual([js[9].result.newClub.verified,js[10].result.newClub.verified,js[11].result.newClub.verified],[false,true,false]);
+ // A club created by staff is verified (the Administrator, and an editor as in the release a67ad42: final review B18), by a member not.
+ assert.deepEqual([js[9].result.newClub.verified,js[10].result.newClub.verified,js[11].result.newClub.verified],[false,true,true]);
  assert.deepEqual([js[17].result,js[18].result.notice,js[19].result.clubId,js[20].result.clubId],[{clubId:UNAFFILIATED,pendingClubName:'Nowy Klub',notice:'club-pending'},'club-pending','NEW','c1']);
  assert.deepEqual([js[12].status,js[13].status,js[14].status,js[15].status,js[16].status],[422,422,422,200,422]);
 });
@@ -349,6 +350,88 @@ test('Rules::sameClub equals sameClub; unaffiliated athletes are never separated
  const athletes=Array.from({length:8},(_,i)=>({id:'u'+i,club:i<6?'Niezrzeszony':'Klub A',clubId:i<6?UNAFFILIATED:'cA',champion:false}));
  assert.deepEqual(bridge({job:'drawCost',athletes,runs:20}),Array(20).fill(0),'two athletes of Klub A always meet another club or an unaffiliated athlete; unaffiliated pairs cost nothing');
 });
+// Final review B9: the draw separates clubs by what the snapshot's clubId means now (merges, renames), not by the snapshot name.
+test('Rules::sameClub with clubKey equals sameClub; draws separate athletes of a merged or renamed club in PHP and JS (B9)',{skip},()=>{
+ const pairs=[[{club:'A',clubId:'c1',clubKey:'c9'},{club:'B',clubId:'c2',clubKey:'c9'}],[{club:'A',clubId:'c1',clubKey:'c1'},{club:'A',clubId:'c2',clubKey:'c2'}],[{club:'A',clubKey:'c1'},{club:'A'}],
+  [{club:'X',clubId:'c5',clubKey:UNAFFILIATED},{club:'Y',clubId:'c6',clubKey:UNAFFILIATED}],[{club:'A',clubId:UNAFFILIATED,clubKey:'c1'},{club:'A',clubId:'c1',clubKey:'c1'}]];
+ const want=[true,false,true,false,false];assert.deepEqual(pairs.map(([a,b])=>sameClub(a,b)),want);assert.deepEqual(bridge({job:'sameClub',pairs}),want);
+ const clubs=[{id:'c-new',name:'UKS Tygrys Kraków',verified:true,mergedInto:null},{id:'c-old',name:'UKS Tygrys',verified:false,mergedInto:'c-new'},{id:'c-ren',name:'Nowa Nazwa',verified:true,mergedInto:null},
+  {id:'c-a',name:'Klub A',verified:true,mergedInto:null},{id:UNAFFILIATED,name:'Niezrzeszony',verified:true,mergedInto:null}];
+ const A=(id,club,clubId)=>({id,profileId:id,club,clubId,champion:false});
+ // Three of UKS Tygrys (one entered under the old name of a club merged since), two of a renamed club (old and new name), one more.
+ const athletes=[A('k1','UKS Tygrys Kraków','c-new'),A('k2','UKS Tygrys Kraków','c-new'),A('s1','UKS Tygrys','c-old'),A('r1','Stara Nazwa','c-ren'),A('r2','Nowa Nazwa','c-ren'),A('x1','Klub A','c-a')];
+ const db={clubs},team={k1:'T',k2:'T',s1:'T',r1:'R',r2:'R',x1:'A'};
+ const keyed=bridge({job:'drawAthletes',db,athletes});assert.deepEqual(keyed,drawAthletes(clubs,athletes));
+ assert.deepEqual(keyed.map(a=>a.clubKey),['c-new','c-new','c-new','c-ren','c-ren','c-a']);
+ assert.deepEqual(drawAthletes(clubs,[A('z','Klub Bez Id',undefined),A('u','Niezrzeszony',UNAFFILIATED),A('m','Klub Znikły','c-gone')]).map(a=>a.clubKey),['name:klubbezid',UNAFFILIATED,'name:klubznikly'],'no club found: the name key; unaffiliated stays');
+ const conflicts=slots=>firstPairs(slots).filter(([a,b])=>team[a]===team[b]).length;
+ assert.deepEqual(bridge({job:'drawSlots',db,athletes,runs:40}).map(conflicts),Array(40).fill(0),'PHP: no first-round pair of one club');
+ assert.deepEqual(Array.from({length:40},(_,i)=>conflicts(makeDraw(drawAthletes(clubs,athletes),i+1).slots)),Array(40).fill(0),'JS: the same');
+ // The organizer's conflict count and the club count see the merged club as one club when the athletes carry clubKey.
+ const d=makeDraw(drawAthletes(clubs,athletes),3);assert.equal(clubConflicts(d,drawAthletes(clubs,athletes)),0);
+ const stats=a=>fingerprintCounts(a.map(x=>({...x,age:20,sex:'M',gradeType:'cup',grade:5,weight:70,height:175,events:['forms'],presence:'pending'})));
+ assert.deepEqual([stats(athletes).clubs,stats(drawAthletes(clubs,athletes)).clubs],[5,3]);
+ // draw.create in a tournament through Domain and the mirror: the separation holds and the saved signature is the one of the snapshots.
+ const w=rich();w.clubs.push(...clubs.filter(c=>c.id!==UNAFFILIATED));
+ const t={id:'t-merge',name:'Turniej Scalony',city:'Opole',date:day(25),mat:'Mata 1',status:'open',createdBy:'demo-admin',createdAt:NOW-1000,selfEntry:false,draws:{},activity:[],
+  entries:athletes.map(a=>({...a,name:'Zawodnik '+a.id,sex:'M',age:25,weight:70,height:175,gradeType:'cup',grade:5,events:['forms'],presence:'pending',actualWeight:null}))};
+ w.tournaments.push(t);const key=categories(t.entries).items[0].id,list=Array(12).fill({actor:'demo-admin',type:'draw.create',payload:{tournamentId:'t-merge',categoryId:key}});
+ const js=runJs(w,list),ph=bridge({job:'execute',db:w,commands:list});
+ assert.deepEqual([STATUS(js.results),STATUS(ph.results)],[list.map(()=>200),list.map(()=>200)]);
+ for(const r of [js,ph]){const dr=r.db.tournaments.find(x=>x.id==='t-merge').draws[key];assert.equal(dr.signature,signature(t.entries));assert.equal(conflicts(dr.slots),0);}
+});
+// Final review B8: tournaments and profiles untouched since migration 0007 carry rev 0; a revision from before the migration
+// (below app_meta.rev_floor) is stale, as under the old global rule; after the migration the scoped rule applies.
+test('Domain::stale and stale: a revision below revFloor is stale whatever the stamps (B8)',{skip},()=>{
+ const db=rich();db.revision=20;db.staffRev=20;db.revFloor=15;
+ const cases=[];
+ for(const expected of [14,15,19,10,3])for(const [type,p,actor] of [['checkin.save',{tournamentId:'t-autumn-2026'}],['tournament.save',{id:'t-autumn-2026'}],['entry.save',{tournamentId:'t-staff-self',profileId:'p-ed'}],['profile.save',{id:'p-ed'}],['profile.archive',{id:'p-ed'}],['tournament.save',{},'demo-editor']])
+  cases.push({type,p,expected,actor:actor??null});
+ const out=bridge({job:'stale',db,cases});cases.forEach((c,i)=>assert.equal(out[i],stale(db,c.type,c.p,c.expected,c.actor),JSON.stringify(c)));
+ assert.deepEqual(cases.filter(c=>c.expected<15).map(c=>stale(db,c.type,c.p,c.expected,c.actor)),cases.filter(c=>c.expected<15).map(()=>true),'before the migration: stale');
+ assert.equal(stale(db,'checkin.save',{tournamentId:'t-autumn-2026'},15),false,'from the migration on: the scoped rule (rev 0, nothing changed)');
+ assert.equal(stale({...db,revFloor:undefined},'checkin.save',{tournamentId:'t-autumn-2026'},14),false,'without a floor (demo, tests): as before');
+});
+// Final review B1: the rule of saved draws (DR-5) for everyone who changes entries without managing the tournament.
+test('saved draws stay when an organizer, or staff in a community tournament, enters or withdraws without managing it (B1)',{skip},()=>{
+ const E={events:['forms'],weight:70,height:175,gradeType:'cup',grade:5},A={sex:'M',birthDate:'1995-04-04',weight:70,height:175,gradeType:'cup',grade:5,events:['forms']},KEY='forms|senior|M|cup|6–3 Cup';
+ const list=[
+  {actor:'u-org1',type:'entry.remove',payload:{tournamentId:'t-staff-self',id:'p-o1a'}},                                // 0 his athlete in the saved draw of a staff tournament
+  {actor:'u-org1',type:'profile.save',payload:{...A,name:'Obcy Organizatora',club:{none:true}}},                       // 1
+  {actor:'u-org1',type:'entry.save',payload:{...E,tournamentId:'t-staff-self',profileId:'@1'}},                         // 2 into the drawn category
+  {actor:'u-org1',type:'entry.save',payload:{...E,tournamentId:'t-staff-self',profileId:'p-o1a',update:true,weight:72}},// 3 an entry of the draw changed
+  {actor:'u-org1',type:'entry.save',payload:{...E,tournamentId:'t-staff-self',profileId:'@1',events:['special']}},     // 4 another category: allowed
+  {actor:'u-org2',type:'draw.create',payload:{tournamentId:'t-org2',categoryId:KEY}},                                  // 5 the community organizer draws
+  {actor:'demo-club',type:'entry.save',payload:{...E,tournamentId:'t-org2',profileId:'p-club1'}},                       // 6 staff in a community tournament
+  {actor:'demo-editor',type:'entry.remove',payload:{tournamentId:'t-org2',id:'p-ed'}},                                  // 7 the same, withdrawal
+  {actor:'u-org2',type:'entry.remove',payload:{tournamentId:'t-org2',id:'p-ed'}},                                       // 8 the manager: as before, the draw goes
+  {actor:'demo-club',type:'entry.save',payload:{...E,tournamentId:'t-staff-self',profileId:'p-club1'}},                 // 9 staff in a staff tournament: as in a67ad42
+ ];
+ const js=runJs(rich(),list),ph=bridge({job:'execute',db:rich(),commands:list});compare(js,ph,list);
+ assert.deepEqual(STATUS(js.results),[409,200,409,409,200,200,409,409,200,200]);
+ const YOURS='Losowanie Twojej kategorii już się odbyło. Wycofanie może zrobić organizator.',THIS='Losowanie tej kategorii już się odbyło. Zgłoszenie może dodać organizator.';
+ assert.deepEqual([0,2,3,6,7].map(i=>js.results[i].error),[YOURS,THIS,YOURS,THIS,YOURS]);
+ const kept=runJs(rich(),list.slice(0,8)),keptPh=bridge({job:'execute',db:rich(),commands:list.slice(0,8)});compare(kept,keptPh,list.slice(0,8));
+ for(const r of [kept,keptPh])assert.deepEqual(['t-staff-self','t-org2'].map(id=>Object.keys(r.db.tournaments.find(t=>t.id===id).draws)),[[KEY],[KEY]],'both saved draws are still there');
+ for(const r of [js,ph])assert.deepEqual(['t-staff-self','t-org2'].map(id=>Object.keys(r.db.tournaments.find(t=>t.id===id).draws).length),[0,0],'the manager (8) and staff in a staff tournament (9) still redraw by changing');
+});
+// Final review B7: club.merge keeps snapshots (PS-10); the club account moved to the target still sees and withdraws its entries.
+test('after club.merge the club account still sees its old club entries, also in closed tournaments, and withdraws them (B7)',{skip},()=>{
+ const db=rich(),gp=db.tournaments.find(t=>t.id==='t-gp-gdansk-2026'),a=db.profiles.find(p=>p.id==='p-club2');
+ gp.entries.push({id:a.id,profileId:a.id,clubId:'club-2',name:a.name,club:'KS Tiger Kraków',sex:a.sex,age:ageAt(a.birthDate,gp.date),weight:a.weight,height:a.height,gradeType:a.gradeType,grade:a.grade,events:['forms'],champion:false,presence:'pending',actualWeight:null});
+ const merge=[{actor:'demo-admin',type:'club.merge',payload:{id:'club-2',into:'club-3'}}],after=runJs(db,merge);assert.equal(after.results[0].status,200);
+ assert.equal(after.db.users.find(u=>u.id==='u-club2').clubId,'club-3');
+ const [view]=bridge({job:'public',db:after.db,actors:['u-club2']}),js=JSON.parse(JSON.stringify(publicWorkspace(after.db,after.db.users.find(u=>u.id==='u-club2'))));
+ assert.deepEqual(view,js);
+ const ids=t=>js.tournaments.find(x=>x.id===t)?.entries.map(e=>e.profileId)??null;
+ assert.deepEqual([ids('t-gp-gdansk-2026'),ids('t-staff-self')?.includes('p-club2'),ids('t-org2')?.includes('p-club2')],[['p-club2'],true,true],'the closed tournament is listed with the entry; open ones keep it');
+ const list=[...merge,{actor:'u-club2',type:'entry.remove',payload:{tournamentId:'t-org2',id:'p-club2'}}];
+ const r=runJs(db,list),p=bridge({job:'execute',db,commands:list});compare(r,p,list);
+ assert.deepEqual(STATUS(r.results),[200,200],'the withdrawal of a former club-2 entry');
+ assert.ok(!r.db.tournaments.find(t=>t.id==='t-org2').entries.some(e=>e.profileId==='p-club2'));
+ assert.equal(r.db.tournaments.find(t=>t.id==='t-staff-self').entries.find(e=>e.profileId==='p-club2').clubId,'club-2','snapshots keep their club (PS-10)');
+});
+
 test('Settings::effective over config.php alone (no app_settings row): derived keys, idempotent, flags',{skip},()=>{
  const base={signup_enabled:false,billing_enabled:false,billing_enforce:false,support_email:''};
  const cases=[base,{...base,signup_enabled:true},{...base,signup_enabled:true,billing_enabled:true,billing_enforce:true},{...base,signup_enabled:true,billing_enforce:true},{...base,signup_enabled:true,signup_force_off:true,support_email:'pomoc@x.test'},{...base,organizers:'paused',organizers_trust_required:false}];
@@ -384,6 +467,10 @@ test('Domain::forgetMember (PHP only): owned profiles forgotten, upcoming tourna
  assert.deepEqual(counts.map(c=>c.tournaments),[1,0,0]);assert.ok(out.revision>db.revision);
  const again=bridge({job:'forgetMember',db:out,users:['u-org1','u-ath','u-par']});assert.deepEqual(again.db,out,'idempotent: nothing changes, not even the revision');
  assert.deepEqual(again.out.map(c=>c.tournaments),[0,0,0]);
+ // Final review B19: a tournament of the organizer that ended today stays public with everybody's results.
+ const done=rich();done.tournaments.push({...structuredClone(done.tournaments.find(t=>t.id==='t-org1')),id:'t-org1-done',status:'finished',date:day(0),selfEntry:false});
+ const {db:kept,out:n}=bridge({job:'forgetMember',db:done,users:['u-org1']}),k=kept.tournaments.find(t=>t.id==='t-org1-done');
+ assert.deepEqual([k.status,k.hiddenBy??null,n[0].tournaments],['finished',null,1],'only t-org1 is hidden');assert.ok(k.entries.some(e=>e.profileId==='p-self'),'the results stay');
 });
 /** rich() after commands that write log lines naming athletes: self-entries, withdrawals by the owner, the Administrator and an
  * organizer, check-in, then a rename of p-self and a corrected self-entry (the old name stays only in older lines and snapshots). */

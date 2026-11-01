@@ -2,13 +2,16 @@
 // Roles of member accounts, athlete profiles, community tournaments and scoped revisions (PLAN-REJESTRACJA-ROLE §9.1, R13).
 // Additive only: new columns at the end of existing tables, NULL or with a DEFAULT (instant ADD COLUMN), one non-unique
 // index and one new table; no new foreign keys (rule of 0002; tombstones are cleaned by Repository::persist and the
-// retention job). Every step is idempotent (Migrator::addColumn/addIndex, IF NOT EXISTS, UPDATE … AND staff_rev=0).
+// retention job). Every step is idempotent (Migrator::addColumn/addIndex, IF NOT EXISTS, UPDATE … AND staff_rev=0 / rev_floor=0).
 //  users        organizer (the member's own switch), organizer_blocked_at (taken away by the Administrator),
 //               organizer_trusted_at/_by (confirmed by the Administrator, R16)
 //  profiles     owner_user_id (the account of an athlete; non-unique index, R7), rev (scoped revision stamp, §5.8)
 //  clubs        verified (existing clubs: 1), created_by, created_at, merged_into
 //  tournaments  created_at, hidden_by, hidden_from, hide_reason, self_entry (existing tournaments: 0, R11), rev
-//  app_meta     staff_rev = revision (staff accounts and existing clubs), so the first stale check matches the old one
+//  app_meta     staff_rev = revision (staff accounts and existing clubs), so the first stale check matches the old one;
+//               rev_floor = revision: every tournament and profile starts with rev 0, so a command based on a revision from
+//               before this migration (a tab or installed app open across the deploy) is stale (Domain::stale, the old
+//               global rule; final review B8), never a silent overwrite of a change it has not seen
 //  entry_withdrawals  tombstones of self-entries removed by an organizer, the Administrator or the system (UX-7)
 // The club 'unaffiliated' ("Niezrzeszony") is not inserted here: migrations change no rows of existing tables
 // (tests/isolation.http.test.mjs compares them), so Clubs::ensure() creates it in the first workspace transaction and
@@ -44,7 +47,9 @@ return ['id'=>7,'name'=>'roles','destructive'=>false,
   $m->addColumn('tournaments','self_entry','TINYINT(1) NOT NULL DEFAULT 0');
   $m->addColumn('tournaments','rev','BIGINT NOT NULL DEFAULT 0');
   $m->addColumn('app_meta','staff_rev','BIGINT NOT NULL DEFAULT 0');
+  $m->addColumn('app_meta','rev_floor','BIGINT NOT NULL DEFAULT 0');
   $m->exec('UPDATE app_meta SET staff_rev=revision WHERE id=1 AND staff_rev=0');
+  $m->exec('UPDATE app_meta SET rev_floor=revision WHERE id=1 AND rev_floor=0');
   $m->exec("CREATE TABLE IF NOT EXISTS entry_withdrawals (
  profile_id VARCHAR(40) NOT NULL,
  tournament_id VARCHAR(40) NOT NULL,

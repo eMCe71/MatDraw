@@ -42,8 +42,16 @@ final class Rules {
  public static function signature(array $a):string{$s=array_map(fn($x)=>$x['id'].':'.$x['club'].':'.(!empty($x['champion'])?'true':'false'),$a);sort($s,SORT_STRING);return implode(',',$s);}
  public static function slotOrder(int $size):array{$edge=[0,7,1,6,2,5,3,4];$order=match($size){8=>[0],16=>[0,1],32=>[0,3,1,2],64=>[0,7,3,4,1,6,2,5],default=>throw new AppError('Niepoprawny rozmiar drabinki.')};$r=[];foreach($edge as $p)foreach($order as $s)$r[]=$s*8+($s%2===0?$p:7-$p);return $r;}
  private static function pairs(array $slots,array &$pairs):array{if(count($slots)===1)return array_values(array_filter($slots));$n=intdiv(count($slots),2);$a=self::pairs(array_slice($slots,0,$n),$pairs);$b=self::pairs(array_slice($slots,$n),$pairs);if(count($a)===1&&count($b)===1)$pairs[]=[$a[0],$b[0]];return [...$a,...$b];}
- /** Same club for the draw (§6.3): equal club names, but 'unaffiliated' athletes are never separated (JS sameClub in engine.js). */
- public static function sameClub(array $a,array $b):bool{return ($a['club']??null)===($b['club']??null)&&($a['clubId']??null)!=='unaffiliated'&&($b['clubId']??null)!=='unaffiliated';}
+ /**
+  * Same club for the draw (§6.3, JS sameClub in engine.js): 'unaffiliated' athletes are never separated; athletes that both
+  * carry clubKey (Domain::drawAthletes: the club their snapshot means now, through merges and renames, final review B9)
+  * compare it, others their snapshot club names.
+  */
+ public static function sameClub(array $a,array $b):bool {
+  $ka=$a['clubKey']??null;$kb=$b['clubKey']??null;
+  if(in_array(Clubs::UNAFFILIATED,[$a['clubId']??null,$b['clubId']??null,$ka,$kb],true))return false;
+  return is_string($ka)&&is_string($kb)?$ka===$kb:($a['club']??null)===($b['club']??null);
+ }
  public static function makeDraw(array $a):array{
   $n=count($a);if($n<3||$n>64)throw new AppError('Drabinka wymaga od 3 do 64 zawodników.');$size=$n<=8?8:2**(int)ceil(log($n,2));$order=array_slice(self::slotOrder($size),0,$n);$map=array_column($a,null,'id');
   for($i=$n-1;$i>0;$i--){$j=random_int(0,$i);[$a[$i],$a[$j]]=[$a[$j],$a[$i]];}$slots=array_fill(0,$size,null);foreach($a as $i=>$p)$slots[$order[$i]]=$p['id'];

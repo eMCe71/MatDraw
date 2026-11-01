@@ -63,6 +63,12 @@ return [
   $full=$repo->snapshot();$full['users'][]=$actor;$part=$repo->organizerSnapshot($actor['id'],date('Y-m-d'));
   return ['snapshot'=>Domain::publicData($part,$actor),'full'=>Domain::publicData($full,$actor),'profiles'=>count($part['profiles']),'allProfiles'=>count($full['profiles']),'raw'=>['tournaments'=>$part['tournaments'],'profiles'=>$part['profiles']]];
  },
+ // app_meta.rev_floor (migration 0007: the global revision when it ran; Domain::stale, final review B8) set to {floor}, or
+ // to the current revision with {now:true}; returns {old, floor, revision}.
+ 'domain-rev-floor'=>function(PDO $pdo,array $p):array{
+  $m=$pdo->query('SELECT revision,rev_floor FROM app_meta WHERE id=1')->fetch();$floor=!empty($p['now'])?(int)$m['revision']:(int)($p['floor']??0);
+  $pdo->prepare('UPDATE app_meta SET rev_floor=? WHERE id=1')->execute([$floor]);return ['old'=>(int)$m['rev_floor'],'floor'=>$floor,'revision'=>(int)$m['revision']];
+ },
  // One row of a kind that the floor of 0007 looks for, committed, with the id 'floor-<kind>'; remove deletes it again.
  'domain-floor'=>function(PDO $pdo,array $p):array{
   $kind=(string)($p['kind']??'');$id='floor-'.$kind;fixture_domain_floor($pdo,$kind,$id,(string)($p['userId']??''),!empty($p['remove']));return ['id'=>$id];

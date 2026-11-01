@@ -77,19 +77,20 @@ export const outsideEntry=(user,t,db)=>!!user&&!!t&&t.status==='open'&&trusted(d
 export const canEnter=(user,t,db)=>!!user&&!!t&&t.status!=='finished'&&(manages(user,t)||outsideEntry(user,t,db));
 export const canCreateTournament=user=>!!user&&(user.role==='admin'||user.role==='editor'||organizer(user));
 const byId=rows=>new Map(rows.map(r=>[r.id,r]));
-function entryVisible(db,u,t,e,profiles){
+/** Club of a snapshot read through the Administrator's merges (roots: clubRoots), as Domain::entryVisible (final review B7). */
+function entryVisible(db,u,t,e,profiles,roots){
  const a=profiles.get(e.profileId)??null;
- if(u.role==='club')return e.clubId===u.clubId&&!!a&&staffProfile(db,a);
+ if(u.role==='club'){let id=e.clubId??null;if(id!==u.clubId&&typeof id==='string')id=(roots??clubRoots(db.clubs)).get(id)??id;return id===u.clubId&&!!a&&staffProfile(db,a);}
  if(u.role==='editor')return !community(db,t)||!!a&&!isset(a.ownerId)&&a.createdBy===u.id;
  return organizer(u)&&!!a&&managesProfile(u,a,db);
 }
 /** Whether user sees tournament t (§5.2): admin and the manager always; others never drafts and only trusted tournaments. */
-export function sees(db,u,t,profiles){
+export function sees(db,u,t,profiles,roots){
  if(u.role==='admin'||manages(u,t))return true;
  if(t.status==='draft'||!trusted(db,t)||!['editor','club','member'].includes(u.role)||u.role==='member'&&!organizer(u))return false;
  if(u.role==='editor'&&!community(db,t))return true;
  if(t.status==='open'&&(u.role!=='member'||t.selfEntry===true))return true;
- profiles??=byId(db.profiles);return t.entries.some(e=>entryVisible(db,u,t,e,profiles));
+ profiles??=byId(db.profiles);if(u.role==='club')roots??=clubRoots(db.clubs);return t.entries.some(e=>entryVisible(db,u,t,e,profiles,roots));
 }
 function profileVisible(db,u,a){return u.role==='admin'?true:u.role==='editor'?staffProfile(db,a):u.role==='club'?staffProfile(db,a)&&a.clubId===u.clubId:organizer(u)&&managesProfile(u,a,db);}
 const publicUser=u=>{const {passwordHash,passwordSalt,authVersion,...safe}=u;return safe;};
@@ -97,11 +98,11 @@ const publicUser=u=>{const {passwordHash,passwordSalt,authVersion,...safe}=u;ret
 export function publicWorkspace(db,user){
  const role=user.role,admin=role==='admin',out={schemaVersion:2,revision:db.revision,user:publicUser(user),clubs:[],users:[],profiles:[],tournaments:[]};
  if(role==='member'&&!organizer(user))return out;
- const profiles=byId(db.profiles),used=new Set();
+ const profiles=byId(db.profiles),used=new Set(),roots=role==='club'?clubRoots(db.clubs):null;
  for(const t of db.tournaments){
-  if(!sees(db,user,t,profiles))continue;
+  if(!sees(db,user,t,profiles,roots))continue;
   const manager=admin||manages(user,t),isCommunity=community(db,t),hidden=isset(t.hiddenBy);
-  const entries=t.entries.filter(e=>manager?!(hidden&&!admin&&e.self):entryVisible(db,user,t,e,profiles));for(const e of entries)used.add(e.clubId??'');
+  const entries=t.entries.filter(e=>manager?!(hidden&&!admin&&e.self):entryVisible(db,user,t,e,profiles,roots));for(const e of entries)used.add(e.clubId??'');
   const full=manager||role==='editor'&&!isCommunity;let draws=full?t.draws:{},activity=full?t.activity.map(({text,time})=>({text,time})):[];
   if(manager&&hidden&&!admin){const ids=new Set(entries.map(e=>e.id));draws=Object.fromEntries(Object.entries(draws).filter(([,d])=>d.slots.filter(Boolean).every(x=>ids.has(x))));activity=[];}
   const v={...t,entries,draws,activity,community:isCommunity,trusted:trusted(db,t),selfEntry:t.selfEntry===true,rev:Number(t.rev)||0};
@@ -136,6 +137,15 @@ export function resolveClub(clubs,clubId){
  for(let hop=0;hop<8&&m.has(cur);hop++){const c=m.get(cur);if(!isset(c.mergedInto))return c;cur=c.mergedInto;}
  return null;
 }
+/** Mirror of Clubs::roots: id → the id resolveClub gives (the end of the merges), the id itself when it resolves to nothing. */
+export function clubRoots(clubs){
+ const by=new Map(clubs.map(c=>[c.id,c.mergedInto??null])),out=new Map();
+ for(const id of by.keys()){let cur=id,root=null;for(let hop=0;hop<8&&by.has(cur);hop++){if(by.get(cur)===null){root=cur;break;}cur=by.get(cur);}out.set(id,root??id);}
+ return out;
+}
+/** Mirror of Domain::drawAthletes (final review B9): athletes of a category with clubKey, the club their snapshot means now (through
+ * merges; a renamed club keeps its id), else 'name:'+clubKey(club); engine.js sameClub compares it. Snapshots and signature() stay. */
+export function drawAthletes(clubs,athletes){const roots=clubRoots(clubs||[]);return athletes.map(a=>({...a,clubKey:(typeof a.clubId==='string'?roots.get(a.clubId):null)??'name:'+clubKey(a.club??'')}));}
 const isNum=v=>typeof v==='number'&&Number.isFinite(v)||typeof v==='string'&&NUMERIC.test(v);
 export function clubCounts(clubs,u,now){let user=0,global=0;for(const c of clubs){if(c.verified!==false||!isNum(c.createdAt)||Math.trunc(Number(c.createdAt))<=now-86400)continue;global++;if((c.createdBy??null)===(u?.id??null))user++;}return {user,global};}
 export function pickClub(clubs,u,choice,now,counts={}){
@@ -149,7 +159,7 @@ export function pickClub(clubs,u,choice,now,counts={}){
  if(member&&contact(name))fail('Nazwa nie może zawierać adresu strony, e-maila ani długiego numeru.');
  for(const c of clubs)if(clubKey(c.name)===key){const t=resolveClub(clubs,c.id);if(t)return {clubId:t.id};}
  if(member&&((counts.user??0)>=CLUBS_DAY_PER_USER||(counts.global??0)>=CLUBS_DAY_GLOBAL))return {clubId:UNAFFILIATED,pendingClubName:name,notice:'club-pending'};
- const club={id:id(),name,verified:u?.role==='admin',createdBy:u?.id??null,createdAt:now,mergedInto:null};return {clubId:club.id,newClub:club};
+ const club={id:id(),name,verified:STAFF.includes(u?.role),createdBy:u?.id??null,createdAt:now,mergedInto:null};return {clubId:club.id,newClub:club};
 }
 
 // Revisions (§5.8).
@@ -157,6 +167,7 @@ const revOf=(rows,key)=>{if(typeof key!=='string')return 0;const x=rows.find(r=>
 /** Mirror of Domain::stale: a command is stale only when the objects it touches changed after the client's revision. */
 export function stale(db,type,p,expected,actorId=null){
  const rev=db.revision;if(expected===rev)return false;if(expected>rev)return true;
+ if(expected<(Number(db.revFloor)||0))return true;// a revision from before migration 0007 (Domain::stale, final review B8)
  const tour=k=>revOf(db.tournaments,k)>expected,prof=k=>revOf(db.profiles,k)>expected,staff=(Number(db.staffRev)||0)>expected;
  const own=k=>actorId!==null&&db[k].some(x=>x.createdBy===actorId&&!isset(x.ownerId)&&(Number(x.rev)||0)>expected);
  const reg=isObj(p.registration)?p.registration.tournamentId:null;
@@ -223,6 +234,14 @@ const clubChoice=p=>isObj(p.club)?p.club:p.clubName&&!p.clubId?{name:p.clubName}
 const within=(rows,now,match)=>rows.filter(x=>isNum(x.createdAt)&&Math.trunc(Number(x.createdAt))>now-86400&&match(x)).map(x=>Math.trunc(Number(x.createdAt)));
 const pending=(db,profileId)=>db.tournaments.some(t=>['open','closed'].includes(t.status)&&t.entries.some(e=>e.profileId===profileId));
 const inDraw=(t,entryId)=>Object.values(t.draws).some(d=>d.slots.includes(entryId));
+/** Mirror of Domain::keepDraws (DR-5, R8; final review B1): an entry in a saved draw is neither changed nor withdrawn, and entryId
+ * joins no category with a saved draw, unless the tournament's manager does it. */
+function keepDraws(t,old,list,entryId){
+ if(old&&inDraw(t,old.id))fail('Losowanie Twojej kategorii już się odbyło. Wycofanie może zrobić organizator.',409);
+ if(list&&categories(list).items.some(c=>Object.hasOwn(t.draws,c.id)&&c.athletes.some(x=>x.id===entryId)))fail('Losowanie tej kategorii już się odbyło. Zgłoszenie może dodać organizator.',409);
+}
+/** Mirror of Domain::guarded: members anywhere, staff in community tournaments (staff in staff tournaments keep the a67ad42 rule). */
+const guarded=(db,u,t)=>u.role==='member'||community(db,t);
 const unWithdraw=(db,profileId,tournamentId)=>{db.withdrawals=(db.withdrawals||[]).filter(w=>!(w.profileId===profileId&&w.tournamentId===tournamentId));};
 const withdrawn=(db,e,tournamentId,by)=>{db.withdrawals.push({profileId:e.profileId,tournamentId,by,at:nowSeconds()});};
 const replace=(list,item)=>{const i=list.findIndex(x=>x.id===item.id);if(i<0)list.push(item);else list[i]=item;};
@@ -433,7 +452,9 @@ function apply(db,user,type,p){
    entry={id:existing.id,profileId:existing.profileId,clubId:existing.clubId,name:existing.name,club:existing.club,sex:existing.sex,age:existing.age,weight:Number(p.weight),height:Number(p.height),gradeType:p.gradeType,grade:Number(p.grade),champion:false,events:[...new Set(p.events||[])],presence:existing.presence||'pending',actualWeight:existing.actualWeight??null,self:true};
    if(isset(p.clubId)&&p.clubId!==existing.clubId){const c=db.clubs.find(x=>x.id===p.clubId&&!isset(x.mergedInto));if(!c)fail('Klub nie istnieje.',404);entry.clubId=c.id;entry.club=c.name;clubChanged=true;}
   }else entry=snapshot(db,a,t,p,existing);
-  validateAthlete(entry);reconcile(t,existing?t.entries.map(x=>x.id===entry.id?entry:x):[...t.entries,entry]);
+  validateAthlete(entry);const list=existing?t.entries.map(x=>x.id===entry.id?entry:x):[...t.entries,entry];
+  if(!manager&&guarded(db,user,t))keepDraws(t,existing,list,entry.id);
+  reconcile(t,list);
   audit(t,clubChanged?'Zmieniono klub w zgłoszeniu: '+entry.name:(existing?'Zmieniono zgłoszenie: ':'Zgłoszono: ')+entry.name,entry.profileId);
   if(!existing)unWithdraw(db,entry.profileId,t.id);return {id:entry.id};
  }
@@ -448,7 +469,7 @@ function apply(db,user,type,p){
  if(type==='draw.create'){
   const c=categories(t.entries).items.find(c=>c.id===p.categoryId);if(!c||c.type!=='bracket')fail('Nie ma takiej kategorii drabinkowej.');
   const old=t.draws[c.id];if(old&&Object.keys(old.results).length)fail('Nie można losować po zapisaniu wyników.',409);
-  const draw=makeDraw(c.athletes,Math.floor(Math.random()*2147483647));draw.revision=(old?.revision||0)+1;t.draws[c.id]=draw;audit(t,'Zapisano losowanie: '+c.title+' · '+c.subtitle);return {id:c.id};
+  const draw=makeDraw(drawAthletes(db.clubs,c.athletes),Math.floor(Math.random()*2147483647));draw.revision=(old?.revision||0)+1;t.draws[c.id]=draw;audit(t,'Zapisano losowanie: '+c.title+' · '+c.subtitle);return {id:c.id};
  }
  if(type==='result.save'||type==='result.clear'){
   const d=t.draws[p.categoryId];if(!d)fail('Najpierw zapisz losowanie.');
@@ -468,7 +489,9 @@ function removeEntry(db,user,p){
  if(user.role==='member'&&!sees(db,user,t))fail('Turniej nie jest dostępny.',404);
  if(!canEnter(user,t,db))fail('Zapisy są zamknięte.',403);
  const a=find(t.entries,p.id,'Zgłoszenie'),owner=find(db.profiles,a.profileId,'Zawodnik');
- if(!manages(user,t)&&!(user.role==='club'?a.clubId===user.clubId&&staffProfile(db,owner):!isset(owner.ownerId)&&owner.createdBy===user.id)){if(user.role==='member')fail('Zgłoszenie nie istnieje.',404);fail('Nie możesz wycofać tego zgłoszenia.',403);}
+ const manager=manages(user,t);
+ if(!manager&&!(user.role==='club'?(resolveClub(db.clubs,a.clubId)?.id??a.clubId)===user.clubId&&staffProfile(db,owner):!isset(owner.ownerId)&&owner.createdBy===user.id)){if(user.role==='member')fail('Zgłoszenie nie istnieje.',404);fail('Nie możesz wycofać tego zgłoszenia.',403);}
+ if(!manager&&guarded(db,user,t))keepDraws(t,a,null,'');
  reconcile(t,t.entries.filter(x=>x.id!==a.id));audit(t,'Wycofano zgłoszenie: '+a.name,a.profileId);
  if(a.self)withdrawn(db,a,t.id,user.role==='admin'?'admin':'organizer');return {id:a.id};
 }
@@ -480,7 +503,7 @@ function selfEntry(db,user,p,owned){
  if(t.status!=='open'||t.selfEntry!==true||t.date<warsawToday())fail('Zapisy do tego turnieju są zamknięte.',403);
  const old=t.entries.find(e=>e.profileId===a.id)??null,update=p.update===true;
  if(old&&!update)fail('Jesteś już zgłoszony do tego turnieju.',409);if(!old&&update)fail('Zgłoszenie nie istnieje.',404);
- if(old&&inDraw(t,old.id))fail('Losowanie Twojej kategorii już się odbyło. Wycofanie może zrobić organizator.',409);
+ keepDraws(t,old,null,'');
  if(!trusted(db,t)&&(a.relation!=='self'||ageAt(String(a.birthDate),t.date)<ADULT_AGE))fail('Zgłoszenia osób niepełnoletnich do tego turnieju będą możliwe, gdy MatBravo potwierdzi organizatora.',409);
  const measures={weight:p.weight??a.weight,height:p.height??a.height,gradeType:p.gradeType??a.gradeType,grade:p.grade??a.grade};
  if(p.saveToProfile===true){
@@ -489,7 +512,7 @@ function selfEntry(db,user,p,owned){
  }
  const entry=snapshot(db,a,t,{...measures,events:p.events??null},old,true);rulesValidate(entry);
  const list=old?t.entries.map(e=>e.id===entry.id?entry:e):[...t.entries,entry];
- if(categories(list).items.some(c=>Object.hasOwn(t.draws,c.id)&&c.athletes.some(x=>x.id===entry.id)))fail('Losowanie tej kategorii już się odbyło. Zgłoszenie może dodać organizator.',409);
+ keepDraws(t,null,list,entry.id);
  reconcile(t,list);audit(t,(old?'Zmieniono zgłoszenie własne: ':'Zgłoszenie własne: ')+entry.name,entry.profileId);
  unWithdraw(db,a.id,t.id);return {id:entry.id,tournamentId:t.id};
 }

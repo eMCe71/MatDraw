@@ -95,8 +95,9 @@ export function firstPairs(slots){
   function walk(s){if(s.length===1)return s.filter(Boolean);const a=walk(s.slice(0,s.length/2)),b=walk(s.slice(s.length/2));if(a.length===1&&b.length===1)pairs.push([a[0],b[0]]);return [...a,...b];}
   walk(slots);return pairs;
 }
-/** Same club for the draw (§6.3, Rules::sameClub): equal club names, but 'unaffiliated' athletes are never separated. */
-export const sameClub=(a,b)=>a?.club===b?.club&&a?.clubId!=='unaffiliated'&&b?.clubId!=='unaffiliated';
+/** Same club for the draw (§6.3, Rules::sameClub): 'unaffiliated' athletes are never separated; athletes that both carry clubKey
+ * (workspace.js drawAthletes: the club their snapshot means now, through merges and renames) compare it, others their club names. */
+export const sameClub=(a,b)=>{const ka=a?.clubKey,kb=b?.clubKey;if([a?.clubId,b?.clubId,ka,kb].includes('unaffiliated'))return false;return typeof ka==='string'&&typeof kb==='string'?ka===kb:a?.club===b?.club;};
 export function makeDraw(athletes,seed=1){
   if(athletes.length<3)throw Error('Minimum 3 zawodników. Kategoria wymaga decyzji organizatora.');
   if(athletes.length>64)throw Error('Powyżej 64 zawodników — regulamin wymaga doprecyzowania.');
@@ -145,7 +146,7 @@ export function clearWinner(draw,id){
   delete draw.results[id];draw.revision++;
 }
 export function clubConflicts(draw,athletes){const map=Object.fromEntries(athletes.map(a=>[a.id,a]));return firstPairs(draw.slots).filter(([a,b])=>sameClub(map[a],map[b])).length;}
-export function fingerprintCounts(athletes){const {items,unassigned}=categories(athletes);return {athletes:athletes.length,active:athletes.filter(a=>a.presence!=='absent').length,clubs:new Set(athletes.filter(a=>a.clubId!=='unaffiliated').map(a=>a.club)).size,categories:items.length,alerts:items.filter(c=>c.underfilled).length,unassigned:unassigned.length};}
+export function fingerprintCounts(athletes){const {items,unassigned}=categories(athletes);return {athletes:athletes.length,active:athletes.filter(a=>a.presence!=='absent').length,clubs:new Set(athletes.filter(a=>a.clubId!=='unaffiliated'&&a.clubKey!=='unaffiliated').map(a=>a.clubKey??a.club)).size,categories:items.length,alerts:items.filter(c=>c.underfilled).length,unassigned:unassigned.length};}
 export function validateAthlete(a){
   if(!a.name?.trim()||!a.club?.trim())throw Error('Podaj imię i nazwisko oraz klub.');
   if(!['M','F'].includes(a.sex)||!['cup','dan'].includes(a.gradeType))throw Error('Sprawdź płeć i rodzaj stopnia.');

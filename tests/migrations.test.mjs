@@ -91,20 +91,22 @@ test('migrate.php prints database errors without the row values MySQL quotes in 
  assert.match(readFileSync('backend/bin/migrate.php','utf8'),/Migrator::safeMessage\(\$e\)/,'migrate.php prints the safe message');
 });
 
-test('0007 matches PLAN-REJESTRACJA-ROLE §9.1: columns through addColumn (NULL or DEFAULT), the owner index, tombstones, staff_rev, a floor, no rows of existing tables',()=>{
+test('0007 matches PLAN-REJESTRACJA-ROLE §9.1: columns through addColumn (NULL or DEFAULT), the owner index, tombstones, staff_rev, rev_floor, a floor, no rows of existing tables',()=>{
  const m=parsed.find(x=>x.id===7);assert.ok(m,'0007_roles.php');assert.equal(m.name,'0007_roles.php');assert.equal(m.destructive,false);
  const columns=[['users','organizer','TINYINT(1) NOT NULL DEFAULT 0'],['users','organizer_blocked_at','BIGINT NULL'],['users','organizer_trusted_at','BIGINT NULL'],['users','organizer_trusted_by','VARCHAR(40) NULL'],
   ['profiles','owner_user_id','VARCHAR(40) NULL'],['profiles','rev','BIGINT NOT NULL DEFAULT 0'],['clubs','verified','TINYINT(1) NOT NULL DEFAULT 1'],['clubs','created_by','VARCHAR(40) NULL'],['clubs','created_at','BIGINT NULL'],['clubs','merged_into','VARCHAR(40) NULL'],
   ['tournaments','created_at','BIGINT NULL'],['tournaments','hidden_by','VARCHAR(40) NULL'],['tournaments','hidden_from','VARCHAR(10) CHARACTER SET ascii NULL'],['tournaments','hide_reason','VARCHAR(200) NULL'],['tournaments','self_entry','TINYINT(1) NOT NULL DEFAULT 0'],['tournaments','rev','BIGINT NOT NULL DEFAULT 0'],
-  ['app_meta','staff_rev','BIGINT NOT NULL DEFAULT 0']];
+  ['app_meta','staff_rev','BIGINT NOT NULL DEFAULT 0'],['app_meta','rev_floor','BIGINT NOT NULL DEFAULT 0']];
  for(const [t,c,d] of columns)assert.ok(m.code.includes(`$m->addColumn('${t}','${c}','${d}');`),`${t}.${c}`);
  assert.equal((m.code.match(/\$m->addColumn\(/g)||[]).length,columns.length,'no other column');
  for(const [,,d] of columns)assert.match(d,/ NULL$|DEFAULT /,'instant ADD COLUMN: NULL or a DEFAULT');
  assert.match(m.code,/\$m->addIndex\('profiles','profiles_owner','owner_user_id'\);/,'non-unique owner index (R7)');
  assert.match(m.code,/\$m->exec\('UPDATE app_meta SET staff_rev=revision WHERE id=1 AND staff_rev=0'\);/);
+ // Final review B8: the revision of the migration is the floor of Domain::stale (rev 0 of untouched objects never hides a change).
+ assert.match(m.code,/\$m->exec\('UPDATE app_meta SET rev_floor=revision WHERE id=1 AND rev_floor=0'\);/);
  assert.match(m.code,/CREATE TABLE IF NOT EXISTS entry_withdrawals \(\s*profile_id VARCHAR\(40\) NOT NULL,\s*tournament_id VARCHAR\(40\) NOT NULL,\s*by_kind VARCHAR\(12\) CHARACTER SET ascii NOT NULL,\s*created_at BIGINT NOT NULL,\s*PRIMARY KEY \(profile_id, tournament_id\),\s*KEY entry_withdrawals_tournament \(tournament_id\)\s*\)/);
  assert.ok(!/FOREIGN\s+KEY/i.test(m.code),'no new foreign keys (rule of 0002)');
- assert.ok(!/\b(INSERT|DELETE|REPLACE)\b/i.test(m.code)&&(m.code.match(/\bUPDATE\b/gi)||[]).length===1,'rows of existing tables stay as they are (the unaffiliated club comes from Clubs::ensure)');
+ assert.ok(!/\b(INSERT|DELETE|REPLACE)\b/i.test(m.code)&&(m.code.match(/\bUPDATE\b/gi)||[]).length===2&&(m.code.match(/\bUPDATE app_meta\b/g)||[]).length===2,'rows of existing tables stay as they are, app_meta aside (the unaffiliated club comes from Clubs::ensure)');
  for(const part of ['FROM profiles WHERE owner_user_id IS NOT NULL',"FROM profiles p JOIN users u ON u.id=p.created_by WHERE u.role='member'","FROM tournaments t JOIN users u ON u.id=t.created_by WHERE u.role='member'",'FROM tournaments WHERE hidden_by IS NOT NULL',"FROM clubs c JOIN users u ON u.id=c.created_by WHERE u.role='member'",'FROM clubs WHERE merged_into IS NOT NULL'])
   assert.ok(m.code.includes(part),'floor: '+part);
  assert.match(m.code,/'floor'=>fn\(PDO \$pdo\):bool=>/);

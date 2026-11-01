@@ -71,17 +71,18 @@ final class Repository {
  private static function club(array $c):array{return ['id'=>$c['id'],'name'=>$c['name'],'verified'=>(bool)$c['verified'],'createdBy'=>$c['created_by'],'createdAt'=>$c['created_at']===null?null:(int)$c['created_at'],'mergedInto'=>$c['merged_into']];}
  private static function profile(array $a):array{return array_replace(self::decode($a['data']),['id'=>$a['id'],'clubId'=>$a['club_id'],'createdBy'=>$a['created_by'],'archived'=>(bool)$a['archived'],'ownerId'=>$a['owner_user_id'],'rev'=>(int)$a['rev']]);}
  private static function tournament(array $t):array{return ['id'=>$t['id'],'createdBy'=>$t['created_by'],'createdAt'=>$t['created_at']===null?null:(int)$t['created_at'],'name'=>$t['name'],'city'=>$t['city'],'date'=>$t['event_date'],'mat'=>$t['mat'],'status'=>$t['status'],'selfEntry'=>(bool)$t['self_entry'],'hiddenBy'=>$t['hidden_by'],'hiddenFrom'=>$t['hidden_from'],'hideReason'=>$t['hide_reason'],'rev'=>(int)$t['rev'],'activity'=>self::decode($t['activity']),'entries'=>[],'draws'=>[]];}
- private function meta():array{$m=$this->pdo->query('SELECT revision,staff_rev FROM app_meta WHERE id=1')->fetch();return [(int)$m['revision'],(int)$m['staff_rev']];}
+ /** [revision, staffRev, revFloor] of app_meta (rev_floor: the global revision when migration 0007 ran, Domain::stale, final review B8). */
+ private function meta():array{$m=$this->pdo->query('SELECT revision,staff_rev,rev_floor FROM app_meta WHERE id=1')->fetch();return [(int)$m['revision'],(int)$m['staff_rev'],(int)$m['rev_floor']];}
  /** Members who created tournaments: {id:{trusted, blocked}} (Domain::trustedOrganizer). */
  private function organizers():array{$o=[];foreach($this->pdo->query("SELECT id,organizer_trusted_at,organizer_blocked_at FROM users WHERE role='member' AND id IN (SELECT created_by FROM tournaments)") as $u)$o[$u['id']]=['trusted'=>$u['organizer_trusted_at']!==null,'blocked'=>$u['organizer_blocked_at']!==null];return $o;}
  private function staff():array{$users=[];foreach($this->pdo->query("SELECT * FROM users WHERE role IN ('admin','editor','club') ORDER BY email,id") as $u)$users[]=['id'=>$u['id'],'clubId'=>$u['club_id'],'email'=>$u['email'],'role'=>$u['role'],'active'=>(bool)$u['active'],'passwordHash'=>$u['password_hash'],'authVersion'=>(int)$u['auth_version']];return $users;}
  private function clubs():array{return array_map([self::class,'club'],$this->pdo->query("SELECT id,name,verified,created_by,created_at,merged_into FROM clubs ORDER BY id='unaffiliated',name,id")->fetchAll());}
  private function load():array {
-  [$revision,$staffRev]=$this->meta();
+  [$revision,$staffRev,$revFloor]=$this->meta();
   // Members (community accounts) never enter the workspace: Domain and the JS workspace see staff only. The staff roles are
   // listed (not role<>'member', which MySQL/MariaDB cannot read through an ENUM index): with the users_role index
   // (migration 0005) this is a range read of the staff rows, whatever the number of members.
-  $db=['schemaVersion'=>2,'revision'=>$revision,'staffRev'=>$staffRev,'clubs'=>$this->clubs(),'users'=>$this->staff(),'profiles'=>[],'tournaments'=>[],'organizers'=>$this->organizers(),'withdrawals'=>[]];
+  $db=['schemaVersion'=>2,'revision'=>$revision,'staffRev'=>$staffRev,'revFloor'=>$revFloor,'clubs'=>$this->clubs(),'users'=>$this->staff(),'profiles'=>[],'tournaments'=>[],'organizers'=>$this->organizers(),'withdrawals'=>[]];
   foreach($this->pdo->query('SELECT * FROM profiles ORDER BY id') as $a)$db['profiles'][]=self::profile($a);
   $index=[];
   foreach($this->pdo->query('SELECT * FROM tournaments ORDER BY event_date,id') as $t){$index[$t['id']]=count($db['tournaments']);$db['tournaments'][]=self::tournament($t);}
@@ -101,8 +102,8 @@ final class Repository {
  public function organizerSnapshot(string $userId,?string $today=null):array {
   $this->pdo->beginTransaction();
   try{
-   [$revision,$staffRev]=$this->meta();
-   $db=['schemaVersion'=>2,'revision'=>$revision,'staffRev'=>$staffRev,'clubs'=>$this->clubs(),'users'=>$this->staff(),'profiles'=>[],'tournaments'=>[],'organizers'=>$this->organizers(),'withdrawals'=>[]];
+   [$revision,$staffRev,$revFloor]=$this->meta();
+   $db=['schemaVersion'=>2,'revision'=>$revision,'staffRev'=>$staffRev,'revFloor'=>$revFloor,'clubs'=>$this->clubs(),'users'=>$this->staff(),'profiles'=>[],'tournaments'=>[],'organizers'=>$this->organizers(),'withdrawals'=>[]];
    $q=$this->pdo->prepare('SELECT * FROM profiles WHERE created_by=? OR owner_user_id=? ORDER BY id');$q->execute([$userId,$userId]);foreach($q->fetchAll() as $a)$db['profiles'][]=self::profile($a);
    // Where his profiles are entered: keys only, from the profiles indexes (created_by, owner) and the covering profile_id index of
    // entries (an OR or a subquery over all profiles, or full entry rows, would read far more: the §12 budget).

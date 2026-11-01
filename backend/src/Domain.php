@@ -66,21 +66,26 @@ final class Domain {
  public static function outsideEntry(array $u,array $t,?array $db=null):bool{return ($t['status']??null)==='open'&&self::trusted($db,$t)&&($u['role']==='club'||$u['role']==='editor'||self::organizer($u)&&($t['selfEntry']??false)===true);}
  public static function canEnter(array $u,array $t,?array $db=null):bool{return ($t['status']??null)!=='finished'&&(self::manages($u,$t)||self::outsideEntry($u,$t,$db));}
  public static function canCreateTournament(array $u):bool{return $u['role']==='admin'||$u['role']==='editor'||self::organizer($u);}
- /** An entry of tournament $t that $u (not its manager) may see: club → own club and staff profile; editor → every entry in staff tournaments, own profiles in community ones; organizer → own profiles. */
- private static function entryVisible(array $db,array $u,array $t,array $e,array $profiles):bool {
+ /**
+  * An entry of tournament $t that $u (not its manager) may see: club → own club and staff profile; editor → every entry in
+  * staff tournaments, own profiles in community ones; organizer → own profiles. The club of a snapshot is read through the
+  * Administrator's merges ($roots, Clubs::roots): club.merge keeps snapshots as they are (PS-10) and moves the club account to
+  * the target, which still sees and withdraws the entries of its old club (final review B7).
+  */
+ private static function entryVisible(array $db,array $u,array $t,array $e,array $profiles,?array $roots=null):bool {
   $a=$profiles[$e['profileId']??'']??null;
-  if($u['role']==='club')return ($e['clubId']??null)===$u['clubId']&&$a!==null&&self::staffProfile($db,$a);
+  if($u['role']==='club'){$id=$e['clubId']??null;if($id!==$u['clubId']&&is_string($id))$id=($roots??Clubs::roots($db['clubs']))[$id]??$id;return $id===$u['clubId']&&$a!==null&&self::staffProfile($db,$a);}
   if($u['role']==='editor')return !self::community($db,$t)||$a!==null&&($a['ownerId']??null)===null&&($a['createdBy']??null)===$u['id'];
   return self::organizer($u)&&$a!==null&&self::managesProfile($u,$a,$db);
  }
  private static function byId(array $rows):array{$o=[];foreach($rows as $r)$o[$r['id']]=$r;return $o;}
  /** Whether $u sees tournament $t (§5.2): admin and the manager always; others never drafts and only trusted tournaments. */
- public static function sees(array $db,array $u,array $t,?array $profiles=null):bool {
+ public static function sees(array $db,array $u,array $t,?array $profiles=null,?array $roots=null):bool {
   if($u['role']==='admin'||self::manages($u,$t))return true;
   if(($t['status']??null)==='draft'||!self::trusted($db,$t)||!in_array($u['role'],['editor','club','member'],true)||$u['role']==='member'&&!self::organizer($u))return false;
   if($u['role']==='editor'&&!self::community($db,$t))return true;
   if(($t['status']??null)==='open'&&($u['role']!=='member'||($t['selfEntry']??false)===true))return true;
-  $profiles??=self::byId($db['profiles']);foreach($t['entries'] as $e)if(self::entryVisible($db,$u,$t,$e,$profiles))return true;
+  $profiles??=self::byId($db['profiles']);if($u['role']==='club')$roots??=Clubs::roots($db['clubs']);foreach($t['entries'] as $e)if(self::entryVisible($db,$u,$t,$e,$profiles,$roots))return true;
   return false;
  }
  private static function profileVisible(array $db,array $u,array $a):bool{return match(true){$u['role']==='admin'=>true,$u['role']==='editor'=>self::staffProfile($db,$a),$u['role']==='club'=>self::staffProfile($db,$a)&&($a['clubId']??null)===$u['clubId'],default=>self::organizer($u)&&self::managesProfile($u,$a,$db)};}
@@ -89,11 +94,11 @@ final class Domain {
  public static function publicData(array $db,array $u):array {
   $role=$u['role'];$admin=$role==='admin';$out=['schemaVersion'=>2,'revision'=>$db['revision'],'user'=>self::safeUser($u),'clubs'=>[],'users'=>[],'profiles'=>[],'tournaments'=>[]];
   if($role==='member'&&!self::organizer($u))return $out;
-  $profiles=self::byId($db['profiles']);$used=[];
+  $profiles=self::byId($db['profiles']);$used=[];$roots=$role==='club'?Clubs::roots($db['clubs']):null;
   foreach($db['tournaments'] as $t){
-   if(!self::sees($db,$u,$t,$profiles))continue;
+   if(!self::sees($db,$u,$t,$profiles,$roots))continue;
    $manager=$admin||self::manages($u,$t);$community=self::community($db,$t);$hidden=($t['hiddenBy']??null)!==null;$entries=[];
-   foreach($t['entries'] as $e){if($manager?$hidden&&!$admin&&!empty($e['self']):!self::entryVisible($db,$u,$t,$e,$profiles))continue;$entries[]=$e;$used[$e['clubId']??'']=true;}
+   foreach($t['entries'] as $e){if($manager?$hidden&&!$admin&&!empty($e['self']):!self::entryVisible($db,$u,$t,$e,$profiles,$roots))continue;$entries[]=$e;$used[$e['clubId']??'']=true;}
    $full=$manager||$role==='editor'&&!$community;$draws=$full?$t['draws']:[];$activity=$full?array_map(static fn($x)=>array_intersect_key($x,['text'=>1,'time'=>1]),$t['activity']):[];
    // A tournament hidden by the Administrator: its manager loses the self-entries (PS-16), the draws holding them and the log naming them.
    if($manager&&$hidden&&!$admin){$ids=array_column($entries,'id');$draws=array_filter($draws,fn($d)=>!array_diff(array_filter($d['slots']),$ids));$activity=[];}
@@ -128,6 +133,9 @@ final class Domain {
   */
  public static function stale(array $db,string $type,array $p,int $expected,?string $actorId=null):bool {
   $rev=(int)$db['revision'];if($expected===$rev)return false;if($expected>$rev)return true;
+  // A revision from before migration 0007 (revFloor, the global revision of that moment): objects untouched since carry no
+  // stamp (rev 0), so only the old global rule tells whether they changed; such a command is stale (final review B8).
+  if($expected<(int)($db['revFloor']??0))return true;
   $tour=fn($id)=>self::revOf($db['tournaments'],$id)>$expected;$prof=fn($id)=>self::revOf($db['profiles'],$id)>$expected;$staff=(int)($db['staffRev']??0)>$expected;
   $own=function(string $k)use($db,$actorId,$expected):bool{if($actorId===null)return false;foreach($db[$k] as $x)if(($x['createdBy']??null)===$actorId&&($x['ownerId']??null)===null&&(int)($x['rev']??0)>$expected)return true;return false;};
   $reg=is_array($p['registration']??null)?($p['registration']['tournamentId']??null):null;
@@ -140,6 +148,15 @@ final class Domain {
    str_starts_with($type,'account.')||str_starts_with($type,'club.')=>$staff,
    default=>true,
   };
+ }
+ /**
+  * The athletes of a category for Rules::makeDraw with clubKey (final review B9): the club their snapshot's clubId means now
+  * (Clubs::roots, through the Administrator's merges; a renamed club keeps its id), else 'name:'.Clubs::key(club). The
+  * separation of clubs in the first round compares these keys, while snapshots and signature() stay as they are (PS-10).
+  */
+ public static function drawAthletes(array $db,array $athletes):array {
+  $roots=Clubs::roots($db['clubs']);
+  return array_map(static fn(array $a)=>['clubKey'=>(is_string($a['clubId']??null)?$roots[$a['clubId']]??null:null)??'name:'.Clubs::key($a['club']??'')]+$a,$athletes);
  }
  private static function canon(mixed $v):mixed{if(is_float($v)&&is_finite($v)&&floor($v)===$v&&abs($v)<9.0E15)return (int)$v;if(!is_array($v))return $v;$o=[];foreach($v as $k=>$x)$o[$k]=self::canon($x);if(!array_is_list($o))ksort($o,SORT_STRING);return $o;}
  private static function same(mixed $a,mixed $b):bool{return $a===$b||self::canon($a)===self::canon($b);}
@@ -177,6 +194,21 @@ final class Domain {
  private static function within(array $rows,int $now,callable $match):array{$at=[];foreach($rows as $x){$c=$x['createdAt']??null;if(is_numeric($c)&&(int)$c>$now-86400&&$match($x))$at[]=(int)$c;}return $at;}
  private static function pending(array $db,string $profileId):bool{foreach($db['tournaments'] as $t)if(in_array($t['status'],['open','closed'],true))foreach($t['entries'] as $e)if($e['profileId']===$profileId)return true;return false;}
  private static function inDraw(array $t,string $entryId):bool{foreach($t['draws'] as $d)if(in_array($entryId,$d['slots'],true))return true;return false;}
+ /**
+  * The rule of saved draws (DR-5, R8) for entries changed by someone other than the tournament's manager: an entry in a saved
+  * draw ($old) is neither changed nor withdrawn, and the entry $entryId of the new list $list joins no category with a saved
+  * draw (409; the manager redraws or adds). entry.self always; entry.save and entry.remove by guarded() actors (B1).
+  */
+ private static function keepDraws(array $t,?array $old,?array $list,string $entryId):void {
+  if($old&&self::inDraw($t,$old['id']))throw new AppError('Losowanie Twojej kategorii już się odbyło. Wycofanie może zrobić organizator.',409);
+  if($list!==null)foreach(Rules::categories($list) as $key=>$c)if(isset($t['draws'][$key])&&in_array($entryId,array_column($c['athletes'],'id'),true))throw new AppError('Losowanie tej kategorii już się odbyło. Zgłoszenie może dodać organizator.',409);
+ }
+ /**
+  * Who changes entries of tournament $t under keepDraws() when not its manager (final review B1): a member (organizer, O19)
+  * in any tournament, staff (editor, club) in community tournaments. Staff in staff tournaments keep the rule of the release
+  * a67ad42: their change drops a draw without results (reconcile), as the manager's does.
+  */
+ private static function guarded(array $db,array $u,array $t):bool{return $u['role']==='member'||self::community($db,$t);}
  private static function unWithdraw(array &$db,string $profileId,string $tournamentId):void{$db['withdrawals']=array_values(array_filter($db['withdrawals']??[],fn($w)=>!($w['profileId']===$profileId&&$w['tournamentId']===$tournamentId)));}
  private static function withdrawn(array &$db,array $e,string $tournamentId,string $by):void{$db['withdrawals'][]=['profileId'=>$e['profileId'],'tournamentId'=>$tournamentId,'by'=>$by,'at'=>time()];}
  /** Snapshot of profile $a for tournament $t (§7.2): the same function for staff, organizer and self entries. */
@@ -259,12 +291,12 @@ final class Domain {
    if($mark===null&&$legacy)foreach($names as $n)if(!isset($kept[$n])&&str_ends_with($s,': '.$n)){$t['activity'][$j]['text']=substr($s,0,-strlen($n)).GuestView::initials($n);break;}
   }
  }
- /** Account deletion (§6.6, PHP only, idempotent): owned profiles forgotten; as organizer, upcoming tournaments hidden by 'system' (self-entries of others detached, tombstone 'system') and created profiles forgotten. */
+ /** Account deletion (§6.6, PHP only, idempotent): owned profiles forgotten; as organizer, upcoming tournaments (dated today or later, not finished: results of a tournament that ended today stay public, final review B19) hidden by 'system' (self-entries of others detached, tombstone 'system') and created profiles forgotten. */
  public static function forgetMember(array &$db,string $userId):array {
   $db['withdrawals']??=[];$before=$db;$today=date('Y-m-d');$out=['profiles'=>0,'tournaments'=>0];
   foreach($db['profiles'] as $a)if(($a['ownerId']??null)===$userId&&self::forgetProfile($db,$a['id'])!=='missing')$out['profiles']++;
   foreach($db['tournaments'] as $k=>$t){
-   if($t['createdBy']!==$userId||$t['date']<$today||($t['hiddenBy']??null)!==null)continue;
+   if($t['createdBy']!==$userId||$t['date']<$today||$t['status']==='finished'||($t['hiddenBy']??null)!==null)continue;
    foreach($t['entries'] as $e)if(!empty($e['self'])&&self::detach($t,$e['id']))self::withdrawn($db,$e,$t['id'],'system');
    $t['hiddenFrom']=$t['status'];$t['status']='draft';$t['hiddenBy']='system';self::audit($t,'Konto organizatora zostało usunięte.');$db['tournaments'][$k]=$t;$out['tournaments']++;
   }
@@ -439,7 +471,9 @@ final class Domain {
     if(isset($p['clubId'])&&$p['clubId']!==$old['clubId']){$c=null;foreach($db['clubs'] as $x)if($x['id']===$p['clubId']&&($x['mergedInto']??null)===null)$c=$x;if(!$c)throw new AppError('Klub nie istnieje.',404);$entry['clubId']=$c['id'];$entry['club']=$c['name'];$clubChanged=true;}
    }else $entry=self::snapshot($db,$a,$t,$p,$old);
    Rules::validate($entry);
-   $list=$old?array_map(fn($e)=>$e['id']===$entry['id']?$entry:$e,$t['entries']):[...$t['entries'],$entry];self::reconcile($t,$list);
+   $list=$old?array_map(fn($e)=>$e['id']===$entry['id']?$entry:$e,$t['entries']):[...$t['entries'],$entry];
+   if(!$manager&&self::guarded($db,$u,$t))self::keepDraws($t,$old,$list,$entry['id']);
+   self::reconcile($t,$list);
    self::audit($t,$clubChanged?'Zmieniono klub w zgłoszeniu: '.$entry['name']:($old?'Zmieniono zgłoszenie: ':'Zgłoszono: ').$entry['name'],$entry['profileId']);
    if(!$old)self::unWithdraw($db,$entry['profileId'],$t['id']);return ['id'=>$entry['id']];
   }
@@ -449,7 +483,7 @@ final class Domain {
    foreach($t['draws'] as $d)if(in_array($a['id'],$d['slots'],true)&&count($d['results'])&&($a['presence']!==$presence||$a['actualWeight']!=$weight))throw new AppError('Zawodnik ma zapisane wyniki.',409);
    self::reconcile($t,array_map(fn($e)=>$e['id']===$a['id']?array_replace($a,['presence'=>$presence,'actualWeight'=>$weight]):$e,$t['entries']));self::audit($t,'Kontrola startowa: '.$a['name'],$a['profileId']);return ['id'=>$a['id']];
   }
-  if($type==='draw.create'){$cats=Rules::categories($t['entries']);$key=(string)($p['categoryId']??'');$c=$cats[$key]??null;if(!$c||$c['type']!=='bracket')throw new AppError('Nie ma takiej kategorii.');$old=$t['draws'][$key]??null;if($old&&count($old['results']))throw new AppError('Nie można losować po zapisaniu wyników.',409);$d=Rules::makeDraw($c['athletes']);$d['revision']=($old['revision']??0)+1;$t['draws'][$key]=$d;self::audit($t,'Zapisano losowanie: '.$c['title'].' · '.$c['subtitle']);return ['id'=>$key];}
+  if($type==='draw.create'){$cats=Rules::categories($t['entries']);$key=(string)($p['categoryId']??'');$c=$cats[$key]??null;if(!$c||$c['type']!=='bracket')throw new AppError('Nie ma takiej kategorii.');$old=$t['draws'][$key]??null;if($old&&count($old['results']))throw new AppError('Nie można losować po zapisaniu wyników.',409);$d=Rules::makeDraw(self::drawAthletes($db,$c['athletes']));$d['revision']=($old['revision']??0)+1;$t['draws'][$key]=$d;self::audit($t,'Zapisano losowanie: '.$c['title'].' · '.$c['subtitle']);return ['id'=>$key];}
   if(in_array($type,['result.save','result.clear'],true)){if($type==='result.save')self::txt($p['winnerId']??null,'zwycięzca');$key=(string)($p['categoryId']??'');if(!isset($t['draws'][$key]))throw new AppError('Najpierw zapisz losowanie.');Rules::result($t['draws'][$key],(string)($p['matchId']??''),$type==='result.save'?(string)($p['winnerId']??''):null);self::audit($t,'Zaktualizowano wynik walki.');return ['id'=>$p['matchId']];}
   throw new AppError('Nieznana operacja.',400);
  }
@@ -465,9 +499,10 @@ final class Domain {
   if($u['role']==='member'&&!self::sees($db,$u,$t))throw new AppError('Turniej nie jest dostępny.',404);
   if(!self::canEnter($u,$t,$db))throw new AppError('Zapisy są zamknięte.',403);
   $a=self::entity($t['entries'],$p['id']??null,'Zgłoszenie');$profile=self::entity($db['profiles'],$a['profileId'],'Zawodnik');$manager=self::manages($u,$t);
-  if(!$manager&&!($u['role']==='club'?$a['clubId']===$u['clubId']&&self::staffProfile($db,$profile):($profile['ownerId']??null)===null&&$profile['createdBy']===$u['id'])){
+  if(!$manager&&!($u['role']==='club'?(Clubs::resolve($db['clubs'],$a['clubId'])['id']??$a['clubId'])===$u['clubId']&&self::staffProfile($db,$profile):($profile['ownerId']??null)===null&&$profile['createdBy']===$u['id'])){
    if($u['role']==='member')throw new AppError('Zgłoszenie nie istnieje.',404);throw new AppError('Nie możesz wycofać tego zgłoszenia.',403);
   }
+  if(!$manager&&self::guarded($db,$u,$t))self::keepDraws($t,$a,null,'');
   self::reconcile($t,array_filter($t['entries'],fn($x)=>$x['id']!==$a['id']));self::audit($t,'Wycofano zgłoszenie: '.$a['name'],$a['profileId']);
   if(!empty($a['self']))self::withdrawn($db,$a,$t['id'],$u['role']==='admin'?'admin':'organizer');return ['id'=>$a['id']];
  }
@@ -479,7 +514,7 @@ final class Domain {
   if($t['status']!=='open'||($t['selfEntry']??false)!==true||$t['date']<date('Y-m-d'))throw new AppError('Zapisy do tego turnieju są zamknięte.',403);
   $old=null;foreach($t['entries'] as $e)if($e['profileId']===$a['id'])$old=$e;$update=($p['update']??null)===true;
   if($old&&!$update)throw new AppError('Jesteś już zgłoszony do tego turnieju.',409);if(!$old&&$update)throw new AppError('Zgłoszenie nie istnieje.',404);
-  if($old&&self::inDraw($t,$old['id']))throw new AppError('Losowanie Twojej kategorii już się odbyło. Wycofanie może zrobić organizator.',409);
+  self::keepDraws($t,$old,null,'');
   if(!self::trusted($db,$t)&&(($a['relation']??null)!=='self'||self::ageAt((string)$a['birthDate'],$t['date'])<self::ADULT_AGE))throw new AppError('Zgłoszenia osób niepełnoletnich do tego turnieju będą możliwe, gdy MatBravo potwierdzi organizatora.',409);
   $measures=['weight'=>$p['weight']??$a['weight'],'height'=>$p['height']??$a['height'],'gradeType'=>$p['gradeType']??$a['gradeType'],'grade'=>$p['grade']??$a['grade']];
   if(($p['saveToProfile']??null)===true){
@@ -489,7 +524,7 @@ final class Domain {
   }
   $entry=self::snapshot($db,$a,$t,$measures+['events'=>$p['events']??null],$old,true);Rules::validate($entry);
   $list=$old?array_map(fn($e)=>$e['id']===$entry['id']?$entry:$e,$t['entries']):[...$t['entries'],$entry];
-  foreach(Rules::categories($list) as $key=>$c)if(isset($t['draws'][$key])&&in_array($entry['id'],array_column($c['athletes'],'id'),true))throw new AppError('Losowanie tej kategorii już się odbyło. Zgłoszenie może dodać organizator.',409);
+  self::keepDraws($t,null,$list,$entry['id']);
   $target=&self::entity($db['tournaments'],$t['id'],'Turniej');self::reconcile($target,$list);self::audit($target,($old?'Zmieniono zgłoszenie własne: ':'Zgłoszenie własne: ').$entry['name'],$entry['profileId']);unset($target);
   self::unWithdraw($db,$a['id'],$t['id']);return ['id'=>$entry['id'],'tournamentId'=>$t['id']];
  }

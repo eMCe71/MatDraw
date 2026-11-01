@@ -10,6 +10,8 @@
 //  pick        {cases:[{clubs, u, choice, now, counts}]}: Clubs::pick (a new club id becomes 'NEW').
 //  athlete     {today, cases:[payload]}: Domain::athleteFields.
 //  sameClub    {pairs:[[a,b]]}: Rules::sameClub.   drawCost {athletes, runs}: same-club first-round pairs after makeDraw.
+//  drawSlots   {db, athletes, runs}: the slots of Rules::makeDraw(Domain::drawAthletes(db, athletes)) for each run.
+//  drawAthletes {db, athletes}: Domain::drawAthletes.
 //  settings    {cases:[config]}: Settings::effective twice (idempotence) and Settings::flags.
 //  actor       {account, organizer, blockedAt, trustedAt, athletes}: Actors::build.
 //  forgetMember {db, users:[id]}: Domain::forgetMember for each account in order.   retain {db, cutoff, limit}: Domain::retain.
@@ -44,6 +46,8 @@ $out=match($in['job']){
  'athlete'=>array_map(fn($p)=>attempt(fn()=>Domain::athleteFields($p,$in['today'])),$in['cases']),
  'sameClub'=>array_map(fn($p)=>Rules::sameClub($p[0],$p[1]),$in['pairs']),
  'drawCost'=>(function()use($in){$out=[];$map=array_column($in['athletes'],null,'id');for($i=0;$i<$in['runs'];$i++){$d=Rules::makeDraw($in['athletes']);$n=0;for($s=0;$s<count($d['slots']);$s+=2){[$a,$b]=[$d['slots'][$s],$d['slots'][$s+1]];if($a&&$b&&Rules::sameClub($map[$a],$map[$b]))$n++;}$out[]=$n;}return $out;})(),
+ 'drawSlots'=>(function()use($in){$out=[];$a=Domain::drawAthletes($in['db'],$in['athletes']);for($i=0;$i<$in['runs'];$i++)$out[]=Rules::makeDraw($a)['slots'];return $out;})(),
+ 'drawAthletes'=>Domain::drawAthletes($in['db'],$in['athletes']),
  'settings'=>array_map(function($c){$e=Settings::effective(null,$c);return ['effective'=>$e,'again'=>Settings::effective(null,$e)===$e,'flags'=>Settings::flags($e)];},$in['cases']),
  'actor'=>Actors::build($in['account'],$in['organizer'],$in['blockedAt'],$in['trustedAt'],$in['athletes']),
  'forgetMember'=>(function()use($in){$db=$in['db'];$out=[];foreach($in['users'] as $id)$out[]=Domain::forgetMember($db,$id);return ['db'=>$db,'out'=>$out];})(),
