@@ -48,13 +48,20 @@ export function saveBody(view,fields,{allowTestMode=false,confirmTestMode=false,
 /** The Stripe check state of a view (contract (b)): stale (the Stripe configuration changed since the last check) and paused (payments
  * are required by the settings, but paid sign-up and enforcement wait for a fresh passing check). A view without stripeCheck: neither.
  * Paused follows the server's own signal, effective.degraded 'stripe-check' (Settings::effective); without effective, a check that was
- * made (checkedAt) and failed or went stale. A check that never ran pauses nothing: the server enforces payments then (R1.2). */
+ * made (checkedAt) and failed or went stale. A check that never ran pauses nothing: the server enforces payments then (R1.2).
+ * rearm (stripeCheck.rearm, R2.4): paused although the check passed (the Stripe mode changed, test <-> live, or nothing was confirmed
+ * in the panel): more checks resume nothing, only a save of the sign-up mode does (the server's save gate, resumes() below). */
 export function stripeState(v){
- const c=v?.stripeCheck;if(!c||typeof c!=='object')return {stale:false,paused:false};
+ const c=v?.stripeCheck;if(!c||typeof c!=='object')return {stale:false,paused:false,rearm:false};
  const stale=c.stale===true,e=v?.effective;
  const paused=e&&typeof e==='object'&&'degraded' in e?e.degraded==='stripe-check':v?.payments==='paid'&&c.checkedAt!=null&&(stale||c.ok!==true);
- return {stale,paused};
+ return {stale,paused,rearm:paused&&c.rearm===true};
 }
+/** Whether a save of the sign-up mode without changes still goes to the server: payments are required but paused by the Stripe check,
+ * and the server's save gate resumes them (Settings::save $resume: a fresh check, then the test-mode and free-period dialogs, R1.2). */
+export const resumes=v=>v?.payments==='paid'&&v?.effective?.degraded==='stripe-check';
+/** Extra of the sign-up mode save (FORMS.mode): {resume:true} when nothing changed and resumes(view), else nothing. */
+export const modeExtra=(view,fields)=>!Object.keys(fields||{}).length&&resumes(view)?{resume:true}:{};
 /** The decision about accounts of the free period (§3.4 point 5): keep, or require payment from a date at least 14 days ahead. */
 export function decisionBody(choice,date,today=warsawToday()){
  if(choice==='keep')return {ok:true,freePeriod:{action:'keep'}};
@@ -133,10 +140,12 @@ function signupSection(v){
    ${paid.ok?'':h`<p class="muted small" id="set-paid-why">${paid.reason}</p>`}
    <label class="set-switch" data-set-payments${off?'':' hidden'}><input type="checkbox" name="payments" value="paid"${payOn?' checked':''}${!paid.ok&&!payOn?' disabled':''}><span><strong>${T('Płatności istniejących kont')}</strong><small>${T('Włączone: konta bez darmowego planu muszą mieć subskrypcję, aby pisać na czacie i zgłaszać się do turniejów.')}</small></span></label>
    ${v.effective&&v.effective.mode!==mode?h`<p class="small set-effective">${T('Obowiązuje teraz: {mode}',{mode:modeName(v.effective.mode)})}</p>`:''}
-   ${stripeState(v).paused?h`<p class="notice set-warn">${PAUSED()}</p>`:''}
+   ${stripeState(v).paused?h`<p class="notice set-warn">${pausedNote(stripeState(v))}</p>`:''}
    <div class="form-error" role="alert"></div><button class="btn primary" type="submit">${T('Zapisz tryb rejestracji')}</button></form></section>`;
 }
 const PAUSED=()=>T('Płatna rejestracja i wymaganie płatności są wstrzymane, dopóki nowa kontrola Stripe nie przejdzie.');
+/** The pause notice: after a passing check that resumed nothing (rearm) it names the save that does. */
+const pausedNote=state=>state.rearm?T('Kontrola Stripe przeszła, ale płatności są dalej wstrzymane: zmienił się tryb Stripe (test ↔ live) albo tej konfiguracji nie potwierdzono jeszcze w panelu. Wznowi je zapis trybu rejestracji: kliknij „Zapisz tryb rejestracji”.'):PAUSED();
 function stripeSection(v){
  const s=v.stripe||{},c=s.check,state=stripeState(v);
  const prices=c?.prices?['pln','usd'].map(k=>k.toUpperCase()+': '+(c.prices[k]?T('jest'):T('brak'))).join(' · '):'';
@@ -144,7 +153,7 @@ function stripeSection(v){
   <dl class="set-facts"><div><dt>${T('Konfiguracja')}</dt><dd>${s.enabled?T('Klucze Stripe są w config.php'):T('Brak (płatności wyłączone w config.php)')}</dd></div>
    <div><dt>${T('Tryb Stripe')}</dt><dd>${s.mode==='live'?h`<span class="badge success">${T('Produkcyjny (live)')}</span>`:h`<span class="badge warning">${T('Testowy (test)')}</span>`}</dd></div>
    <div><dt>${T('Ostatnia kontrola')}</dt><dd data-set-check>${c?h`${fmtTime(c.at)} · ${c.ok?h`<span class="badge success">${T('Działa')}</span>`:h`<span class="badge warning">${T('Problem')}</span> ${checkError(c.error)}`}${prices?h`<br><span class="muted small">${T('Ceny planu')}: ${prices}</span>`:''}`:T('jeszcze nie było')}</dd></div></dl>
-  ${state.stale?h`<div class="set-alert" role="alert"><strong>${T('Konfiguracja Stripe zmieniła się od ostatniego sprawdzenia — sprawdź ponownie')}</strong>${state.paused?h` ${PAUSED()}`:''}</div>`:state.paused?h`<p class="notice set-warn">${PAUSED()}</p>`:''}
+  ${state.stale?h`<div class="set-alert" role="alert"><strong>${T('Konfiguracja Stripe zmieniła się od ostatniego sprawdzenia — sprawdź ponownie')}</strong>${state.paused?h` ${pausedNote(state)}`:''}</div>`:state.paused?h`<p class="notice set-warn">${pausedNote(state)}</p>`:''}
   <div class="set-row">${btn(T('Sprawdź Stripe'),'stripe-check','secondary',{disabled:!s.enabled})}<span class="muted small">${T('Najwyżej 6 kontroli na godzinę.')}</span></div></section>`;
 }
 function supportSection(v){
@@ -248,7 +257,8 @@ export const pendingSave=()=>pending;
 /** One save with its dialogs (exported for tests/settings-ui.test.mjs, which runs it against a stub document and io). */
 export async function save(el,fields,extra={},done=T('Zapisano ustawienia.')){
  if(!st.view)return;
- if(!Object.keys(fields).length){say(el,T('Nic nie zmieniono.'));return;}
+ // extra.resume: the unchanged sign-up mode save that resumes paused payments (resumes(); saveBody sends only the version then).
+ if(!Object.keys(fields).length&&extra.resume!==true){say(el,T('Nic nie zmieniono.'));return;}
  // The panel's form the save started from (a dialog's button carries none: the pending save remembers it), for the focus afterwards.
  const origin=originOf(el)||pending?.origin||null;
  const r=await attempt(st.view,fields,extra);
@@ -299,7 +309,8 @@ const FORMS={
  mode:(form)=>{
   const f=new FormData(form),fields=changedFields(st.view,modeFields(String(f.get('mode')||modeOf(st.view)),{paymentsOn:f.get('payments')==='paid'}));
   if(stopsPayments(st.view,fields)){pending={fields,extra:{},done:T('Zapisano ustawienia.'),origin:'mode'};openModal(T('Płatności przestaną być wymagane'),h`<p class="modal-lead">${T('Osoby z aktywną subskrypcją dalej płacą. Zatrzymaj subskrypcje w panelu Członkowie albo w Stripe, jeśli tak zdecydujesz.')}</p><div class="form-error" role="alert"></div>`,all(btn(T('Anuluj'),'close'),btn(T('Zapisz tryb rejestracji'),'confirm-go','primary')));return;}
-  return busy(form,()=>save(form,fields));
+  // Nothing changed while payments are paused by the Stripe check: the save still goes, the server's gate resumes them (R2.4).
+  return busy(form,()=>save(form,fields,modeExtra(st.view,fields)));
  },
  support:(form)=>busy(form,()=>save(form,changedFields(st.view,{supportEmail:String(new FormData(form).get('supportEmail')||'').trim()}),{},T('Zapisano adres pomocy.'))),
  organizers:(form)=>{const f=new FormData(form);return busy(form,()=>save(form,changedFields(st.view,{organizers:f.get('organizers')==='paused'?'paused':'on',trustRequired:f.has('trustRequired')})));},

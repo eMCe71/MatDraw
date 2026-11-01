@@ -237,24 +237,59 @@ test('contract (c): a 409 with confirmTestMode asks "Otworzyć mimo to?" and its
 });
 test('contract (b): a stale Stripe check says "sprawdź ponownie" and that paid sign-up and enforcement wait for a passing check',()=>{
  const fresh={ok:true,stale:false,checkedAt:'2026-10-30T10:00:00Z',mode:'test'},DEG={effective:{mode:'off',degraded:'stripe-check'}};
- assert.deepEqual(S.stripeState(VIEW()),{stale:false,paused:false},'no stripeCheck (older server): nothing');
- assert.deepEqual(S.stripeState(VIEW({stripeCheck:fresh,payments:'paid'})),{stale:false,paused:false});
- assert.deepEqual(S.stripeState(VIEW({stripeCheck:{...fresh,stale:true},payments:'paid',...DEG})),{stale:true,paused:true});
- assert.deepEqual(S.stripeState(VIEW({stripeCheck:{...fresh,stale:true}})),{stale:true,paused:false},'payments not required: nothing is paused');
+ assert.deepEqual(S.stripeState(VIEW()),{stale:false,paused:false,rearm:false},'no stripeCheck (older server): nothing');
+ assert.deepEqual(S.stripeState(VIEW({stripeCheck:fresh,payments:'paid'})),{stale:false,paused:false,rearm:false});
+ assert.deepEqual(S.stripeState(VIEW({stripeCheck:{...fresh,stale:true},payments:'paid',...DEG})),{stale:true,paused:true,rearm:false});
+ assert.deepEqual(S.stripeState(VIEW({stripeCheck:{...fresh,stale:true}})),{stale:true,paused:false,rearm:false},'payments not required: nothing is paused');
  // R1.2: a check that never ran pauses nothing (the server enforces payments then: Settings::effective degrades only after a check).
  const never={ok:false,stale:false,checkedAt:null,mode:null};
- assert.deepEqual(S.stripeState(VIEW({stripeCheck:never,payments:'paid',signup:'on',effective:{mode:'paid',degraded:null}})),{stale:false,paused:false},'never checked: not paused');
- assert.deepEqual(S.stripeState(VIEW({stripeCheck:never,payments:'paid',signup:'on',effective:undefined})),{stale:false,paused:false},'never checked, no effective: not paused');
+ assert.deepEqual(S.stripeState(VIEW({stripeCheck:never,payments:'paid',signup:'on',effective:{mode:'paid',degraded:null}})),{stale:false,paused:false,rearm:false},'never checked: not paused');
+ assert.deepEqual(S.stripeState(VIEW({stripeCheck:never,payments:'paid',signup:'on',effective:undefined})),{stale:false,paused:false,rearm:false},'never checked, no effective: not paused');
  assert.doesNotMatch(S.pageView(VIEW({signup:'on',payments:'paid',mode:'paid',stripeCheck:never,effective:{mode:'paid',degraded:null}})).html,/wstrzymane, dopóki/);
  // A failed check: the server's degraded signal decides; without effective, a made and failed check pauses.
- assert.deepEqual(S.stripeState(VIEW({stripeCheck:{...fresh,ok:false},payments:'paid',signup:'on',...DEG})),{stale:false,paused:true},'failed check, server degraded');
- assert.deepEqual(S.stripeState(VIEW({stripeCheck:{...fresh,ok:false},payments:'paid',signup:'on',effective:undefined})),{stale:false,paused:true},'failed check, no effective');
- assert.deepEqual(S.stripeState(VIEW({stripeCheck:{...fresh,ok:false},payments:'paid',signup:'on',effective:{mode:'off',degraded:'billing-missing'}})),{stale:false,paused:false},'another degradation has its own alert');
+ assert.deepEqual(S.stripeState(VIEW({stripeCheck:{...fresh,ok:false},payments:'paid',signup:'on',...DEG})),{stale:false,paused:true,rearm:false},'failed check, server degraded');
+ assert.deepEqual(S.stripeState(VIEW({stripeCheck:{...fresh,ok:false},payments:'paid',signup:'on',effective:undefined})),{stale:false,paused:true,rearm:false},'failed check, no effective');
+ assert.deepEqual(S.stripeState(VIEW({stripeCheck:{...fresh,ok:false},payments:'paid',signup:'on',effective:{mode:'off',degraded:'billing-missing'}})),{stale:false,paused:false,rearm:false},'another degradation has its own alert');
  const stale=S.pageView(VIEW({signup:'on',payments:'paid',mode:'paid',stripeCheck:{...fresh,stale:true},...DEG})).html;
  assert.match(stale,/class="set-alert" role="alert"><strong>Konfiguracja Stripe zmieniła się od ostatniego sprawdzenia — sprawdź ponownie<\/strong> Płatna rejestracja i wymaganie płatności są wstrzymane, dopóki nowa kontrola Stripe nie przejdzie\./);
  assert.match(stale,/data-set-form="mode">[\s\S]*Płatna rejestracja i wymaganie płatności są wstrzymane[\s\S]*Zapisz tryb rejestracji/,'the sign-up section says it too');
  assert.doesNotMatch(S.pageView(VIEW({signup:'on',payments:'paid',mode:'paid',stripeCheck:fresh})).html,/sprawdź ponownie|wstrzymane, dopóki/);
  english(()=>assert.match(S.pageView(VIEW({stripeCheck:{...fresh,stale:true}})).html,/The Stripe configuration has changed since the last check — check again/));
+});
+// R2.4 (contract (b), frontend part): a passing check after test -> live keys (or with nothing confirmed) resumes nothing (rearm);
+// the panel says that saving the sign-up mode resumes payments, and that save goes to the server even without changes.
+test('R2.4: rearm shows "zapis trybu rejestracji" instead of "dopóki nowa kontrola", and the unchanged mode save runs the server gate',async()=>{
+ const rearm={ok:true,stale:false,checkedAt:'2026-10-30T10:00:00Z',mode:'live',rearm:true},DEG={effective:{mode:'off',degraded:'stripe-check'}};
+ const live={stripe:{enabled:true,mode:'live',check:{at:1700000000,ok:true,mode:'live',prices:{pln:true,usd:true},error:null}}};
+ const view=VIEW({signup:'on',payments:'paid',mode:'paid',stripeCheck:rearm,...DEG,...live});
+ assert.deepEqual(S.stripeState(view),{stale:false,paused:true,rearm:true});
+ assert.deepEqual(S.stripeState(VIEW({signup:'on',payments:'paid',mode:'paid',stripeCheck:rearm,effective:{mode:'paid',degraded:null}})),{stale:false,paused:false,rearm:false},'not paused: no rearm');
+ const html=S.pageView(view).html,note=/Kontrola Stripe przeszła, ale płatności są dalej wstrzymane: zmienił się tryb Stripe \(test ↔ live\) albo tej konfiguracji nie potwierdzono jeszcze w panelu\. Wznowi je zapis trybu rejestracji: kliknij „Zapisz tryb rejestracji”\./g;
+ assert.equal(html.match(note)?.length,2,'in the Stripe and the sign-up sections');
+ assert.doesNotMatch(html,/wstrzymane, dopóki nowa kontrola/,'never "until a new check passes": more checks resume nothing');
+ english(()=>assert.match(S.pageView(view).html,/The Stripe check passed, but payments are still paused[\s\S]*click “Save sign-up mode”/));
+ // A failed check (no rearm) keeps the old notice.
+ assert.match(S.pageView(VIEW({signup:'on',payments:'paid',mode:'paid',stripeCheck:{...rearm,ok:false,rearm:false},...DEG})).html,/wstrzymane, dopóki nowa kontrola/);
+ // The save: an unchanged mode while payments are paused goes as {version} (the server's $resume); otherwise "Nic nie zmieniono."
+ assert.equal(S.resumes(view),true);assert.equal(S.resumes(VIEW({payments:'paid',effective:{mode:'paid',degraded:null}})),false);assert.equal(S.resumes(VIEW({payments:'free',...DEG})),false);
+ assert.deepEqual(S.modeExtra(view,{}),{resume:true});assert.deepEqual(S.modeExtra(view,{signup:'off'}),{},'a change is an ordinary save');assert.deepEqual(S.modeExtra(VIEW(),{}),{});
+ assert.deepEqual(S.saveBody(view,{},{resume:true}),{version:3},'only the version is sent');
+ const log=[],sent=[],box={textContent:''};let open=false;const replies=[conflict('free_period_decision',{counts:{a:0,b:1}}),VIEW({version:4,signup:'on',payments:'paid',mode:'paid',effective:{mode:'paid',degraded:null},stripeCheck:{...rearm,rearm:false},...live})];
+ registry.provide('ui',{modal:title=>{open=true;log.push('modal:'+title);},closeModal:()=>{open=false;log.push('close');},toast:m=>log.push('toast:'+m)});
+ globalThis.document={querySelector:sel=>sel==='#modal-root .modal'?(open?{}:null):sel==='#modal-root .form-error'?(open?box:null):null};
+ const io={...S.io};S.io.request=async(route,o)=>{sent.push([route,o?.body]);const r=replies.shift();if(r instanceof Error)throw r;return r;};S.io.refreshMe=()=>{};
+ const formBox={textContent:''},form={closest:sel=>sel==='form'?{querySelector:()=>formBox}:null};
+ try{
+  S.state.view=VIEW({payments:'free'});await S.save(form,{},S.modeExtra(S.state.view,{}));
+  assert.equal(formBox.textContent,'Nic nie zmieniono.');assert.equal(sent.length,0,'nothing paused: nothing sent');
+  S.state.view=view;await S.save(form,{},S.modeExtra(view,{}));
+  assert.deepEqual(sent[0],['admin-settings-save',{version:3}],'the unchanged save goes to the server');
+  assert.equal(log.at(-1),'modal:Konta z okresu bezpłatnego','the gate asks for the decision (live keys: no test-mode question)');
+  const p=S.pendingSave();assert.deepEqual([p.fields,p.extra],[{},{resume:true}]);
+  await S.save(form,p.fields,{...p.extra,freePeriod:{action:'keep'}},p.done);
+  assert.deepEqual(sent[1],['admin-settings-save',{version:3,freePeriod:{action:'keep'}}],'the decision resends the unchanged save');
+  assert.equal(open,false);assert.equal(S.state.view.version,4);assert.deepEqual(S.stripeState(S.state.view),{stale:false,paused:false,rearm:false},'payments run again');
+ }finally{Object.assign(S.io,io);delete globalThis.document;S.state.view=null;}
 });
 test('R1.2: "Sprawdź Stripe" shows the result and then loads the server view again (stale, effective and degraded from the server)',async()=>{
  const log=[],sent=[];const checked={at:1700000000,ok:true,mode:'test',prices:{pln:true,usd:true},error:null};
@@ -265,11 +300,11 @@ test('R1.2: "Sprawdź Stripe" shows the result and then loads the server view ag
  const io={...S.io};S.io.request=async(route,o)=>{sent.push(route);return replies.shift();};
  try{
   S.state.view=VIEW({signup:'on',payments:'paid',mode:'paid',effective:{mode:'off',degraded:'stripe-check'},stripeCheck:{ok:true,stale:true,checkedAt:'2023-11-14T22:13:20+00:00',mode:'test'}});
-  assert.deepEqual(S.stripeState(S.state.view),{stale:true,paused:true});
+  assert.deepEqual(S.stripeState(S.state.view),{stale:true,paused:true,rearm:false});
   const button={disabled:false,isConnected:true};await S.checkStripe(button);
   assert.deepEqual(sent,['admin-stripe-check','admin-settings'],'the view is loaded again after the check');
   assert.equal(log[0],'toast:Stripe działa.');
-  assert.equal(S.state.view,after,'the server view replaces the local one');assert.deepEqual(S.stripeState(S.state.view),{stale:false,paused:false});
+  assert.equal(S.state.view,after,'the server view replaces the local one');assert.deepEqual(S.stripeState(S.state.view),{stale:false,paused:false,rearm:false});
   assert.equal(button.disabled,false);
  }finally{Object.assign(S.io,io);delete globalThis.document;S.state.view=null;}
 });
@@ -283,13 +318,13 @@ test('R2.1: a 503 from "Sprawdź Stripe" (failed check saved, then stripe_unavai
  globalThis.document={querySelector:()=>null};
  const io={...S.io};S.io.request=async route=>{sent.push(route);const r=replies.shift();if(r instanceof Error)throw r;return r;};
  try{
-  S.state.view=before;assert.deepEqual(S.stripeState(S.state.view),{stale:false,paused:false});
+  S.state.view=before;assert.deepEqual(S.stripeState(S.state.view),{stale:false,paused:false,rearm:false});
   replies=[fail(503,'stripe_unavailable'),after];
   const button={disabled:false,isConnected:true};await S.checkStripe(button);
   assert.deepEqual(sent,['admin-stripe-check','admin-settings'],'the server view is loaded again after a 503');
   assert.equal(log.length,1,'one toast with the error');
   assert.equal(S.state.view,after,'the server view replaces the old one');
-  assert.deepEqual(S.stripeState(S.state.view),{stale:false,paused:true},'paid sign-up shows as paused');
+  assert.deepEqual(S.stripeState(S.state.view),{stale:false,paused:true,rearm:false},'paid sign-up shows as paused');
   assert.equal(button.disabled,false);
   sent.length=0;log.length=0;S.state.view=before;replies=[fail(429,'rate_limited')];
   await S.checkStripe(button);

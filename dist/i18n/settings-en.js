@@ -54,6 +54,7 @@ export default {
  'Otwórz mimo to':'Open anyway',
  'Konfiguracja Stripe zmieniła się od ostatniego sprawdzenia — sprawdź ponownie':'The Stripe configuration has changed since the last check — check again',
  'Płatna rejestracja i wymaganie płatności są wstrzymane, dopóki nowa kontrola Stripe nie przejdzie.':'Paid sign-up and payment enforcement are paused until a new Stripe check passes.',
+ 'Kontrola Stripe przeszła, ale płatności są dalej wstrzymane: zmienił się tryb Stripe (test ↔ live) albo tej konfiguracji nie potwierdzono jeszcze w panelu. Wznowi je zapis trybu rejestracji: kliknij „Zapisz tryb rejestracji”.':'The Stripe check passed, but payments are still paused: the Stripe mode changed (test ↔ live) or this configuration has not been confirmed in the panel yet. Saving the sign-up mode resumes them: click “Save sign-up mode”.',
  // Help address.
  'Adres pomocy':'Help address',
  'E-mail pomocy':'Help e-mail',
