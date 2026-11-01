@@ -192,6 +192,13 @@ ok 'activating a release with its own sw.js replaces the kill switch and its .ht
 sql "INSERT INTO users (id,club_id,email,role,active,password_hash,auth_version) VALUES ('m1',NULL,'member@test.example','member',1,'x',1)"
 run 'rollback to R0 with a member' env PHP_INI_SCAN_DIR=":$work/ini" bash "$repo/scripts/deploy-remote.sh" rollback "$base" "$docroot"
 ok 'the floor guard blocks the rollback while a member exists' '[[ $rc != 0 && $(readlink -f "$base/current") == "$base/releases/$R1" ]] && grep -q "dane w bazie wymagają kodu co najmniej w wersji" <<<"$out" && grep -q FORCE_ROLLBACK <<<"$out"'
+# Final review B11, B12: the refusal gives the reason of its floor (2: member accounts; 7: community data shown to staff)
+# and says that reverting the whole release does not help.
+ok 'the refusal for floor 2 names member accounts and warns against reverting the release' 'grep -q "co najmniej w wersji 2, " <<<"$out" && grep -q "istnieją konta członków" <<<"$out" && ! grep -q "personelowi" <<<"$out" && grep -q "nie cofaj całego wydania" <<<"$out"'
+sql "INSERT INTO tournaments (id,created_by,name,city,event_date,mat,status,activity) VALUES ('t-floor7','m1','Turniej Członka','Opole','2030-01-01','Mata 1','open','[]')"
+run 'rollback to R0 with community data' env PHP_INI_SCAN_DIR=":$work/ini" bash "$repo/scripts/deploy-remote.sh" rollback "$base" "$docroot"
+ok 'the refusal for floor 7 names community data shown to staff' '[[ $rc != 0 && $(readlink -f "$base/current") == "$base/releases/$R1" ]] && grep -q "co najmniej w wersji 7, " <<<"$out" && grep -q "istnieją dane społeczności" <<<"$out" && grep -q "pokazałby je personelowi" <<<"$out" && ! grep -q "istnieją konta członków" <<<"$out"'
+sql "DELETE FROM tournaments WHERE id='t-floor7'"
 run 'activate R0 with a member' remote activate "$R0"
 ok 'the floor guard also blocks activating the old release by name' '[[ $rc != 0 && $(readlink -f "$base/current") == "$base/releases/$R1" ]]'
 run 'FORCE_ROLLBACK=1 rollback' env FORCE_ROLLBACK=1 bash "$repo/scripts/deploy-remote.sh" rollback "$base" "$docroot"

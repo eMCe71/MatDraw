@@ -66,9 +66,13 @@ go_live(){
 }
 # Highest migration id a release ships (1 = baseline only), from the file names, exactly as Migrator::target().
 code_target(){ local n=1 f id; for f in "$1"/backend/migrations/[0-9][0-9][0-9][0-9]_*.php; do [[ -f $f ]] || continue; id=${f##*/}; id=$((10#${id:0:4})); ((id>n)) && n=$id; done; echo "$n"; }
-# Rollback floor guard (plan §2.8): code older than the data needs (e.g. without member accounts, migration 0002) would
-# show members data they may not see. The floor comes from migrate.php of the active release, which knows every
-# migration the data could need; a target release at least as new as the active one never needs the database.
+# Rollback floor guard (plan §2.8): code older than the data needs would show data to people who may not see it (floor 2,
+# migration 0002: member accounts, which old code would treat as staff; floor 7, migration 0007: community data, i.e.
+# organizers' tournaments, athlete profiles of accounts, members' or merged clubs, hidden tournaments, which old code would
+# show to staff). The floor comes from migrate.php of the active release, which knows every migration the data could need;
+# a target release at least as new as the active one never needs the database. The refusal names the reason of its floor
+# and says not to revert the whole release: reverting it ships the old tree, which is refused the same way (final review
+# B11, B12).
 floor_guard(){
  local dir=$1 cur want have floor= raw= err= tmp
  cur=$(readlink -f "$base/current" 2>/dev/null || true); [[ -n $cur && -d $cur && $cur != "$(readlink -f "$dir")" ]] || return 0
@@ -82,7 +86,9 @@ floor_guard(){
  fi
  if [[ -n $floor ]]; then
   ((floor<=want)) && return 0
-  msg="Powrót zablokowany: dane w bazie wymagają kodu co najmniej w wersji $floor (np. istnieją konta członków), a wydanie $(basename "$dir") obsługuje tylko wersję $want. Starszy kod pokazałby członkom dane, których nie wolno im widzieć. Popraw błąd nowym wdrożeniem."
+  if ((floor>=7)); then why="istnieją dane społeczności (turnieje organizatorów, profile zawodników z kont, kluby członków albo scalone, ukryte turnieje); starszy kod pokazałby je personelowi"
+  else why="istnieją konta członków; starszy kod potraktowałby je jak personel i pokazałby im dane, których nie wolno im widzieć"; fi
+  msg="Powrót zablokowany: dane w bazie wymagają kodu co najmniej w wersji $floor, a wydanie $(basename "$dir") obsługuje tylko wersję $want: $why. Popraw błąd nowym wdrożeniem, które zachowuje migracje do wersji $floor i kod, który je czyta (nie cofaj całego wydania: takie wydanie też zostanie odrzucone)."
  else
   msg="Powrót zablokowany: nie udało się sprawdzić, jakiej wersji kodu wymagają dane ($(head -c 300 <<<"${err:-${raw:-brak migrate.php}}" | tr '\n' ' ')). Wydanie $(basename "$dir") obsługuje tylko wersję $want."
  fi

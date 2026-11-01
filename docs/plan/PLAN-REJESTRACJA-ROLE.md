@@ -156,7 +156,7 @@ $eff['signup_mode'] = !$eff['signup_enabled'] ? 'off' : ($eff['billing_enforce']
 | on | paid | true | tak, gdy kontrola Stripe przeszła przy przełączeniu (§3.4) | „Załóż konto · 8,99 zł / mies.” | tak |
 | * | paid | false | nie: `effective` przechodzi w `off`+`free`, `settings_degraded='billing-missing'` | „Zaloguj się, aby pisać” | — |
 
-- **Token zaproszeń** (`signup_invite_token`) zostaje wyłącznie w `config.php`. `Members::signupOpen()` przyjmuje go tylko wtedy, gdy rejestracja jest wyłączona, a `effective.billing_enforce=true`.
+- **Token zaproszeń** (`signup_invite_token`) zostaje wyłącznie w `config.php`. `Members::signupOpen()` przyjmuje go tylko wtedy, gdy rejestracja jest wyłączona, a `effective.billing_enforce=true`, i nigdy przy `signup_force_off` (`effective` usuwa wtedy token, §18 B6).
 - **Nowy klucz config** `signup_force_off` (domyślnie `false`): awaryjny sufit (SSH).
 - `signup_free_beta` zostaje w `Config::DEFAULTS` dla zgodności i jest wyprowadzany w `effective`. `support_email` z config jest tylko wartością startową.
 
@@ -202,7 +202,7 @@ Dochodzą nowe limity:
 | Włączenie roli organizatora (rejestracja i `roles`) na IP /64 | 3 na dobę | `RateLimit 'organizer-enable-ip-day'` | `Zbyt wiele nowych kont organizatorów z tej sieci. Spróbuj ponownie jutro.` |
 | `roles` na konto | 10/h | `RateLimit 'roles'` | `Zbyt wiele zmian ról. Spróbuj ponownie później.` |
 | Komendy workspace członka-organizatora | 60/min i 1200/h na konto | `index.php` przed transakcją | `Zbyt wiele operacji. Spróbuj ponownie za chwilę.` |
-| **Wszystkie transakcje workspace członków razem** (komendy organizatorów, `athlete-entry`, `-withdraw`, `-save`, `-archive`, `-forget`) | 120 na minutę globalnie; personel nie jest liczony | `RateLimit 'member-tx','all'` w `index.php` i trasach `athlete-*` | `Serwer jest teraz mocno obciążony. Spróbuj ponownie za chwilę.` (z `Retry-After`) |
+| **Wszystkie transakcje workspace członków razem** (komendy organizatorów, `athlete-entry`, `-save`, `-archive`) | 120 **zapisanych** na minutę globalnie (sprawdzane przed blokadą, liczone po zatwierdzeniu: odrzucone komendy nie zużywają kubełka) i 30 transakcji na minutę na konto; personel nie jest liczony; wycofanie zgłoszenia i usunięcie danych (`entry.remove`, `profile.forget`, `athlete-withdraw`, `athlete-forget`) nigdy nie czeka (R12) | `MemberTx` (`RateLimit 'member-tx','all'` i `'member-tx-account'`) w `index.php` i trasach `athlete-*` (§18 B2) | `Serwer jest teraz mocno obciążony. Spróbuj ponownie za chwilę.` / `Zbyt wiele operacji. Spróbuj ponownie za chwilę.` (z `Retry-After`) |
 | `bootstrap` członka-organizatora | 1500/h **na sesję**; odpowiedzi `unchanged` (§8.1) nie są liczone | `index.php` | `Zbyt wiele operacji. Spróbuj ponownie za chwilę.` |
 | `organizer-unlock` | limity logowania (`Auth::reserveLogin`) | trasa | istniejący komunikat logowania |
 | Nowe turnieje organizatora | 3 na dobę (także robocze); 10 opublikowanych nadchodzących | `Domain` (pod blokadą) | `Limit nowych turniejów: 3 na dobę.` / `Masz już 10 opublikowanych nadchodzących turniejów. Przełącz któryś na roboczy albo poczekaj, aż się odbędzie.` |
@@ -898,7 +898,7 @@ Każdy nowy tekst to polski klucz `T()` z jednym wpisem EN w słowniku funkcji. 
 
 ## 13. Wdrożenie i kroki właściciela
 
-**Wdrożenie** idzie jednym scaleniem do `main` po `integration-qa`, w dzień bez zawodów (PLAN-CZAT D18). Pipeline robi kopię bazy, migruje 0007 i 0008, przełącza wydanie i weryfikuje. **Po wdrożeniu nic się nie zmienia** (brak wiersza `app_settings` → `config.php`: rejestracja wyłączona). Wydanie podnosi `min_client_api`, więc otwarte karty odświeżą się i pobiorą nową rewizję.
+**Wdrożenie** idzie jednym scaleniem do `main` po `integration-qa`, w dzień bez zawodów (PLAN-CZAT D18). Pipeline robi kopię bazy, migruje 0007 i 0008, przełącza wydanie i weryfikuje. **Po wdrożeniu nic się nie zmienia** (brak wiersza `app_settings` → `config.php`: rejestracja wyłączona; istniejące konta członków nie włączą roli organizatora ani nie założą profilu zawodnika, dopóki rejestracja jest wyłączona, §18 B10). `min_client_api` zostaje `1`; zamiast tego migracja 0007 zapisuje `app_meta.rev_floor` (rewizja z chwili migracji), a `Domain::stale` uznaje każdą komendę z rewizją sprzed niej za nieaktualną, więc karta otwarta przed wdrożeniem dostaje 409 i odświeża widok, zamiast nadpisać zmianę, której nie widziała (§18 B8).
 
 Kroki właściciela (kolejność):
 1. **Załóż skrzynkę `hello@matbravo.com`** w panelu AfterMarket (albo przekierowanie) i wyślij próbną wiadomość.
@@ -1062,6 +1062,27 @@ Przegląd z 2026-11-01 zgłosił 55 ustaleń w trzech soczewkach. Każde sprawdz
   - **Korekta własnego zgłoszenia (R12).** `athlete-entry` z `update:true` dla istniejącego zgłoszenia własnego profilu, bez nowych konkurencji, działa bez pełnego dostępu. Nowa konkurencja albo nowy turniej to zgłoszenie, które w trybie płatnym daje 402.
   - **Pola kontraktu `me` i `public-config` (§4.4, §8.1)** są dostarczane zgodnie z planem. Asercje dokładnego zestawu kluczy w `tests/accounts.http.test.mjs` zaktualizowano świadomie (opcja A).
   - **Grupa B przy przejściu na płatne (§3.4)** nie obejmuje kont z subskrypcją bieżącego trybu ani kont, które Admin sam oznaczył jako płatne. Gdy płatność jest już wymagana, grupa B jest pusta.
+
+## 18. Poprawki po przeglądzie końcowym (2026-11-01, grupa backend)
+
+Przegląd końcowy (bezpieczeństwo, ustawienia i płatności, domena, wdrożenie, UX) potwierdził ustalenia B1–B11; B12–B19 to drobne. Rozstrzygnięcia po stronie serwera (lustro JS w `dist/workspace.js` i `dist/engine.js`, testy zgodności PHP/JS):
+
+| # | Ustalenie | Rozstrzygnięcie |
+|---|---|---|
+| B10 | Istniejące konta członków dostawały role zaraz po wdrożeniu, przy rejestracji „Wyłączona” | `Settings::rolesOpen(effective)` = `signup_mode !== 'off'` (także `signup_force_off`). Przy zamkniętej: `roles {organizer:true}` i `athlete-save` bez `id` → 403 (`Rejestracja jest chwilowo wyłączona.`); wyłączenie roli, poprawki, wycofania i usuwanie danych działają zawsze. `me.features.rolesOpen` i `public-config.rolesOpen` (frontend ukrywa/blokuje zakładkę Role) |
+| B1 | Organizator spoza turnieju kasował zapisane losowania (`reconcile`) wpisując albo wycofując swój profil | Reguła DR-5 (`Domain::keepDraws`) dla każdej zmiany zgłoszenia przez kogoś, kto nie zarządza turniejem: członek wszędzie, personel (edytor, klub) w turniejach społeczności. Menedżer i personel w turniejach personelu bez zmian (jak w a67ad42). Ścieżki usuwania danych (`detach`) bez zmian |
+| B2 | Dwa darmowe konta organizatorów wyczerpywały globalny kubełek komendami-śmieciami | `MemberTx` (§3.7): globalny kubełek liczy tylko zatwierdzone zapisy, konto ma własne 30 transakcji na minutę, usuwanie i wycofanie nigdy nie czeka |
+| B7 | Po `club.merge` konto klubu nie widziało i nie wycofywało zgłoszeń dawnego klubu | Odczyt migawek przez scalenia (`Clubs::roots`) w `entryVisible`/`sees`/`removeEntry`; migawki bez zmian (PS-10) |
+| B9 | Rozdzielanie klubów w losowaniu porównywało nazwy z migawek | `Domain::drawAthletes` dodaje `clubKey` (klub po scaleniach; inaczej `name:`+klucz nazwy), `Rules::sameClub`/`sameClub` porównują go; `signature()` i zapisane losowania bez zmian |
+| B8 | Po 0007 obiekty mają `rev=0`, więc karty sprzed wdrożenia omijały kontrolę nieaktualności | `app_meta.rev_floor` w 0007; `stale()`: rewizja poniżej progu → nieaktualna (§13) |
+| B4, B16 | Zmiana kluczy Stripe w `config.php` przy płatnościach „płatnych” omijała kontrolę; cena w Stripe ≠ kwota dla gości | `stripeCheck.fp` = HMAC (`app_key`) z trybu, skrótu klucza, kluczy cen i kwot. `effective`: przy zapisanej kontroli, która nie przeszła albo dotyczy innej konfiguracji → rejestracja zamknięta, płatności wstrzymane, `settings_degraded='stripe-check'`, do udanego „Sprawdź Stripe”. Kontrola porównuje kwotę ceny z `billing_amounts` (`amount_mismatch`). `admin-settings.stripeCheck {ok, stale, checkedAt, mode}` |
+| B5 | Płatną rejestrację w trybie testowym Stripe można było otworzyć bez potwierdzenia | Bramka zapisu obejmuje też otwarcie płatnej rejestracji (`off` → `on` przy „płatnych”); 409 `test_mode` z `confirmTestMode:true`, potwierdzenie `allowTestMode` (albo `confirmTestMode`); decyzja o kontach, gdy płatności nie są w tej chwili wymagane |
+| B6 | `signup_force_off` nie zamykał tokenu zaproszeń | §3.3: sufit nad każdą samodzielną rejestracją; baner także w oknie testów |
+| B3 | Usunięcie konta zostawia pełne imię w wynikach | Bez zmian: decyzja właściciela O7; ostrzeżenie i ścieżka do inicjałów w oknie usunięcia konta (frontend) |
+| B11, B12 | Rada „cofnij wydanie” i komunikat strażnika „floor” | Komunikat podaje powód progu (2: konta członków, 7: dane społeczności) i ostrzega przed cofnięciem całego wydania; `DEPLOY-PL.md` opisuje poprawkę z zachowaniem migracji 0007–0009 |
+| B14 | Limit organizatorów na sieć omijany równoległymi rejestracjami | Rezerwacja atomowa (`RateLimit::hit`) i zwrot (`RateLimit::refund`) przy nieudanej rejestracji lub zmianie roli; powyżej limitu duplikatów e-maili odpowiedź 429 zamiast 409 |
+| B18 | Kluby tworzone przez edytora były niezweryfikowane | Klub nowy tworzony przez personel jest zweryfikowany (jak w a67ad42); przez członka nie |
+| B19 | Usunięcie konta organizatora ukrywało turniej zakończony tego dnia | `forgetMember` pomija turnieje `finished` |
 
 ## Załącznik A. Nowe ustawienia
 
