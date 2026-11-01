@@ -1,6 +1,7 @@
 import {CONFIG} from './runtime-config.js';
 import {initialWorkspace,execute,publicWorkspace,organizer,trustedOrganizer,DomainError,UNAFFILIATED} from './workspace.js';
 import {guestUpcoming,guestTournament,warsawToday} from './guest-view.js';
+import {athleteView,publicClubs} from './athlete-view.js';
 import {emit} from './registry.js';
 const KEY='matdraw.workspace.v2',SESSION='matdraw.session.v2';
 export const isDemo=CONFIG.mode==='demo';
@@ -119,6 +120,33 @@ export async function command(type,payload,expectedRevision){
   db=next;save();const updated=db.users.find(u=>u.id===actor.id);
   if(result.id===actor.id&&updated.active){authVersion=updated.authVersion;sessionStorage.setItem(SESSION,JSON.stringify({id:session,version:authVersion}));}
   return {workspace:view(me()),result};
+ });
+}
+/** Athlete routes (PLAN-REJESTRACJA-ROLE §7, §8.1): athlete (GET: AthleteView), athlete-save, athlete-archive, athlete-forget,
+ * athlete-entry, athlete-withdraw (POST, JSON body) and public-clubs (public GET). API mode sends them as they are (request, so
+ * errors carry status and code: 402 leads to the payment prompt). The demo (§10.7) answers from this browser's data with the
+ * shapes of backend/routes/athletes.php: athleteView() of athlete-view.js and the commands of workspace.js (athlete.save,
+ * athlete.archive, athlete.forget with the password, entry.self, entry.remove of an own profile only). */
+export const ATHLETE_ROUTES=['athlete','athlete-save','athlete-archive','athlete-forget','athlete-entry','athlete-withdraw','public-clubs'];
+const only=(o,keys)=>Object.fromEntries(keys.filter(k=>o&&typeof o==='object'&&Object.hasOwn(o,k)).map(k=>[k,o[k]]));
+const copy=value=>JSON.parse(JSON.stringify(value));
+export async function athleteRequest(route,body={}){
+ if(!ATHLETE_ROUTES.includes(route))throw new DomainError('Nieznana operacja.',400);
+ if(!isDemo)return route==='public-clubs'?publicApi({route}):request(route,route==='athlete'?{}:{method:'POST',body});
+ if(route==='public-clubs'){read();return copy(publicClubs(db?.clubs||[]));}
+ if(route==='athlete'){read();const u=me();if(u.role!=='member')throw new DomainError('Brak uprawnień.',403);return copy(athleteView(db,u,warsawToday()));}
+ return locked(async()=>{
+  read();const u=me();if(u.role!=='member')throw new DomainError('Brak uprawnień.',403);
+  const p=body&&typeof body==='object'?body:{},owned=db.profiles.some(a=>a.ownerId===u.id&&a.id===p.profileId);
+  const run=(type,payload)=>{const out=execute(db,u.id,type,payload,db.revision);db=out.db;save();return out.result;};
+  const view=()=>athleteView(db,u,warsawToday()),caps=()=>demoActor(u.id).caps;
+  if(route==='athlete-save'){const r=run('athlete.save',only(p,['id','name','birthDate','sex','weight','height','gradeType','grade','club','relation']));return copy({profile:view().profiles.find(a=>a.id===r.id)??null,caps:caps(),...(r.notice?{notice:r.notice}:{})});}
+  if(route==='athlete-archive'){run('athlete.archive',{profileId:p.profileId,archived:p.archived!==false});return {caps:caps()};}
+  if(route==='athlete-forget'){if(typeof p.password!=='string'||await hash(p.password,u.passwordSalt)!==u.passwordHash)throw new DomainError('Nieprawidłowe obecne hasło.',422);run('athlete.forget',{profileId:p.profileId});return {caps:caps()};}
+  if(route==='athlete-entry'){const r=run('entry.self',only(p,['tournamentId','profileId','events','weight','height','gradeType','grade','saveToProfile','update']));return copy({ok:true,entry:view().entries.find(e=>e.profileId===r.id&&e.tournament.id===r.tournamentId)??null});}
+  // Only the own profiles' entries, as the route: never another person's entry through a tournament this member organizes.
+  if(typeof p.profileId!=='string'||!owned)throw new DomainError('Zawodnik nie istnieje.',404);
+  run('entry.remove',{tournamentId:p.tournamentId,id:p.profileId});return {ok:true};
  });
 }
 export const dataKey=KEY;
