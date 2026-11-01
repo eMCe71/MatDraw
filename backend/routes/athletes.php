@@ -4,7 +4,7 @@
 //   athlete           GET peek, member: AthleteView::build (no workspace, no lock); ?t=<tournament id> keeps that tournament in
 //                     the open list when it takes self-entries, also beyond OPEN_LIMIT (the guest preview's "enter" link)
 //   athlete-save      POST session, member: athlete.save (§6.1)                       20/h per account (with athlete-archive)
-//                     without id (a new profile) only while sign-up is open: 403 'Rejestracja jest chwilowo wyłączona.' (B10)
+//                     without id (a new profile) only while sign-up is open: 403 'Role są dostępne po otwarciu rejestracji.' (B10)
 //   athlete-archive   POST session, member: athlete.archive {profileId, archived}      20/h (shared)
 //   athlete-forget    POST session, member: athlete.forget {profileId, password}       5/h, password with the login limits
 //   athlete-entry     POST session, member, 4 KB: entry.self (§7.2); 402 without full access in paid mode   30/h (with withdraw)
@@ -52,7 +52,7 @@ return [
  }],
  'athlete'=>['method'=>'GET','auth'=>'peek','user'=>'member','handler'=>fn(RouteContext $ctx):array=>$view($ctx,$config($ctx),$include($ctx))],
  'athlete-save'=>['method'=>'POST','auth'=>'session','user'=>'member','handler'=>function(RouteContext $ctx)use($config,$fields,$run,$saveLimit,$view,$caps):array{
-  $c=$config($ctx);if($ctx->input('id')===null&&!Settings::rolesOpen($c))throw new AppError('Rejestracja jest chwilowo wyłączona.',403);$saveLimit($ctx,$c);
+  $c=$config($ctx);if($ctx->input('id')===null&&!Settings::rolesOpen($c))throw new AppError('Role są dostępne po otwarciu rejestracji.',403);$saveLimit($ctx,$c);
   $r=$run($ctx,$c,Actors::of($ctx->pdo(),$ctx->user()),'athlete.save',$fields($ctx->body,['id','name','birthDate','sex','weight','height','gradeType','grade','club','relation']));
   $profile=null;foreach($view($ctx,$c)['profiles'] as $p)if($p['id']===$r['id'])$profile=$p;
   return ['profile'=>$profile,'caps'=>$caps($ctx)]+(isset($r['notice'])?['notice'=>$r['notice']]:[]);

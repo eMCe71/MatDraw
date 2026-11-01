@@ -42,7 +42,7 @@ async function guest(route){const r=await fetch(base+'?route='+route,{headers:{'
 /** A session that started the sign-up form 10 s ago (server-measured time). */
 async function begun(body={}){const c=await fresh();const r=await c.req('signup-begin',body);if(r.status===200)fixture('session-edit',{sid:sid(c),set:{signup_at:now()-10}});return [c,r];}
 const signupBody=(over={})=>({email:uniq('rej')+'@review.test',password:PASSWORD,firstName:'Ola',lastName:'Nowak',username:uniq('ola'),country:'PL',sports:['taekwondo'],clubText:null,showClub:false,website:'',...over});
-const CLOSED='Rejestracja jest chwilowo wyłączona.',BUSY='Serwer jest teraz mocno obciążony. Spróbuj ponownie za chwilę.',OWN='Zbyt wiele operacji. Spróbuj ponownie za chwilę.';
+const CLOSED='Rejestracja jest chwilowo wyłączona.',ROLES_CLOSED='Role są dostępne po otwarciu rejestracji.',BUSY='Serwer jest teraz mocno obciążony. Spróbuj ponownie za chwilę.',OWN='Zbyt wiele operacji. Spróbuj ponownie za chwilę.';
 const original={};
 /** Rewrites keys of config.php (settings-config) and remembers the first old value of each for after(). */
 function setConfig(set){const old=fixture('settings-config',{set});for(const k of Object.keys(old))if(!(k in original))original[k]=old[k];}
@@ -60,15 +60,15 @@ test('B10: while sign-up is off members gain no roles (organizer, a new athlete 
   const plain=member('b10'),c=await signIn(plain.email);
   const f=ok(await c.req('me')).features;assert.deepEqual([f.signupMode,f.rolesOpen],['off',false]);
   assert.equal((await guest('public-config')).data.rolesOpen,false);
-  error(await c.req('roles',{organizer:true}),403,CLOSED);
-  error(await c.req('athlete-save',athleteBody({club:{name:'Klub '+uniq('k')}})),403,CLOSED);
+  error(await c.req('roles',{organizer:true}),403,ROLES_CLOSED);
+  error(await c.req('athlete-save',athleteBody({club:{name:'Klub '+uniq('k')}})),403,ROLES_CLOSED);
   const st=fixture('roles-user',{email:plain.email});
   assert.deepEqual([st.user.organizer,st.profiles.length,st.clubs.length],[0,0,0],'no organizer role, owned profile or club: nothing the 0007 floor counts (the rollback stays possible)');
   // An organizer from before keeps his tools and may switch the role off, but not on again while sign-up is off.
   const o=member('b10org',{organizer:true}),oc=await signIn(o.email);await oc.load();
   const t=(await oc.cmd('tournament.save',T({name:'Turniej Istniejącego Organizatora'}))).id;await oc.cmd('tournament.save',T({name:'Turniej Istniejącego Organizatora',id:t,status:'draft'}));
   assert.equal(ok(await oc.req('roles',{organizer:false})).caps.organizer,false);
-  error(await oc.req('roles',{organizer:true}),403,CLOSED);
+  error(await oc.req('roles',{organizer:true}),403,ROLES_CLOSED);
   // An athlete from before edits his profile and enters and withdraws.
   const a=await admin(),open=(await a.cmd('tournament.save',{...T({name:'Turniej Zawodnika B10'}),selfEntry:true})).id,x=athlete('b10ath'),xc=await signIn(x.email);
   assert.equal(ok(await xc.req('athlete-save',{...athleteBody({sex:'M',birthDate:'1995-04-04',weight:71,height:175,grade:5}),id:x.profileId,name:'Zawodnik Poprawiony'})).profile.name,'Zawodnik Poprawiony');

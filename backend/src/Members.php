@@ -514,7 +514,7 @@ final class Members {
   if($on&&$actor['caps']['organizerBlocked'])throw new AppError('Administrator wyłączył Ci rolę organizatora.',403);
   if($on===$actor['organizer'])return ['caps'=>$actor['caps']];
   // B10: the role is gained only while sign-up is open (Settings::rolesOpen); switching it off always works.
-  if($on&&!Settings::rolesOpen($c))throw new AppError('Rejestracja jest chwilowo wyłączona.',403);
+  if($on&&!Settings::rolesOpen($c))throw new AppError('Role są dostępne po otwarciu rejestracji.',403);
   if($on){
    $ip=ClientIp::bucket($c);self::reserveOrganizer($pdo,$c,$ip);
    try{self::tx($pdo,function()use($pdo,$u){$pdo->prepare("UPDATE users SET organizer=1 WHERE id=? AND role='member' AND organizer_blocked_at IS NULL")->execute([$u['id']]);self::audit($pdo,'self','self.organizer',$u['id'],'on');});}
