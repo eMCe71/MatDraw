@@ -566,7 +566,8 @@ test('API stub in a browser: roles closed (rolesOpen false) and the account dele
  const {server,url}=await serveApi(api),browser=await chromium.launch().catch(e=>{server.close();throw e;}),errors=[];
  try{
   for(const [w,hh] of [[390,844],[1440,900]]){
-   const ctx=await browser.newContext({viewport:{width:w,height:hh},locale:'pl-PL',serviceWorkers:'block'}),page=await ctx.newPage();watch(page,errors);
+   const fresh=async()=>{const c=await browser.newContext({viewport:{width:w,height:hh},locale:'pl-PL',serviceWorkers:'block'}),p=await c.newPage();watch(p,errors);return [c,p];};
+   let [ctx,page]=await fresh();
    // Contract (a): a member without a role, roles closed: no Role tab, the address falls back to the profile tab.
    member=stubMember({features:{rolesOpen:false}});
    await page.goto(url+'#profile?tab=roles');await page.waitForSelector('.acct-tabs');
@@ -597,9 +598,12 @@ test('API stub in a browser: roles closed (rolesOpen false) and the account dele
    assert.equal(await page.locator('#acct-delete-form [name="athleteInitials"]').count(),0);
    sent=[];await page.click('#modal-root button[form="acct-delete-form"]');await page.waitForFunction(()=>!document.querySelector('#acct-delete-form'),null,{timeout:10000});
    assert.deepEqual(sent.map(([r])=>r),['account-delete'],'the athlete data are not erased twice');
+   // The app now logs out and lands on #chat on its own (asynchronously): wait for it, then go on in a fresh context, so
+   // its late navigation cannot take the next page away (final review R1.1: flaky wait for .acct-danger).
+   await page.waitForFunction(()=>location.hash==='#chat',null,{timeout:10000});await ctx.close();
    // Without an athlete profile: no warning and no box.
-   member=stubMember({features:{rolesOpen:true}});
-   await page.goto(url+'#profile?tab=security');await page.reload();await page.waitForSelector('.acct-danger');
+   member=stubMember({features:{rolesOpen:true}});[ctx,page]=await fresh();
+   await page.goto(url+'#profile?tab=security');await page.waitForSelector('.acct-danger');
    assert.doesNotMatch(await page.locator('.acct-danger').innerText(),/imieniem i nazwiskiem/);
    await page.click('[data-acct-act="delete-open"]');await page.waitForSelector('#acct-delete-form');
    assert.equal(await page.locator('#acct-delete-form [name="athleteInitials"]').count(),0,'no initials box without an athlete profile');

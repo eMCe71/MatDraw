@@ -389,7 +389,8 @@ test('demo in a browser (PL 1440, EN 390): #starts, the entry window by keyboard
    await page.fill('#ath-entry-form [name="weight"]','5');await page.click('.modal-actions button[type="submit"]');
    await page.waitForFunction(()=>/\S/.test(document.querySelector('#ath-measures-error')?.textContent||''));
    assert.equal(await page.evaluate(()=>document.activeElement?.getAttribute('name')),'weight');assert.equal(await page.getAttribute('#ath-entry-form [name="weight"]','aria-invalid'),'true');
-   await page.fill('#ath-entry-form [name="weight"]','42');
+   // The input handler runs after a dynamic import() (athlete-boot.js flow()), so a later task: wait for it, not one read.
+   await page.fill('#ath-entry-form [name="weight"]','42');await page.waitForFunction(()=>!/\S/.test(document.querySelector('#ath-measures-error')?.textContent||''));
    assert.equal(await page.locator('#ath-measures-error').innerText(),'');assert.equal(await page.getAttribute('#ath-entry-form [name="weight"]','aria-invalid'),null);
    assert.match(await page.locator('[data-ath-preview]').innerText(),lang==='pl'?/Juniorki młodsze · kobiety · 10–7 Cup/:/Younger juniors · female · 10th–7th Gup/);
    await page.fill('#ath-entry-form [name="grade"]','5');await page.waitForFunction(()=>/6–3|6th–3rd/.test(document.querySelector('[data-ath-preview]').textContent));
