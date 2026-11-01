@@ -31,6 +31,12 @@ test('communityOnly, defaultPage(role,user) and visible(user): an organizer work
  assert.ok(registry.allows(registry.page('qa-starts'),'member',athlete)&&!registry.allows(registry.page('qa-starts'),'member',org)&&!registry.allows(registry.page('qa-starts'),'admin',{role:'admin',caps:{athlete:true}}));
 });
 
+test('final review F9: the tournament summary labels do not depend on the count (no genitive plural after 1)',()=>{
+ const summary=app.slice(app.indexOf('<div class="workspace-summary">'),app.indexOf('${firstRun}'));
+ assert.ok(summary.length>0);
+ for(const bad of ['Moich turniejów','Turniejów','Zawodników klubu','Moich zawodników','Otwartych zapisów'])assert.ok(!summary.includes("T('"+bad+"')"),bad);
+ for(const good of ['Moje turnieje','Turnieje','Zawodnicy klubu','Moi zawodnicy','W bazie zawodników','Otwarte zapisy'])assert.ok(summary.includes("T('"+good+"')"),good);
+});
 test('app.js uses the roles: communityOnly in the shell, render, the hall screen polling and rerenderLanguage; mount points for wave 3',()=>{
  const shell=app.slice(app.indexOf('function shell('),app.indexOf('function roundName('));
  assert.match(shell,/member=communityOnly\(user\)/);assert.match(shell,/home=registry\.defaultPage\(user\.role,user\)/);
@@ -190,6 +196,9 @@ test('demo in a browser: organizer and editor defaults, copy link with its fallb
    await page.fill('#tournament-form [name=name]','Puchar Organizatora');await page.fill('#tournament-form [name=date]','2027-03-14');await page.fill('#tournament-form [name=city]','Opole');
    await page.click('button[form="tournament-form"]');await page.waitForSelector('[data-action="copy-link"]');
    const id=await page.locator('[data-action="copy-link"]').first().getAttribute('data-id');
+   // Final review F9: the summary labels are headings in the nominative, right for any count ("1 Moich turniejów" was wrong).
+   assert.deepEqual(await page.locator('.workspace-summary span').allInnerTexts(),['Moje turnieje','Moi zawodnicy','Otwarte zapisy']);
+   assert.equal(await page.locator('.workspace-summary strong').first().innerText(),'1');
    await page.click('[data-action="copy-link"]');await page.waitForSelector('#copy-link-field');
    assert.deepEqual(await page.evaluate(()=>{const f=document.querySelector('#copy-link-field');return [f.value,f.readOnly,f.selectionStart,f.selectionEnd===f.value.length];}),[url+'#guest?t='+id,true,0,true],'fallback: the address selected in a read-only field');
    await page.keyboard.press('Escape');await ctx.close();

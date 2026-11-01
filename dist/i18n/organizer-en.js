@@ -33,8 +33,6 @@ export default {
  'Personelu':'Staff',
  'Społeczności':'Community',
  'Ukryte':'Hidden',
- 'Moich turniejów':'My tournaments',
- 'Moich zawodników':'My athletes',
  'Widzisz tylko swoje turnieje i swoich zawodników.':'You see only your tournaments and your athletes.',
  'Twórz turnieje, udostępniaj link do zapisów i prowadź kontrolę startową.':'Create tournaments, share the entry link and run the check-in.',
  'Link do zapisów':'Entry link',

@@ -296,10 +296,9 @@ export default {
  'WERSJA {n}':'VERSION {n}',
 
  // Tournaments
- 'Turniejów':'Tournaments',
- 'Zawodników klubu':'Club athletes',
+ 'Zawodnicy klubu':'Club athletes',
  'W bazie zawodników':'In the athlete database',
- 'Otwartych zapisów':'Open for registration',
+ 'Otwarte zapisy':'Open for registration',
  'Szukaj turnieju':'Search tournaments',
  'Szukaj turnieju lub miasta…':'Search tournament or city…',
  'Jedna baza zawodników. Wiele turniejów.':'One athlete database. Many tournaments.',
