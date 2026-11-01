@@ -32,7 +32,7 @@ test('tournaments page and guest preview carry the chat mount points',()=>{
  assert.ok(app.includes('data-page="${esc(registry.defaultPage(workspace?.user?.role))}"'),'member preview has a Wróć button with data-page');
 });
 test('the grid covers the plan\'s breakpoints and the print stylesheet hides the chat',()=>{
- for(const s of ['minmax(340px,388px) minmax(460px,1fr) clamp(400px,30vw,480px)','minmax(560px,760px) 520px','"story auth" "chat auth" "upcoming foot"','"story" "auth" "chat" "upcoming" "foot"','min-height:560px;max-height:900px','height:calc(100dvh - 48px)','--mascot-h:196px'])assert.ok(css.includes(s),s);
+ for(const s of ['minmax(340px,388px) minmax(460px,1fr) clamp(400px,30vw,480px)','minmax(400px,1fr) minmax(560px,760px) max(520px,calc(50% - 360px))','"story auth" "chat auth" "upcoming foot"','"story" "auth" "chat" "upcoming" "foot"','min-height:560px;max-height:900px','height:calc(100dvh - 48px)','--mascot-h:196px'])assert.ok(css.includes(s),s);
  assert.match(css,/@media print\{[^}]*\.home-centre/);
  assert.deepEqual([...new Set([...css.matchAll(/@media\s*\(\s*max-width:\s*(\d+)px/g)].map(m=>+m[1]))].filter(w=>![440,650,760,800,1000,1180,1199,1650].includes(w)),[],'plan 8.7: no new breakpoint (760 and 1180 predate the slice)');
  assert.match(readFileSync(root+'styles.css','utf8'),/@media print\{[^@]*#app,[^}]*display:none!important/,'the app shell (home page, guest preview) is never part of a printout: prints go through #print-root');
@@ -85,11 +85,25 @@ test('home page in a browser: layout, skip links, phone sign-in button, known de
   {const {ctx,page}=await open(390,844,()=>{try{localStorage.setItem('matdraw.knownDevice','1');}catch{}});
    await page.waitForSelector('.login-page.known-device');
    const y=await page.evaluate(()=>[document.querySelector('.home-chat').getBoundingClientRect().top,document.querySelector('.login-form-panel').getBoundingClientRect().top]);assert.ok(y[1]<y[0],'known device: sign-in above the chat');await ctx.close();}
-  // very wide screens: the content of the left column stays 400px wide, right-aligned against the chat (no 1200px card)
-  for(const [w,h] of [[1920,1080],[2560,1300]]){
+  // very wide screens: the content of the left column stays 400px wide, right-aligned against the chat (no 1200px card); up to 1760px the
+  // columns are the plan's 400 | 760 | 520, wider the story | chat | sign-in cluster stays centred (production bug: everything drifted right,
+  // a big empty navy area on the left): the empty margins on both sides match, the chat card sits in the middle, the sign-in form,
+  // footer and PL|EN switch stay next to the chat
+  for(const [w,h] of [[1680,1000],[1920,1080],[2000,1000],[2560,1300],[3840,1440]]){
    const {ctx,page}=await open(w,h);await page.waitForSelector('.upcoming-item');
-   const r=await page.evaluate(()=>{const c=document.querySelector('.upcoming-card').getBoundingClientRect(),h=document.querySelector('.home-centre').getBoundingClientRect();return {card:c.width,gap:h.left-c.right,ov:document.documentElement.scrollWidth-document.documentElement.clientWidth};});
-   assert.ok(r.card<=400&&r.card>=300&&r.gap>=0&&r.gap<=60&&r.ov===0,w+' '+JSON.stringify(r));await ctx.close();
+   const r=await page.evaluate(()=>{const R=s=>document.querySelector(s).getBoundingClientRect(),c=R('.upcoming-card'),h=R('.home-centre'),st=R('.login-story'),logo=R('.login-story .brand'),chat=R('.home-chat'),panel=R('.login-form-panel'),form=R('.login-form-content'),foot=R('.login-foot .footer'),lang=R('.login-lang'),vw=document.documentElement.clientWidth;
+    return {cols:getComputedStyle(document.querySelector('.login-page')).gridTemplateColumns,card:c.width,gap:h.left-c.right,ov:document.documentElement.scrollWidth-vw,left:logo.left-st.left,right:vw-form.right,chat:(chat.left+chat.right)/2-vw/2,
+     slot:[form.left-panel.left,foot.left-panel.left,foot.right-panel.left,lang.right-panel.left],formRight:form.right,lang:lang.right,navy:st.left,white:panel.right-vw};});
+   const at=w+' '+JSON.stringify(r);
+   assert.ok(r.card<=400&&r.card>=300&&r.gap>=0&&r.gap<=60&&r.ov===0,at);
+   if(w===1680)assert.equal(r.cols,'400px 760px 520px',at);
+   if(w>=2000){
+    assert.ok(Math.abs(r.left-r.right)<=40,'empty margins left and right match: '+at);
+    assert.ok(Math.abs(r.chat)<=40,'the chat card stays in the middle: '+at);
+   }
+   // sign-in content (form, footer, language switch) inside the first 520px of its column; the fills reach both screen edges
+   assert.ok(r.slot[0]>=40&&r.slot[1]>=40&&r.slot[2]<=480&&r.slot[3]<=500&&r.lang>=r.formRight&&r.navy===0&&r.white===0,at);
+   await ctx.close();
   }
   // the module event after the list is (re)painted: the placeholders exist when it fires
   {const ctx=await browser.newContext({viewport:{width:1440,height:900},locale:'pl-PL'});

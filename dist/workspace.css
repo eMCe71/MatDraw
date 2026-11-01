@@ -103,8 +103,11 @@
 .home-skips button{background:#fff;color:#00448a;padding:12px 14px;border-radius:6px;font-size:13px;font-weight:650;box-shadow:0 6px 20px #0b1a334d}
 .home-skips button:focus-visible{outline:2px solid #0072bc;outline-offset:2px}
 .login-jump{display:none}
-/* Very wide screens (plan: 400px minmax(560px,760px) 520px): the left column keeps the navy fill but its content stays 400px wide, right-aligned against the chat. */
-@media(min-width:1650px){.login-page{grid-template-columns:minmax(400px,1fr) minmax(560px,760px) 520px}.login-story,.login-page .login-upcoming{padding-left:max(52px,calc(100% - 400px))}.login-form-panel{padding-inline:56px}.login-foot{padding-inline:56px}}
+/* Very wide screens (plan: 400px minmax(560px,760px) 520px, centred): up to 1760px the columns are exactly that. Wider, both outer columns
+   grow by the same amount (the sign-in one is max(520px,50% - 360px)), so the story | chat | sign-in cluster stays in the middle; the navy
+   and white fills still reach the screen edges. The story content stays 400px wide against the chat, the sign-in content (form, footer,
+   PL|EN switch) stays in the first 520px next to the chat. Without the chat (two columns, below) the sign-in column keeps 56px padding. */
+@media(min-width:1650px){.login-page{grid-template-columns:minmax(400px,1fr) minmax(560px,760px) max(520px,calc(50% - 360px))}.login-story,.login-page .login-upcoming{padding-left:max(52px,calc(100% - 400px))}.login-form-panel{padding-inline:56px}.login-foot{padding-inline:56px}.home-centre:not([hidden])~.login-form-panel,.home-centre:not([hidden])~.login-foot{padding-right:max(56px,calc(100% - 464px))}.login-page:not(:has(>.home-centre[hidden]))>.login-lang{right:max(32px,calc(50% - 848px))}}
 /* Features switched off (chat-boot hides the card): two columns, story | sign-in. */
 @media(min-width:1200px){.login-page:has(>.home-centre[hidden]){grid-template-columns:minmax(0,1fr) clamp(440px,35vw,680px);grid-template-areas:"story auth" "upcoming auth" "upcoming foot"}}
 @media(max-width:1199px){
