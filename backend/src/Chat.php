@@ -29,8 +29,12 @@ use PDO;
  * people (full access only)}; a gone channel is {st:'gone'}; a channel that did not change is left out unless it was
  * loaded from 0. A history page (before=) carries no rev and no more: it never moves the client's cursor.
  * Member message {id, r, t, a?, o?, c, b} / tombstone {id, r, t, a?, o?, x}: a = public_id of the author (absent for a
- * deleted account), o = 1 for the organiser of the tournament (tournaments.created_by). Guests and signed-in people
- * without full access get ChatGuestView (no people at all).
+ * deleted account), o = 1 for the organiser of the tournament (tournaments.created_by), 2 when that organiser is a member
+ * whose tournaments are not trusted (PLAN-REJESTRACJA-ROLE §5.6, PS-12: shown as "Organizer (community)"). Guests and
+ * signed-in people without full access get ChatGuestView (no people at all).
+ * Community tournaments (§5.6, R16): the lists of the chat lobby leave out tournaments of members whose tournaments are
+ * not trusted (a creator not confirmed by the Administrator while Settings::flags trustRequired, or blocked), except the
+ * viewer's own; their channels stay reachable by id like their guest page.
  */
 final class Chat {
  /** Global channels (requirement 1, §5.1): fixed order; names and descriptions are interface texts (dictionaries). */
@@ -218,18 +222,18 @@ final class Chat {
    foreach(People::project($pdo,array_map('strval',array_keys($authors))) as $uid=>$p){$pids[$uid]=$p['pid'];unset($p['pid']);$people[$pids[$uid]]=$p;}
   }
   foreach($batches as $id=>$rows){
-   $organizer=$tour($channels[$id])['created_by']??null;
-   $ch[$id]['m']=array_map(fn($m)=>$full?self::memberMessage($m,$pids[$m['user_id']]??null,$organizer!==null&&$m['user_id']===$organizer):ChatGuestView::message($m,$id,$c['app_key']),$rows);
+   $t=$tour($channels[$id]);$organizer=$t['created_by']??null;$o=$t&&$full?self::organizerFlag($t,$trust??=self::trustRequired($pdo,$c)):0;
+   $ch[$id]['m']=array_map(fn($m)=>$full?self::memberMessage($m,$pids[$m['user_id']]??null,$organizer!==null&&$m['user_id']===$organizer?$o:0):ChatGuestView::message($m,$id,$c['app_key']),$rows);
   }
   $out+=['ch'=>(object)$ch,'heads'=>(object)$heads];
   if($full)$out['people']=(object)$people;
   return $out;
  }
- /** Member projection of one message: {id, r, t, a?, o?, c, b} or the tombstone {id, r, t, a?, o?, x}. */
- public static function memberMessage(array $m,?string $pid,bool $organizer):array {
+ /** Member projection of one message: {id, r, t, a?, o?, c, b} or the tombstone {id, r, t, a?, o?, x}; $organizer true or 1 gives o:1, 2 gives o:2. */
+ public static function memberMessage(array $m,?string $pid,bool|int $organizer):array {
   $o=['id'=>(int)$m['id'],'r'=>(int)$m['rev'],'t'=>(int)$m['created_ms']];
   if($pid!==null)$o['a']=$pid;
-  if($organizer)$o['o']=1;
+  if($organizer===true||$organizer===1||$organizer===2)$o['o']=$organizer===2?2:1;
   return $m['state']==='visible'?$o+['c'=>(int)$m['cont'],'b'=>(string)$m['body']]:$o+['x'=>ChatGuestView::X[$m['state']]??'mod'];
  }
  private static function rows(PDO $pdo,string $sql,array $params):array{$q=$pdo->prepare($sql);$q->execute($params);$r=$q->fetchAll(PDO::FETCH_ASSOC);$q->closeCursor();return $r;}
@@ -239,13 +243,22 @@ final class Chat {
   foreach(self::rows($pdo,'SELECT '.self::CHANNEL.' FROM chat_channels WHERE id IN ('.self::marks($ids).')',$ids) as $r)$out[(int)$r['id']]=$r;
   return $out;
  }
- /** The tournaments behind the tournament channels of $channels, in one query: id => {id, event_date, status, created_by}. */
+ /** Columns of a tournament row with its creator's role and confirmation (organizerFlag). */
+ private const TOURNAMENT='t.id,t.name,t.city,t.event_date,t.status,t.created_by,u.role AS creator_role,u.organizer_trusted_at,u.organizer_blocked_at FROM tournaments t LEFT JOIN users u ON u.id=t.created_by';
+ /** The tournaments behind the tournament channels of $channels, in one query: id => {id, name, city, event_date, status, created_by, creator_role, organizer_trusted_at, organizer_blocked_at}. */
  public static function tournamentRows(PDO $pdo,array $channels):array {
   $ids=array_values(array_unique(array_filter(array_map(fn($c)=>$c['tournament_id'],$channels),'is_string')));if(!$ids)return [];$out=[];
-  foreach(self::rows($pdo,'SELECT id,name,city,event_date,status,created_by FROM tournaments WHERE id IN ('.self::marks($ids).')',$ids) as $r)$out[$r['id']]=$r;
+  foreach(self::rows($pdo,'SELECT '.self::TOURNAMENT.' WHERE t.id IN ('.self::marks($ids).')',$ids) as $r)$out[$r['id']]=$r;
   return $out;
  }
- public static function tournamentRow(PDO $pdo,string $id):?array{return self::rows($pdo,'SELECT id,name,city,event_date,status,created_by FROM tournaments WHERE id=?',[$id])[0]??null;}
+ public static function tournamentRow(PDO $pdo,string $id):?array{return self::rows($pdo,'SELECT '.self::TOURNAMENT.' WHERE t.id=?',[$id])[0]??null;}
+ /** trustRequired of the effective configuration (§17); $c is the route's config (effective already, or config.php when null: effective is idempotent). */
+ public static function trustRequired(PDO $pdo,?array $c):bool{return Settings::flags(Settings::effective($pdo,$c??\matdraw_config()))['trustRequired'];}
+ /** o of the organiser's messages: 1 for staff and trusted organizers, 2 for a member whose tournaments are not trusted (blocked, or not confirmed while confirmation is required). */
+ public static function organizerFlag(array $t,bool $trustRequired):int {
+  if(in_array($t['creator_role']??null,Domain::STAFF,true))return 1;
+  return ($t['organizer_blocked_at']??null)===null&&(($t['organizer_trusted_at']??null)!==null||!$trustRequired)?1:2;
+ }
 
  // ——— Channel lists ———
 
@@ -257,18 +270,22 @@ final class Chat {
   * archive (at most 50, newest first) of tournaments whose chat was ever used (an archive cannot be written, so an empty
   * one is not worth a row). Title, date and city are public through the public route already.
   */
- public static function lists(PDO $pdo,?array $viewer,int $now):array {
+ public static function lists(PDO $pdo,?array $viewer,int $now,?array $c=null):array {
   $settings=ChatSettings::get($pdo);$today=self::today();$grace=$settings['data']['graceDays'];
   $lobby=[];
   foreach(self::rows($pdo,"SELECT ".self::CHANNEL.",sort FROM chat_channels WHERE kind='lobby' ORDER BY sort,id",[]) as $r)if(isset(self::LOBBY[$r['slug']]))
    $lobby[]=['id'=>(int)$r['id'],'slug'=>$r['slug'],'scope'=>$r['scope'],'last'=>(int)$r['last_message_id'],'count'=>(int)$r['msg_count'],'st'=>self::visibleFor($r,null,$viewer,$today,$grace)];
   $cols='t.id,t.name,t.city,t.event_date,t.status,t.created_by,c.id AS cid,c.last_message_id,c.msg_count,c.status AS cstatus';
-  $upcoming=fn()=>self::rows($pdo,"SELECT $cols FROM tournaments t LEFT JOIN chat_channels c ON c.tournament_id=t.id WHERE t.status IN (".self::T_STATUSES.") AND t.event_date>=? ORDER BY t.event_date,t.id LIMIT ".self::UPCOMING,[$viewer===null?$today:self::shiftDate($today,-$grace)]);
+  // Staff tournaments and trusted community ones (the same rule as Domain::trusted and GuestView), plus the viewer's own,
+  // filtered in SQL: tournaments of unconfirmed organizers cannot push others out of the list's limit.
+  $trusted=" AND (u.role IN ('admin','editor','club') OR u.organizer_blocked_at IS NULL AND (u.organizer_trusted_at IS NOT NULL OR ?=0) OR t.created_by=?)";
+  $who=[self::trustRequired($pdo,$c)?1:0,$viewer['id']??''];
+  $upcoming=fn()=>self::rows($pdo,"SELECT $cols FROM tournaments t LEFT JOIN chat_channels c ON c.tournament_id=t.id LEFT JOIN users u ON u.id=t.created_by WHERE t.status IN (".self::T_STATUSES.") AND t.event_date>=?$trusted ORDER BY t.event_date,t.id LIMIT ".self::UPCOMING,[$viewer===null?$today:self::shiftDate($today,-$grace),...$who]);
   $rows=$upcoming();$archive=[];
   if($viewer!==null){
    $missing=array_filter($rows,fn($r)=>$r['cid']===null);
    if($missing){foreach($missing as $r)self::tournamentChannel($pdo,$r['id'],$now);$rows=$upcoming();}
-   $archive=self::rows($pdo,"SELECT $cols FROM tournaments t JOIN chat_channels c ON c.tournament_id=t.id WHERE t.status IN (".self::T_STATUSES.") AND t.event_date<? AND c.rev>0 ORDER BY t.event_date DESC,t.id LIMIT ".self::ARCHIVE,[self::shiftDate($today,-$grace)]);
+   $archive=self::rows($pdo,"SELECT $cols FROM tournaments t JOIN chat_channels c ON c.tournament_id=t.id LEFT JOIN users u ON u.id=t.created_by WHERE t.status IN (".self::T_STATUSES.") AND t.event_date<? AND c.rev>0$trusted ORDER BY t.event_date DESC,t.id LIMIT ".self::ARCHIVE,[self::shiftDate($today,-$grace),...$who]);
   }
   $items=[];
   foreach([...$rows,...$archive] as $r){
@@ -351,10 +368,10 @@ final class Chat {
   if($state!=='open')throw new AppError('Ten czat jest tylko do odczytu.',409);
   $body=self::body($in['b']??null);
   $cid=$in['cid']??null;if(!is_string($cid)||!preg_match('/^[A-Za-z0-9_-]{22}$/D',$cid))throw new AppError('Niepoprawny formularz.',400);
-  $again=function(array $old)use($pdo,$viewer,$channel):array{if((int)$old['channel_id']!==(int)$channel['id'])throw new AppError('Niepoprawny formularz.',400);return self::sent($pdo,$old,$viewer['id']);};
+  $again=function(array $old)use($pdo,$c,$viewer,$channel):array{if((int)$old['channel_id']!==(int)$channel['id'])throw new AppError('Niepoprawny formularz.',400);return self::sent($pdo,$old,$viewer['id'],null,$c);};
   if($old=self::byClientId($pdo,$viewer['id'],$cid))return $again($old);
   self::limit($pdo,$viewer['id'],$d['send'],$nowMs??self::nowMs());
-  $organizer=$t!==null&&($t['created_by']??null)===$viewer['id'];
+  $organizer=$t!==null&&($t['created_by']??null)===$viewer['id']?self::organizerFlag($t,self::trustRequired($pdo,$c)):0;
   $id=(int)$channel['id'];
   $pdo->beginTransaction();
   try{
@@ -391,9 +408,9 @@ final class Chat {
   }
   throw new AppError('Niepoprawny formularz.',400);
  }
- /** Answer of chat-send for a stored message of $userId ($organizer null: looked up, for a repeated cid). */
- private static function sent(PDO $pdo,array $m,string $userId,?bool $organizer=null):array {
-  $organizer??=(self::rows($pdo,'SELECT t.created_by FROM chat_channels c JOIN tournaments t ON t.id=c.tournament_id WHERE c.id=?',[$m['channel_id']])[0]['created_by']??null)===$userId;
+ /** Answer of chat-send for a stored message of $userId ($organizer null: looked up, for a repeated cid; 0, 1 or 2 as organizerFlag). */
+ private static function sent(PDO $pdo,array $m,string $userId,?int $organizer=null,?array $c=null):array {
+  if($organizer===null){$t=self::rows($pdo,'SELECT '.self::TOURNAMENT.' JOIN chat_channels c ON c.tournament_id=t.id WHERE c.id=?',[$m['channel_id']])[0]??null;$organizer=$t&&$t['created_by']===$userId?self::organizerFlag($t,self::trustRequired($pdo,$c)):0;}
   $p=People::project($pdo,[$userId])[$userId]??null;$pid=$p['pid']??null;unset($p['pid']);
   return ['m'=>self::memberMessage($m,$pid,$organizer),'rev'=>(int)$m['rev'],'people'=>(object)($pid!==null?[$pid=>$p]:[])];
  }
