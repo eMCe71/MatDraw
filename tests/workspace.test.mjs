@@ -114,7 +114,7 @@ test('initialWorkspace: unaffiliated club, verified clubs, staffRev, demo organi
  assert.deepEqual(db.tournaments.map(t=>[t.id,t.selfEntry]),[['t-autumn-2026',false],['t-winter-2027',true],['t-gp-gdansk-2026',false],['t-spring-2027',false]]);
  const org=db.users.find(u=>u.id==='demo-organizer'),ath=db.users.find(u=>u.id==='demo-athlete');
  assert.deepEqual([org.role,org.organizer,org.organizerTrustedAt,ath.role,ath.organizer],['member',true,null,'member',false]);
- const kid=db.profiles.find(p=>p.ownerId==='demo-athlete');
+ const kid=db.profiles.find(p=>p.ownerId==='demo-athlete');assert.equal(db.profiles.filter(p=>p.ownerId==='demo-athlete').length,1,'one athlete profile per account (§17)');
  assert.deepEqual([kid.relation,kid.createdBy,ageAt(kid.birthDate,'2026-11-01'),db.tournaments.some(t=>t.entries.some(e=>e.profileId===kid.id))],['guardian','demo-athlete',14,false]);
  // The staff views are unchanged by the demo members: no member account, no owned profile outside the Admin view.
  const admin=publicWorkspace(db,db.users[0]);assert.deepEqual(admin.users.map(u=>u.id),['demo-admin','demo-editor','demo-club']);

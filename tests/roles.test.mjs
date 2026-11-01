@@ -13,10 +13,11 @@ const NOW=Math.floor(Date.now()/1000),day=n=>warsawToday(new Date(Date.now()+n*8
 const born=years=>{const [y,m,d]=day(0).split('-').map(Number);return (y-years)+'-'+String(m).padStart(2,'0')+'-'+String(Math.min(d,28)).padStart(2,'0');};
 const A={sex:'M',birthDate:'1995-04-04',weight:70,height:175,gradeType:'cup',grade:5,events:['forms']},E={events:['forms'],weight:70,height:175,gradeType:'cup',grade:5};
 const T={city:'Opole',mat:'Mata 1'};
-/** initialWorkspace + an unconfirmed (org1), a confirmed (org2) and a blocked organizer (org3), an athlete account (ath) and a member without roles (mem). */
+/** initialWorkspace + an unconfirmed (org1), a confirmed (org2) and a blocked organizer (org3), an athlete account (ath), a member without
+ * roles (mem) and two parent accounts (par, par2): one athlete profile per account (§17), so every child has its own account. */
 function world(){
  const db=initialWorkspace(),u=(id,o)=>({id,clubId:null,email:id+'@r.test',role:'member',active:true,authVersion:1,organizer:false,organizerBlockedAt:null,organizerTrustedAt:null,...o});
- db.users.push(u('org1',{organizer:true}),u('org2',{organizer:true,organizerTrustedAt:NOW-100}),u('org3',{organizer:true,organizerTrustedAt:NOW-100,organizerBlockedAt:NOW-50}),u('ath'),u('mem'));
+ db.users.push(u('org1',{organizer:true}),u('org2',{organizer:true,organizerTrustedAt:NOW-100}),u('org3',{organizer:true,organizerTrustedAt:NOW-100,organizerBlockedAt:NOW-50}),u('ath'),u('mem'),u('par'),u('par2'));
  return db;
 }
 function run(db,actor,type,payload,revision=db.revision){return execute(db,actor,type,payload,revision);}
@@ -27,7 +28,7 @@ function seq(db,list){const ids=[];for(const [actor,type,p] of list){const out=r
 const view=(db,id)=>publicWorkspace(db,db.users.find(u=>u.id===id));
 
 test('constants are the plan values (§5.4, O5) and organizer commands are listed',()=>{
- assert.deepEqual([ORGANIZER_DAY,ORGANIZER_ACTIVE,COMMUNITY_DAY_GLOBAL,ORGANIZER_PROFILES_DAY,CLUBS_DAY_PER_USER,CLUBS_DAY_GLOBAL,MINOR_SELF_AGE,ADULT_AGE,ATHLETES_PER_ACCOUNT,RETENTION_MONTHS],[3,10,50,300,3,30,16,18,5,24]);
+ assert.deepEqual([ORGANIZER_DAY,ORGANIZER_ACTIVE,COMMUNITY_DAY_GLOBAL,ORGANIZER_PROFILES_DAY,CLUBS_DAY_PER_USER,CLUBS_DAY_GLOBAL,MINOR_SELF_AGE,ADULT_AGE,ATHLETES_PER_ACCOUNT,RETENTION_MONTHS],[3,10,50,300,3,30,16,18,1,24]);
  assert.deepEqual(ORGANIZER_TYPES,['tournament.save','profile.save','profile.archive','profile.forget','entry.save','entry.remove','checkin.save','draw.create','result.save','result.clear']);
 });
 
@@ -178,11 +179,13 @@ test('entry.self gates: saved draws, minors in unconfirmed tournaments, closed, 
  let db=world();
  const {db:d,ids}=seq(db,[
   ['ath','athlete.save',{...A,relation:'self',name:'Ewa Dorosła',sex:'F',club:{none:true}}],
-  ['ath','athlete.save',{...A,relation:'guardian',name:'Ola Mała',sex:'F',birthDate:born(12),weight:40,height:150,grade:8,club:{id:'club-2'}}],
+  ['par','athlete.save',{...A,relation:'guardian',name:'Ola Mała',sex:'F',birthDate:born(12),weight:40,height:150,grade:8,club:{id:'club-2'}}],
   ['org1','tournament.save',{...T,name:'Niepotwierdzony',date:day(20),status:'open'}],
   ['org2','tournament.save',{...T,name:'Potwierdzony',date:day(21),status:'open'}],
  ]);db=d;const [adult,kid,t1,t2]=ids;
- const self=(t,p,o={})=>run(db,'ath','entry.self',{tournamentId:t,profileId:p,events:['forms'],...o});
+ // One profile per account (§17): the adult on ath, the child on the parent account par, an archived one on par2 below.
+ const owner={[adult]:'ath',[kid]:'par'};
+ const self=(t,p,o={})=>run(db,owner[p]??'par2','entry.self',{tournamentId:t,profileId:p,events:['forms'],...o});
  assert.deepEqual(err(()=>self(t1,kid)),[409,'Zgłoszenia osób niepełnoletnich do tego turnieju będą możliwe, gdy MatBravo potwierdzi organizatora.']);
  assert.equal(code(()=>self(t2,kid)),200,'confirmed organizer');assert.equal(code(()=>self(t1,adult)),200,'adult');
  const g={...db,users:db.users.map(u=>u.id==='ath'?u:u)};g.profiles=g.profiles.map(p=>p.id===adult?{...p,relation:'guardian'}:p);
@@ -192,7 +195,7 @@ test('entry.self gates: saved draws, minors in unconfirmed tournaments, closed, 
  db=self(t2,kid).db;assert.deepEqual(err(()=>self(t2,kid)),[409,'Jesteś już zgłoszony do tego turnieju.']);
  const entry=db.tournaments.find(t=>t.id===t2).entries.find(e=>e.profileId===kid);
  assert.deepEqual([entry.self,entry.champion,entry.club,entry.presence,entry.age],[true,false,'KS Tiger Kraków','pending',12]);
- db=run(db,'ath','entry.self',{tournamentId:t2,profileId:kid,events:['forms'],update:true,weight:41,saveToProfile:true}).db;
+ db=run(db,'par','entry.self',{tournamentId:t2,profileId:kid,events:['forms'],update:true,weight:41,saveToProfile:true}).db;
  assert.equal(db.profiles.find(p=>p.id===kid).weight,41,'saveToProfile updates the profile in the same command');
  assert.match(db.tournaments.find(t=>t.id===t2).activity[0].text,/^Zmieniono zgłoszenie własne: Ola Mała$/);
  // Closed, past, no self-entries, finished: 403 with one message.
@@ -208,10 +211,11 @@ test('entry.self gates: saved draws, minors in unconfirmed tournaments, closed, 
  assert.deepEqual(err(()=>self(t2,adult)),[409,'Losowanie tej kategorii już się odbyło. Zgłoszenie może dodać organizator.']);
  assert.ok(db.tournaments.find(t=>t.id===t2).draws[cat],'the draw stays');void tour;
  // Archived or missing profiles.
- db=run(db,'ath','athlete.save',{...A,relation:'guardian',name:'Trzecia',sex:'F',birthDate:born(20),club:{none:true}}).db;const third=db.profiles.at(-1).id;
- db=run(db,'ath','athlete.archive',{profileId:third}).db;
+ db=run(db,'par2','athlete.save',{...A,relation:'guardian',name:'Trzecia',sex:'F',birthDate:born(20),club:{none:true}}).db;const third=db.profiles.at(-1).id;
+ db=run(db,'par2','athlete.archive',{profileId:third}).db;
  assert.deepEqual(err(()=>self(t1,third)),[409,'Najpierw uzupełnij dane zawodnika.']);assert.deepEqual(err(()=>run(db,'ath','entry.self',{tournamentId:t1,events:['forms']})),[409,'Najpierw uzupełnij dane zawodnika.']);
  assert.equal(code(()=>run(db,'org1','entry.self',{tournamentId:t1,profileId:adult,events:['forms']})),404,'not his profile');
+ assert.equal(code(()=>run(db,'par','entry.self',{tournamentId:t1,profileId:adult,events:['forms']})),404,'another account of the same family is not the owner');
  assert.equal(code(()=>run(db,'demo-admin','entry.self',{tournamentId:t1,profileId:adult,events:['forms']})),403,'staff never self-enter');
 });
 
@@ -229,18 +233,31 @@ test('owner withdrawal: open 200 before canEnter, closed 403 with the hint, in a
  assert.equal(code(()=>run(db,'org1','entry.remove',{tournamentId:t,id:p})),404,'unconfirmed outsider: the tournament is not open for him');
 });
 
-test('athlete.save: closed fields, age 16 for self, 5 profiles, one self, identity locked while entries are pending',()=>{
+test('athlete.save: closed fields, age 16 for self, one profile per account (self or guardian), identity locked while entries are pending',()=>{
  let db=world();const save=p=>run(db,'ath','athlete.save',p);
  assert.deepEqual(err(()=>save({...A,relation:'self',name:'Za Młody',birthDate:born(15),club:{none:true}})),[422,'Osoby poniżej 16 lat rejestruje rodzic lub opiekun. Poproś go o założenie konta.']);
  assert.equal(code(()=>save({...A,relation:'self',name:'Szesnastolatek',birthDate:born(16),club:{none:true}})),200);
  assert.equal(code(()=>save({...A,relation:'other',name:'X',club:{none:true}})),422);
  db=save({...A,relation:'self',name:'Ja Sam',club:{id:'club-1'},ownerId:'org1',createdBy:'org1',champion:true,events:['light'],archived:true}).db;
  const me=db.profiles.at(-1);assert.deepEqual([me.ownerId,me.createdBy,me.champion,me.events,me.archived,me.relation],['ath','ath',false,['forms'],false,'self'],'closed list of fields');
- assert.deepEqual(err(()=>save({...A,relation:'self',name:'Drugi Ja',club:{none:true}})),[409,'Na koncie jest już Twój własny profil zawodnika.']);
- for(let i=0;i<4;i++)db=save({...A,relation:'guardian',name:'Dziecko '+i,birthDate:born(10),weight:35,height:140,grade:9,club:{none:true}}).db;
- assert.equal(db.profiles.filter(p=>p.ownerId==='ath').length,5);
- assert.deepEqual(err(()=>save({...A,relation:'guardian',name:'Szóste',birthDate:born(9),weight:30,height:130,grade:9,club:{none:true}})),[409,'Na jednym koncie może być najwyżej 5 zawodników.']);
- assert.ok(typeof db.profiles.at(-1).guardianDeclaredAt==='number','guardian declaration time is kept (hook for consent)');
+ // One athlete profile per account (§17): a second one, self or guardian, is refused on a self account and on a guardian account.
+ const ONE=[409,'Na jednym koncie może być tylko jeden zawodnik.'];
+ assert.deepEqual(err(()=>save({...A,relation:'self',name:'Drugi Ja',club:{none:true}})),ONE);
+ assert.deepEqual(err(()=>save({...A,relation:'guardian',name:'Dziecko',birthDate:born(10),weight:35,height:140,grade:9,club:{none:true}})),ONE);
+ const kidOf=(name,o={})=>({...A,relation:'guardian',name,birthDate:born(10),weight:35,height:140,grade:9,club:{none:true},...o});
+ db=run(db,'par','athlete.save',kidOf('Dziecko Rodzica')).db;const kid=db.profiles.at(-1);
+ assert.deepEqual([kid.ownerId,kid.relation,typeof kid.guardianDeclaredAt],['par','guardian','number'],'guardian declaration time is kept (hook for consent)');
+ assert.deepEqual(err(()=>run(db,'par','athlete.save',kidOf('Drugie Dziecko',{birthDate:born(9)}))),ONE);
+ assert.deepEqual(err(()=>run(db,'par','athlete.save',{...A,relation:'self',name:'Sam Rodzic',club:{none:true}})),ONE);
+ assert.deepEqual(['ath','par'].map(id=>db.profiles.filter(p=>p.ownerId===id).length),[1,1]);
+ // An archived profile still holds the place (the account restores it); after athlete.forget the account may start again.
+ db=run(db,'par','athlete.archive',{profileId:kid.id}).db;assert.deepEqual(err(()=>run(db,'par','athlete.save',kidOf('Nowe Dziecko'))),ONE);
+ db=run(db,'par','athlete.save',kidOf('Dziecko Rodzica',{id:kid.id})).db;assert.equal(db.profiles.find(p=>p.id===kid.id).archived,false,'restored by its id');
+ db=run(db,'par','athlete.forget',{profileId:kid.id}).db;assert.equal(code(()=>run(db,'par','athlete.save',{...A,relation:'self',name:'Sam Rodzic',club:{none:true}})),200);
+ // The model keeps several profiles (§17): data written before the limit still allows one 'self' per account.
+ const legacy=structuredClone(db);legacy.profiles.push({...kid,id:'legacy-kid',ownerId:'ath',createdBy:'ath',name:'Stare Dziecko'});
+ assert.deepEqual(err(()=>run(legacy,'ath','athlete.save',kidOf('Stare Dziecko',{id:'legacy-kid',relation:'self',birthDate:born(30)}))),[409,'Na koncie jest już Twój własny profil zawodnika.']);
+ assert.deepEqual(err(()=>run(legacy,'ath','athlete.save',kidOf('Trzecie'))),ONE);
  // Identity locked while entries in open or closed tournaments exist; name and measures are free.
  db=run(db,'ath','entry.self',{tournamentId:'t-winter-2027',profileId:me.id,events:['forms']}).db;
  for(const patch of [{birthDate:'1994-01-01'},{sex:'F'},{club:{id:'club-2'}},{club:{none:true}}])assert.equal(code(()=>save({...A,id:me.id,relation:'self',name:'Ja Sam',club:{id:'club-1'},...patch})),409,JSON.stringify(patch));
