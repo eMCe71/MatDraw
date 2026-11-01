@@ -5,8 +5,10 @@ import assert from 'node:assert/strict';
 import {readFileSync,readdirSync} from 'node:fs';
 
 const read=file=>readFileSync(new URL('../dist/'+file,import.meta.url),'utf8');
-// New modules (plan §5.9): registry, me, chat* (with chat-admin), moderation-boot, account*, members-boot, admin-members, avatar-crop, pwa.
-const SCOPE=/^(?:registry|me|moderation-boot|members-boot|admin-members|avatar-crop|pwa)\.js$|^(?:chat|account)[\w-]*\.js$/;
+// New modules (plan §5.9): registry, me, chat* (with chat-admin), moderation-boot, account*, members-boot, admin-members, avatar-crop, pwa;
+// PLAN-REJESTRACJA-ROLE §10.6: athlete* (athlete-boot, athlete-flow, athlete-data, athlete-form, athlete-view), club-picker, settings-boot,
+// admin-settings and admin-clubs, in scope by name before they exist.
+const SCOPE=/^(?:registry|me|moderation-boot|members-boot|admin-members|avatar-crop|pwa|club-picker|settings-boot|admin-settings|admin-clubs)\.js$|^(?:chat|account|athlete)[\w-]*\.js$/;
 const MODULES=readdirSync(new URL('../dist/',import.meta.url)).filter(f=>SCOPE.test(f)).sort();
 const RULES=[
  ['innerHTML',/\binnerHTML\b/],
@@ -36,6 +38,8 @@ test('the scan covers the community modules that exist',()=>{
  for(const file of ['registry.js','me.js','chat-boot.js','chat-admin.js','moderation-boot.js','account-boot.js','members-boot.js','admin-members.js','pwa.js'])assert.ok(MODULES.includes(file),file);
  for(const file of ['app.js','client.js','i18n.js','chat.css'])assert.ok(!MODULES.includes(file),file);
  assert.ok(SCOPE.test('chat-transport.js')&&SCOPE.test('chat-demo.js')&&SCOPE.test('account-flow.js')&&SCOPE.test('avatar-crop.js'),'future modules are in scope by name');
+ for(const file of ['athlete-boot.js','athlete-flow.js','athlete-data.js','athlete-form.js','athlete-view.js','club-picker.js','settings-boot.js','admin-settings.js','admin-clubs.js'])assert.ok(SCOPE.test(file),file+' is in scope by name');
+ for(const file of ['settings.css','workspace.js','engine.js'])assert.ok(!SCOPE.test(file),file);
 });
 
 test('no HTML sinks, script elements or on* attributes in the community modules',()=>{

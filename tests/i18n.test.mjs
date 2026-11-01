@@ -21,7 +21,7 @@ const NAMES=/Bogusław/g;
 const list=dir=>existsSync(new URL('../'+dir,import.meta.url))?readdirSync(new URL('../'+dir,import.meta.url)).sort():[];
 // Interface modules scanned for T('…') keys, thrown messages and stray Polish (plan §8.6): every dist/*.js except the rules engine,
 // domain/demo data, dictionaries, boot scripts, the service worker, the registry (no texts) and data-only modules.
-const NOT_UI=new Set(['engine.js','workspace.js','guest-view.js','lang-boot.js','runtime-config.js','sw.js','registry.js','profile-data.js','chat-demo.js']);
+const NOT_UI=new Set(['engine.js','workspace.js','guest-view.js','lang-boot.js','runtime-config.js','sw.js','registry.js','profile-data.js','chat-demo.js','athlete-view.js','athlete-data.js']);
 const UI_MODULES=list('dist').filter(f=>f.endsWith('.js')&&!/^i18n/.test(f)&&!NOT_UI.has(f)).map(f=>'dist/'+f);
 // promo.js holds the advertisement and the access offer as Polish data shown through T(); the promotional test below covers those
 // two objects. Only their literals are exempt: the rest of promo.js is scanned like any interface module (plan §8.6 point 3).
@@ -67,7 +67,9 @@ test('lang-boot.js (early <html lang>) follows the same rule as i18n.js',()=>{
 test('the interface modules are found and the per-feature dictionaries merge without collisions',()=>{
  for(const file of ['dist/app.js','dist/architecture.js','dist/client.js','dist/me.js'])assert.ok(UI_MODULES.includes(file),file);
  for(const file of ['dist/registry.js','dist/engine.js','dist/i18n.js','dist/i18n-en.js'])assert.ok(!UI_MODULES.includes(file),file);
- assert.deepEqual(DICTIONARY_SOURCES.map(([name])=>name),['i18n-en.js',...['shell','accounts','chat','moderation','members','billing','home','pwa'].map(f=>'i18n/'+f+'-en.js')]);
+ assert.deepEqual(DICTIONARY_SOURCES.map(([name])=>name),['i18n-en.js',...['shell','accounts','chat','moderation','members','billing','home','pwa','server-domain','server-settings','server-accounts','server-athletes','organizer','athlete','settings'].map(f=>'i18n/'+f+'-en.js')]);
+ // Every dictionary file of dist/i18n is registered (PLAN-REJESTRACJA-ROLE §10.6: wave 1 registers the empty ones of later slices).
+ assert.deepEqual(list('dist/i18n').filter(f=>f.endsWith('-en.js')).map(f=>'i18n/'+f).sort(),DICTIONARY_SOURCES.map(([name])=>name).filter(n=>n.startsWith('i18n/')).sort());
  assert.deepEqual(collisions,[],'the same key with different English text in two dictionaries');
  assert.ok(PHP_MESSAGE_FILES.includes('backend/src/Domain.php')&&PHP_MESSAGE_FILES.includes('backend/public/api/index.php'));
 });
