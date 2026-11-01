@@ -342,7 +342,7 @@ test('demo adapter: seeded channels, member and guest projections, a demo accoun
  let wants={ch:{},h:{}},mode='feed';const data=[];
  const t=createDemoTransport({mode:()=>mode,wants:()=>wants,me:()=>me,tournaments:async()=>[{id:'t-a',name:'Puchar',date:'2099-01-02',city:'Kraków'}],onData:d=>data.push(d)});
  const lists=await t.lists();
- assert.deepEqual(lists.lobby.map(c=>c.slug),['taekwondo','taekwondo-pl','karate','general']);assert.ok(lists.lobby.every(c=>c.count===8));
+ assert.deepEqual(lists.lobby.map(c=>c.slug),['taekwondo-pl','taekwondo','karate','general']);assert.ok(lists.lobby.every(c=>c.count===8));
  assert.equal(lists.tournaments[0].tournamentId,'t-a');assert.equal(lists.tournaments[0].count,8);
  wants={ch:{'2':0},h:{'1':[0,0]}};t.update();await flush();await new Promise(r=>setTimeout(r,5));
  const page=data.at(-1).ch['2'];assert.equal(page.m.length,8);assert.ok(page.m.every(m=>m.a&&!('g' in m)));assert.ok(data.at(-1).people[page.m[0].a].n);assert.equal(data.at(-1).heads['1'].n,8);

@@ -138,11 +138,14 @@ test('hosting health: the current hour in full plus the overlapping part of the 
  assert.deepEqual(out.map(o=>o[0]),[36,27,18,0,0,0],'rows as strings from the database; statuses outside the list ignored');
 });
 
-test('migration 0003 seeds the four channels of Chat::LOBBY in order and the default settings of ChatSettings',{skip},()=>{
- const k=bridge({job:'constants'}),src=readFileSync('backend/migrations/0003_chat.php','utf8');
+test('migrations 0003 and 0009 give the four channels of Chat::LOBBY in order, and 0003 the default settings of ChatSettings',{skip},()=>{
+ const k=bridge({job:'constants'}),src=readFileSync('backend/migrations/0003_chat.php','utf8'),order=readFileSync('backend/migrations/0009_lobby_order.php','utf8');
  const seeded=[...src.match(/\$lobby=\[(.*?)\];/)[1].matchAll(/\['([a-z-]+)','(world|pl)',(\d+)\]/g)].map(m=>[m[1],m[2],Number(m[3])]);
- assert.deepEqual(seeded,Object.entries(k.lobby).map(([slug,l])=>[slug,l.scope,l.sort]));
- assert.deepEqual(Object.keys(k.lobby),['taekwondo','taekwondo-pl','karate','general']);
+ // 0003 seeds the channels and scopes; 0009 sets the owner's order (Taekwondo Polska first), which Chat::LOBBY carries.
+ const sorts=Object.fromEntries([...order.matchAll(/\['([a-z-]+)',(\d+)\]/g)].map(m=>[m[1],Number(m[2])]));
+ const after=seeded.map(([slug,scope,sort])=>[slug,scope,sorts[slug]??sort]).sort((x,y)=>x[2]-y[2]);
+ assert.deepEqual(after,Object.entries(k.lobby).map(([slug,l])=>[slug,l.scope,l.sort]));
+ assert.deepEqual(Object.keys(k.lobby),['taekwondo-pl','taekwondo','karate','general']);
  const json=[...src.match(/\$defaults=('.*?');/s)[1].matchAll(/'([^']*)'/g)].map(m=>m[1]).join('');
  assert.deepEqual(JSON.parse(json),k.defaults);
 });

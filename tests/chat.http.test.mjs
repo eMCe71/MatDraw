@@ -66,7 +66,7 @@ test('public-chat-channels: four global channels in a fixed order, public cache 
  const r=await get('public-chat-channels');
  assert.equal(r.status,200);assert.equal(r.headers.get('cache-control'),'public, max-age=30');assert.equal(r.headers.get('set-cookie'),null);
  assert.deepEqual(Object.keys(r.data),['cv','cfg','lobby','tournaments']);assert.deepEqual(Object.keys(r.data.cfg),CLIENT);
- assert.deepEqual(r.data.lobby.map(l=>[l.slug,l.scope,l.st]),[['taekwondo','world','open'],['taekwondo-pl','pl','open'],['karate','world','open'],['general','world','open']]);
+ assert.deepEqual(r.data.lobby.map(l=>[l.slug,l.scope,l.st]),[['taekwondo-pl','pl','open'],['taekwondo','world','open'],['karate','world','open'],['general','world','open']]);
  for(const l of r.data.lobby){assert.deepEqual(Object.keys(l),['id','slug','scope','last','count','st']);assert.equal(typeof l.id,'number');}
  const ids=r.data.tournaments.map(t=>t.tournamentId);
  for(const id of [T.draft,T.grace,T.archive,T.emptyArchive])assert.ok(!ids.includes(id),'guests see neither drafts nor past tournaments');

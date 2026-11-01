@@ -16,7 +16,7 @@ const Demo=Client.isDemo?await import('./chat-demo.js'):null;
 
 export const MAX_DOM=300,GROUP_MS=300000,PREVIEW=3,SR_MS=15000,READ_MS=1000,FLOOR_PREVIEW=10000;
 const DRAFT='matdraw.chat.draft.',SEEN='matdraw.chat.seen',LAST='matdraw.chat.channel',STRIP='matdraw.chat.strip';
-const SLUGS=['taekwondo','taekwondo-pl','karate','general'];
+const SLUGS=['taekwondo-pl','taekwondo','karate','general'];
 
 // ——— Pure helpers (tests/chat-client.test.mjs) ———
 
@@ -353,10 +353,13 @@ function open(v,key){
 
 // ——— Templates ———
 
+// World channels: a colour globe in the style of the 🌍 emoji (owner's request), a self-hosted file so its gradient ids stay
+// inside the image.
+const globe=()=>h`<img class="chat-globe" src="./brand/globe.svg" alt="" width="16" height="16" aria-hidden="true">`;
 const flagPl=()=>h`<span class="chat-flag" aria-hidden="true"><svg viewBox="0 0 16 10" focusable="false"><rect width="16" height="5" fill="#fff"/><rect y="5" width="16" height="5" fill="#dc143c"/></svg></span>`;
 function chIcon(c){
  if(c?.kind==='tournament'){const d=c.date?new Date(c.date+'T12:00:00'):null;return d&&!Number.isNaN(d.getTime())?h`<span class="chat-ch-date${c.date===today()?' is-today':''}" aria-hidden="true"><small>${d.toLocaleDateString(locale(),{month:'short'}).replace('.','')}</small><strong>${d.getDate()}</strong></span>`:h`<span class="chat-ch-ico" aria-hidden="true">${icon('trophy')}</span>`;}
- return h`<span class="chat-ch-ico" aria-hidden="true">${c?.scope==='pl'?flagPl():icon('globe')}</span>`;
+ return h`<span class="chat-ch-ico" aria-hidden="true">${c?.scope==='pl'?flagPl():globe()}</span>`;
 }
 const langSwitch=()=>h`<div class="lang-switch" role="group" aria-label="Język / Language">${[['pl','PL','Polski'],['en','EN','English']].map(([code,label,name])=>h`<button type="button" class="lang-option" data-set-lang="${code}" lang="${code}" aria-pressed="${getLanguage()===code}" aria-label="${name}" title="${name}">${label}</button>`)}</div>`;
 const live=()=>h`<span class="chat-live" data-chat-part="live" hidden><i aria-hidden="true"></i>${T('Na żywo')}</span>`;

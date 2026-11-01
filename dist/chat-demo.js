@@ -6,7 +6,7 @@ import {cleanText} from './profile-data.js';
 import {DEFAULT_CFG,normalizeCfg} from './chat-transport.js';
 
 export const KEY='matdraw.chat.demo.v1';
-const LOBBY=[['taekwondo','world'],['taekwondo-pl','pl'],['karate','world'],['general','world']];
+const LOBBY=[['taekwondo-pl','pl'],['taekwondo','world'],['karate','world'],['general','world']];
 const PEOPLE={
  DemoMarta001:{n:'Marta K.',u:'marta.k',cc:'PL',sp:['taekwondo','karate'],club:'KS Tygrys Kraków',av:null,mod:false,since:'2026-09'},
  DemoTomek001:{n:'Tomasz W.',u:'tomek.w',cc:'PL',sp:['taekwondo'],club:'UKS Smok Gdańsk',av:null,mod:false,since:'2026-10'},

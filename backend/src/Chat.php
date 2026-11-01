@@ -39,8 +39,8 @@ use PDO;
 final class Chat {
  /** Global channels (requirement 1, §5.1): fixed order; names and descriptions are interface texts (dictionaries). */
  public const LOBBY=[
-  'taekwondo'=>['scope'=>'world','sort'=>10,'name'=>'Taekwondo','about'=>'Dowolny język — najlepiej angielski'],
-  'taekwondo-pl'=>['scope'=>'pl','sort'=>20,'name'=>'Taekwondo','about'=>'Rozmowy po polsku'],
+  'taekwondo-pl'=>['scope'=>'pl','sort'=>10,'name'=>'Taekwondo','about'=>'Rozmowy po polsku'],
+  'taekwondo'=>['scope'=>'world','sort'=>20,'name'=>'Taekwondo','about'=>'Dowolny język — najlepiej angielski'],
   'karate'=>['scope'=>'world','sort'=>30,'name'=>'Karate','about'=>'Dowolny język — najlepiej angielski'],
   'general'=>['scope'=>'world','sort'=>40,'name'=>'Ogólny','about'=>'Wszystko o sztukach walki i MatBravo'],
  ];
