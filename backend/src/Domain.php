@@ -345,7 +345,8 @@ final class Domain {
    if($pending!==null)$a['pendingClubName']=$pending;else unset($a['pendingClubName']);
    if(isset($pick['newClub']))$db['clubs'][]=$pick['newClub'];
    if($old){$target=&self::entity($db['profiles'],$old['id'],'Zawodnik');$target=$a;unset($target);}else $db['profiles'][]=$a;
-   if(isset($p['registration']))self::apply($db,$u,'entry.save',array_replace($p['registration'],['profileId'=>$a['id']]));
+   // registration as the JS mirror reads it (truthy; not an object: no tournament, 404), never a TypeError (500).
+   if(isset($p['registration'])&&!in_array($p['registration'],[false,0,0.0,''],true))self::apply($db,$u,'entry.save',array_replace(is_array($p['registration'])?$p['registration']:[],['profileId'=>$a['id']]));
    return ['id'=>$a['id']]+(isset($pick['notice'])?['notice'=>$pick['notice']]:[]);
   }
   if($type==='profile.archive'){$a=&self::prof($db,$u,$p['id']??null);if(!self::managesProfile($u,$a,$db)||($a['ownerId']??null)!==null&&!$admin)throw new AppError('Brak uprawnień.',403);$a['archived']=(bool)($p['archived']??false);return ['id'=>$a['id']];}

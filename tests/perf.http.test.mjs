@@ -20,11 +20,12 @@ const median=list=>{const s=[...list].sort((a,b)=>a-b);return s[Math.floor(s.len
 async function signIn(email,password){const c=new Client();await c.req('session');const r=await c.req('login',{email,password});assert.equal(r.status,200,JSON.stringify(r.data));return c;}
 async function get(route,cookie,params={}){const qs=new URLSearchParams(params).toString();const t0=performance.now();const r=await fetch(base+'?route='+route+(qs?'&'+qs:''),{headers:{'X-MatBravo-Client':'1',...(cookie?{Cookie:cookie}:{})}});const text=await r.text();const ms=performance.now()-t0;let data=null;try{data=JSON.parse(text);}catch{}return {status:r.status,data,text,ms};}
 let admin,org,seed;
-/** diagnostics?probe=perf; with best, the faster of two probes per figure (a shared test machine has busy moments). */
+/** diagnostics?probe=perf; with best, the fastest of three probes per figure (each a median of 3; a shared test machine has busy moments). */
 async function diagnostics(best=false){
  const probe=async()=>{fixture('reset-limits');const r=await get('diagnostics',admin.cookie,{probe:'perf'});assert.equal(r.status,200,r.text);return r.data.perf;};
- const a=await probe();if(!best)return a;const b=await probe();
- return {...a,loadMs:Math.min(a.loadMs,b.loadMs),organizerSnapshotMs:Math.min(a.organizerSnapshotMs,b.organizerSnapshotMs),unchangedMs:Math.min(a.unchangedMs,b.unchangedMs)};
+ const runs=[await probe()];if(best)runs.push(await probe(),await probe());
+ const min=k=>Math.min(...runs.map(p=>p[k]));
+ return {...runs[0],loadMs:min('loadMs'),organizerSnapshotMs:min('organizerSnapshotMs'),unchangedMs:min('unchangedMs')};
 }
 
 before(async()=>{

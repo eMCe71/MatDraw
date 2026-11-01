@@ -282,6 +282,14 @@ test('publicData equals publicWorkspace for every actor, before and after the co
  }
 });
 
+test('profile.save with a registration that is not an object: the same status in PHP and JS, never a server error',{skip},()=>{
+ const db=rich(),list=[],A={sex:'M',birthDate:'1995-04-04',weight:70,height:175,gradeType:'cup',grade:5,events:['forms']};
+ for(const actor of ['demo-admin','u-org1'])for(const registration of ['x',7,true,['a'],{},false,0,''])
+  list.push({actor,type:'profile.save',payload:{...A,name:'Rejestracja '+list.length,club:{none:true},registration}});
+ const js=runJs(db,list),ph=bridge({job:'execute',db,commands:list});compare(js,ph,list);
+ assert.deepEqual(STATUS(js.results),[404,404,404,404,404,200,200,200,404,404,404,404,404,200,200,200],'no tournament: 404 and nothing saved; a falsy value is no registration');
+});
+
 test('Domain::stale agrees with the JS table of scopes (§5.8)',{skip},()=>{
  const db=rich();db.revision=20;db.staffRev=12;
  const rev=(k,id,r)=>{db[k].find(x=>x.id===id).rev=r;};

@@ -288,6 +288,7 @@ test('privacy sweep: no public or guest answer carries an e-mail, username, name
 //  - staff unchanged: workspace shape and defaults, revision isolation (R15), self-entries seen by the editor (O2), never
 //    by the club (O10).
 import {categories,resolveDraw} from '../dist/engine.js';
+import {readdirSync,readFileSync} from 'node:fs';
 const RPASS='RolesPassword2026!';
 let rseq=0;const rtag=p=>`${p}${RUN}${(++rseq).toString(36)}`;
 /** A session that started the sign-up form 10 s ago (the server-measured fill time, §3.6). */
@@ -358,6 +359,7 @@ test('roles end to end in free mode: sign-up with roles, publishing at once, sel
  // Two adults of the organizer in the same category, then registration closed: the athlete can no longer withdraw (§7.3).
  const p1=(await org.cmd('profile.save',{...ADULT,name:'Ola Pierwsza'+RUN,club:{none:true}})).id,p2=(await org.cmd('profile.save',{...ADULT,name:'Ewa Druga'+RUN,clubName:'Klub Organizatora '+RUN})).id;
  for(const id of [p1,p2])await org.cmd('entry.save',{tournamentId:t,profileId:id,...ENTRY});
+ error(await cmd(org,'profile.save',{...ADULT,name:'Zła Rejestracja'+RUN,club:{none:true},registration:'x'}),404,'Turniej nie jest dostępny.');// was a TypeError: 500
  await org.cmd('tournament.save',{...TOUR(tname),id:t,status:'closed'});
  assert.equal((await view(ath)).entries.find(e=>e.tournament.id===t).canWithdraw,false);
  await call(ath,'athlete-withdraw',{tournamentId:t,profileId:selfId},403,'Zapisy są zamknięte. Jeśli nie przyjedziesz, organizator oznaczy nieobecność przy kontroli startowej.');
@@ -430,6 +432,11 @@ test('JSON leak scan: bootstrap, commands, athlete, me and the admin routes of e
   for(const [label,text] of texts)leak(`${k} ${label}`,text,scope[k]);
  }
  for(const tid of [ts,ta,tb]){const r=await get('public-tournament',{id:tid});assert.equal(r.status,200);leak('guest '+tid,r.text,scope.guest);}
+ // Every admin route of the registry (backend/routes/*.php) answers 403 to members and to staff other than the Administrator (§11).
+ const routes=new URL('../backend/routes/',import.meta.url),admins=readdirSync(routes).filter(f=>f.endsWith('.php'))
+  .flatMap(f=>[...readFileSync(new URL(f,routes),'utf8').matchAll(/'(admin-[a-z-]+|diagnostics)'=>\['method'=>'(GET|POST)'/g)].map(m=>[m[1],m[2]]));
+ assert.ok(admins.length>=12,JSON.stringify(admins));
+ for(const [k,c] of Object.entries({A,ed,cl,X,M}))for(const [route,method] of admins){const r=method==='GET'?await get(route,{},c.cookie):await c.req(route,{});assert.equal(r.status,403,`${route} for ${k}: ${JSON.stringify(r.data)}`);}
  assert.equal(fixture('roles-user',{email:A.email}).user.organizer_trusted_at,null,'the refused admin-member changed nothing');
  // The Administrator: everything, but the workspace accounts are staff only (members never enter it, R5).
  const ab=await admin.req('bootstrap');assert.ok(ab.data.users.every(u=>['admin','editor','club'].includes(u.role)));
