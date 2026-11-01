@@ -274,6 +274,198 @@ test('pages, actions and forms: registered for the right roles, render SafeHtml,
  for(const sel of selectors)for(const part of sel.split(','))assert.match(part.trim(),/acct-|^\[class\*="acct-"\]/,'every rule targets an acct- element: '+part);
 });
 
+// ---- Roles at sign-up and in the "Role" tab (PLAN-REJESTRACJA-ROLE §4.5, §6.1, §10.1, §10.2, §17) ----
+const athlete=await import('../dist/athlete-form.js');
+const {accessFor}=await import('../dist/promo.js');
+const TODAY='2026-11-01',FULL={relation:'guardian',name:'Zosia Kowalska',birthDate:'2014-05-05',sex:'F',weight:'40,5',height:'150',gradeType:'cup',grade:'8',club:{none:true}};
+const memberMe=(caps={},athletes=[],extra={})=>({user:{id:'u1',role:'member',email:'m@example.test',caps:{organizer:false,organizerBlocked:false,organizerTrusted:false,athlete:false,...caps}},profile:{firstName:'Marta',lastName:'Kowalska',username:'marta.k'},athletes,access:{full:true,state:'open'},billing:{enabled:false},features:{signupMode:'free'},...extra});
+const ZOSIA={profileId:'p1',name:'Zosia Kowalska',relation:'guardian',archived:false};
+
+test('sign-up steps follow the ticked roles before the account exists and me.caps after the reload, never a fixed count (§4.5)',()=>{
+ assert.deepEqual(flow.signupSteps({athlete:false,organizer:false},false),['account','profile']);
+ assert.deepEqual(flow.signupSteps({athlete:false,organizer:true},true),['account','profile','plan'],'the organizer role adds no step');
+ assert.deepEqual(flow.signupSteps({athlete:true,organizer:true},false),['account','profile','athlete']);
+ assert.deepEqual(flow.signupSteps({athlete:true},true),['account','profile','athlete','plan']);
+ assert.deepEqual(flow.signupSteps(null,true),['account','profile','plan']);
+ assert.deepEqual(flow.stepLabel(flow.signupSteps({athlete:true},true),'athlete'),{n:3,total:4,name:'Zawodnik'});
+ assert.deepEqual(flow.stepLabel(flow.signupSteps({athlete:true},true),'plan'),{n:4,total:4,name:'Plan'});
+ assert.deepEqual(flow.stepLabel(flow.signupSteps({},false),'profile'),{n:2,total:2,name:'Profil'});
+ // After the reload the plan step counts from me.caps: an athlete account had four steps.
+ assert.deepEqual(flow.stepLabel(flow.signupSteps(memberMe({athlete:true}).user.caps,true),'plan'),{n:4,total:4,name:'Plan'});
+ assert.deepEqual(flow.stepLabel(flow.signupSteps(memberMe({organizer:true}).user.caps,true),'plan'),{n:3,total:3,name:'Plan'});
+ for(const name of Object.values(flow.STEP_LABELS))assert.ok(Object.hasOwn(DICTIONARY,name),name);
+ const src=source('account-flow.js');
+ assert.match(src,/\$\{s\.roles\.athlete\?T\('Dalej'\):T\('Utwórz konto'\)\}/,'step 2 says "Dalej" while the athlete step follows');
+ assert.match(src,/T\('Konto MatBravo: czaty, zgłoszenia do turniejów i własne turnieje\. Wybierz, kim jesteś — możesz to zmienić później\.'\)/,'the new lead');
+ assert.doesNotMatch(src,/Konto członka społeczności: czaty, profil i podglądy turniejów/,'the old lead is gone');
+ assert.match(src,/roles,\.\.\.\(roles\.athlete\?\{athlete:athleteBody\(s\.athlete\)\}:\{\}\)/,'signup sends roles and the athlete only with the athlete role');
+});
+test('#signup?as=…&t=… ticks the role and keeps the target in sessionStorage for 30 minutes (§4.5, §10.1)',()=>{
+ const q=s=>new URLSearchParams(s);
+ assert.deepEqual(boot.parseTarget(q('as=athlete&t=t-winter_2027')),{as:'athlete',t:'t-winter_2027'});
+ assert.deepEqual(boot.parseTarget(q('as=organizer')),{as:'organizer',t:null});
+ assert.deepEqual(boot.parseTarget(q('as=athlete&t=<x>')),{as:'athlete',t:null},'a malformed tournament id is dropped');
+ for(const s of ['','as=admin','as=','t=abc'])assert.equal(boot.parseTarget(q(s)),null,s);
+ assert.equal(boot.signupHash({as:'athlete',t:'t-1'}),'#signup?as=athlete&t=t-1');assert.equal(boot.signupHash({as:'organizer',t:'x y'}),'#signup?as=organizer');
+ assert.equal(boot.signupHash({}),'#signup');assert.equal(boot.signupHash(null),'#signup');
+ const s=new Store();boot.saveTarget({as:'athlete',t:'t-1'},s,1000);assert.equal(boot.TARGET_KEY,'matdraw.signup.target');
+ assert.match(boot.TARGET_KEY,/^matdraw\.signup\./,'purged at sign-out with the other matdraw.signup.* keys (me.js)');
+ assert.deepEqual(boot.readTarget(s,1000+29*60e3),{as:'athlete',t:'t-1'});assert.equal(boot.readTarget(s,1000+31*60e3),null,'stale after 30 minutes');
+ s.setItem(boot.TARGET_KEY,JSON.stringify({as:'athlete',t:'<script>',at:1000}));assert.deepEqual(boot.readTarget(s,2000),{as:'athlete',t:null},'a stored id is checked again');
+ boot.clearTarget(s);assert.equal(boot.readTarget(s,2000),null);
+ const broken={getItem(){throw new Error('blocked');},setItem(){throw new Error('blocked');},removeItem(){throw new Error('blocked');}};
+ assert.doesNotThrow(()=>{boot.saveTarget({as:'athlete'},broken);boot.clearTarget(broken);});assert.equal(boot.readTarget(broken),null);
+});
+test('athlete step: "Kogo zgłaszasz?" is required and first, the name is prefilled only for "Siebie" (§6.1, UX-1)',()=>{
+ const f=athlete.newAthlete();
+ assert.equal(f.relation,null,'no answer is chosen in advance');assert.equal(f.name,'');assert.equal(f.club,null);
+ const html=String(athlete.athleteFieldsHtml(f,{id:'t',clubs:[{id:'c1',name:'KS Tygrys'}],today:TODAY}));
+ assert.ok(html.indexOf('name="relation"')<html.indexOf('name="athleteName"'),'the relation comes first');
+ assert.equal((html.match(/<input type="radio" name="relation" value="(?:self|guardian)" required>/g)||[]).length,2,'both answers required and unticked');
+ assert.match(html,/Kogo zgłaszasz\?/);assert.match(html,/Siebie/);assert.match(html,/Moje dziecko lub podopiecznego/);
+ assert.match(html,/<input name="athleteName"[^>]* value="">/,'no name before the answer');
+ assert.match(html,/<div class="acct-consents" data-acct-athlete-consents><\/div>/,'empty consent slot');
+ assert.match(html,/<p class="acct-minor" data-acct-minor aria-live="polite"><\/p>/,'no age message yet');
+ assert.match(html,/data-club-picker/);assert.match(html,/value="none"/,'the club picker offers "Niezrzeszony"');
+ assert.match(html,/max="2026-11-01"/,'no birth date in the future');
+ // The name: "Siebie" fills the account's name, the child never gets it.
+ let g=athlete.relationChange(f,'self','Marta Kowalska');assert.equal(g.name,'Marta Kowalska');assert.equal(g.relation,'self');
+ g=athlete.relationChange(g,'guardian','Marta Kowalska');assert.equal(g.name,'','the prefilled own name is removed for a child');
+ g=athlete.relationChange({...f,name:'Zosia Kowalska'},'self','Marta Kowalska');assert.equal(g.name,'Zosia Kowalska','a typed name is never replaced');
+ g=athlete.relationChange({...f,name:'Zosia Kowalska'},'guardian','Marta Kowalska');assert.equal(g.name,'Zosia Kowalska');
+ g=athlete.relationChange(f,'guardian','Marta Kowalska');assert.equal(g.name,'','"Moje dziecko" starts with an empty name');
+ assert.equal(athlete.relationChange(f,'self','').name,'');assert.equal(athlete.accountName(' Marta ',' Kowalska '),'Marta Kowalska');
+ // Editing an existing profile (AthleteView): club, pending club name and the lock of club, birth date and sex.
+ const p={id:'p1',name:'Zosia',birthDate:'2014-05-05',sex:'F',weight:40,height:150,gradeType:'cup',grade:8,relation:'guardian',locked:true,club:{id:'c1',name:'KS Tygrys',verified:true,unaffiliated:false,pending:null}};
+ assert.deepEqual(athlete.newAthlete(p),{id:'p1',relation:'guardian',name:'Zosia',birthDate:'2014-05-05',sex:'F',weight:'40',height:'150',gradeType:'cup',grade:'8',club:{id:'c1'},clubName:'KS Tygrys',clubVerified:true,prefilled:null,locked:true});
+ const unverified=String(athlete.athleteFieldsHtml(athlete.newAthlete({...p,locked:false,club:{id:'c9',name:'UKS Nowy',verified:false,unaffiliated:false,pending:null}}),{id:'t',clubs:[{id:'c1',name:'KS Tygrys'}],today:TODAY}));
+ assert.match(unverified,/<option value="c9" selected>UKS Nowy · niezweryfikowany<\/option>/,'the own new club (not in public-clubs yet) stays chosen');
+ assert.deepEqual(athlete.newAthlete({...p,club:{id:'unaffiliated',name:'',unaffiliated:true,pending:'UKS Nowy'}}).club,{name:'UKS Nowy'},'a pending name is tried again');
+ assert.deepEqual(athlete.newAthlete({...p,club:{id:'unaffiliated',name:'',unaffiliated:true,pending:null}}).club,{none:true});
+ const locked=String(athlete.athleteFieldsHtml(athlete.newAthlete(p),{id:'t',clubs:[],today:TODAY}));
+ assert.match(locked,/name="birthDate"[^>]* disabled aria-describedby="t-locked"/);assert.match(locked,/name="sex" required disabled/);assert.match(locked,/Klub, datę urodzenia i płeć zmienisz po turnieju/);
+});
+test('a locked profile with a pending club name saves its other fields: the club goes as \'unaffiliated\', the pending name stays',async()=>{
+ const {initialWorkspace,execute}=await import('../dist/workspace.js');
+ const PENDING={id:'unaffiliated',name:'',verified:true,unaffiliated:true,pending:'Klub Oczekujący'};
+ const f=athlete.newAthlete({id:'p1',name:'Ola',birthDate:'2017-09-12',sex:'F',weight:30,height:130,gradeType:'cup',grade:9,relation:'guardian',locked:true,club:PENDING});
+ assert.deepEqual(f.club,{name:'Klub Oczekujący'},'the disabled picker still shows the pending name');
+ assert.deepEqual(athlete.athleteBody(f).club,{id:'unaffiliated'},'locked: the club it has now');
+ assert.deepEqual(athlete.athleteBody({...f,locked:false}).club,{name:'Klub Oczekujący'},'unlocked: the pending name is tried again');
+ assert.deepEqual(athlete.athleteBody(athlete.newAthlete({id:'p1',locked:true,club:{id:'c1',name:'KS',verified:true,unaffiliated:false,pending:null}})).club,{id:'c1'});
+ // Against the domain (workspace.js mirrors Domain athlete.save): a child of a parent, unaffiliated with a pending name, entered
+ // in an open tournament; the daily quota of new clubs is free again, so a {name} would create a club and be refused (409).
+ let db=initialWorkspace();db.users.push({id:'parent',clubId:null,email:'parent@example.test',role:'member',active:true,authVersion:1,organizer:false,organizerBlockedAt:null,organizerTrustedAt:null});
+ const run=(actor,type,p)=>{const r=execute(db,actor,type,p);db=r.db;return r.result;};
+ const date=new Date(Date.now()+90*864e5).toISOString().slice(0,10);
+ const tid=run('demo-admin','tournament.save',{name:'Zapisy Otwarte',city:'Opole',date,mat:'Mata 1',status:'open',selfEntry:true}).id;
+ const id=run('parent','athlete.save',{...athlete.athleteBody({...f,id:null,locked:false,club:{none:true}})}).id;
+ db.profiles.find(a=>a.id===id).pendingClubName='Klub Oczekujący';
+ run('parent','entry.self',{tournamentId:tid,profileId:id,events:['forms']});
+ assert.throws(()=>execute(db,'parent','athlete.save',{id,...athlete.athleteBody({...f,locked:false,weight:'31'})}),e=>e.status===409,'the old body: a new club is a change of the club');
+ run('parent','athlete.save',{id,...athlete.athleteBody({...f,weight:'31'})});
+ const saved=db.profiles.find(a=>a.id===id);
+ assert.equal(saved.weight,31);assert.equal(saved.clubId,'unaffiliated');assert.equal(saved.pendingClubName,'Klub Oczekujący','the pending name is kept');
+});
+test('athlete body and errors: the server\'s fields and messages (Domain::athleteFields mirror), under 16 "Siebie" without a workaround',()=>{
+ assert.deepEqual(athlete.athleteBody(FULL),{name:'Zosia Kowalska',birthDate:'2014-05-05',sex:'F',weight:40.5,height:150,gradeType:'cup',grade:8,club:{none:true},relation:'guardian'});
+ assert.deepEqual(Object.keys(athlete.athleteBody({...FULL,ownerId:'x',champion:true,events:['fight']})).sort(),['birthDate','club','grade','gradeType','height','name','relation','sex','weight'],'a closed list of fields');
+ assert.equal(athlete.athleteBody({...FULL,weight:'',sex:'X',relation:'parent'}).weight,null);assert.equal(athlete.athleteBody({...FULL,sex:'X'}).sex,null);assert.equal(athlete.athleteBody({...FULL,relation:'parent'}).relation,null);
+ assert.equal(athlete.athleteError(FULL,TODAY),null);
+ const minor=athlete.minorMessage();
+ for(const [patch,msg] of [[{relation:null},'Wybierz, kogo zgłaszasz.'],[{name:'  '},'Sprawdź pole: imię i nazwisko.'],[{birthDate:''},'Podaj datę urodzenia.'],[{birthDate:'2027-01-01'},'Sprawdź datę urodzenia.'],
+  [{weight:''},'Niepoprawna wartość liczbowa.'],[{weight:'5'},'Wartość liczbowa jest poza zakresem.'],[{height:'300'},'Wartość liczbowa jest poza zakresem.'],[{sex:''},'Sprawdź płeć i rodzaj stopnia.'],
+  [{gradeType:'dan',grade:'10'},'Wartość liczbowa jest poza zakresem.'],[{club:null},'Wybierz klub lub wpisz nazwę nowego klubu.'],[{relation:'self'},minor]])
+  assert.equal(athlete.athleteError({...FULL,...patch},TODAY)?.message,msg,JSON.stringify(patch));
+ assert.equal(athlete.athleteError({...FULL,relation:'self',birthDate:'2010-11-01'},TODAY),null,'16 on the day: allowed');
+ assert.equal(athlete.athleteError({...FULL,relation:'self',birthDate:'2010-11-02'},TODAY)?.message,minor,'one day short of 16');
+ assert.equal(athlete.athleteError({...FULL,relation:'guardian',birthDate:'2020-01-01'},TODAY),null,'a parent enters a young child');
+ // The same messages as the server: the literals of Domain.php.
+ const domain=readFileSync(new URL('../backend/src/Domain.php',import.meta.url),'utf8');
+ for(const m of [minor,'Wybierz, kogo zgłaszasz.','Podaj datę urodzenia.','Sprawdź datę urodzenia.','Wybierz klub lub wpisz nazwę nowego klubu.',athlete.lockedMessage()])assert.ok(domain.includes("'"+m+"'"),m);
+ assert.equal(minor,'Osoby poniżej 16 lat rejestruje rodzic lub opiekun. Poproś go o założenie konta.');
+ for(const lang of ['pl','en'])assert.doesNotMatch(inLanguage(lang,()=>athlete.minorMessage()),/zaznacz|wybierz|Moje dziecko|tick|choose|select|child or/i,'no hint to change the answer ('+lang+')');
+ assert.equal(athlete.minorSelf({relation:'self',birthDate:'2012-01-01'},TODAY),true);assert.equal(athlete.minorSelf({relation:'guardian',birthDate:'2012-01-01'},TODAY),false);
+ assert.equal(athlete.minorSelf({relation:'self',birthDate:''},TODAY),false);assert.equal(athlete.minorSelf({relation:'self',birthDate:'2012-13-45'},TODAY),false);
+ const shown=String(athlete.athleteFieldsHtml({...athlete.newAthlete(),relation:'self',birthDate:'2015-01-01'},{today:TODAY}));
+ assert.match(shown,/<p class="acct-minor" data-acct-minor aria-live="polite">Osoby poniżej 16 lat rejestruje rodzic lub opiekun\. Poproś go o założenie konta\.<\/p>/);
+});
+test('landing after the sign-up (§10.1, UX-3): plan while payments are required, then target tournament, organizer, athlete, chat',()=>{
+ const paid=(me,full=false)=>({...me,billing:{enabled:true,enforce:true},access:{full,state:full?'active':'none'}});
+ assert.deepEqual(flow.landing(memberMe()),{page:'chat',params:null});
+ assert.deepEqual(flow.landing(memberMe({organizer:true})),{page:'tournaments',params:null});
+ assert.deepEqual(flow.landing(memberMe({athlete:true},[ZOSIA])),{page:'starts',params:null});
+ assert.deepEqual(flow.landing(memberMe({athlete:true,organizer:true},[ZOSIA])),{page:'tournaments',params:null},'both roles: the organizer tools');
+ assert.deepEqual(flow.landing(memberMe({athlete:true,organizer:true},[ZOSIA]),{as:'athlete',t:null}),{page:'starts',params:null},'started as an athlete');
+ assert.deepEqual(flow.landing(memberMe({athlete:true},[ZOSIA]),{as:'athlete',t:'t-1'}),{page:'guest',params:{t:'t-1',enter:'1'}},'back to the tournament with the entry window');
+ assert.deepEqual(flow.landing(memberMe(),{as:'athlete',t:'t-1'}),{page:'chat',params:null},'"Zawodnik" unticked: the target is not used');
+ assert.deepEqual(flow.landing(memberMe({organizer:true}),{as:'athlete',t:'t-1'}),{page:'tournaments',params:null},'only "Organizator" ticked after the athlete offer: the organizer tools');
+ assert.deepEqual(flow.landing(memberMe({organizer:true,athlete:true},[ZOSIA]),{as:'athlete',t:'t-1'}),{page:'guest',params:{t:'t-1',enter:'1'}},'both roles from the offer: the tournament');
+ assert.deepEqual(flow.landing(memberMe({athlete:true}),{as:'athlete',t:'../x'}),{page:'starts',params:null},'a malformed id is ignored');
+ assert.deepEqual(flow.landing(paid(memberMe({athlete:true})),{as:'athlete',t:'t-1'}),{page:'signup',params:{step:'3'}},'the plan first');
+ assert.deepEqual(flow.landing(paid(memberMe({athlete:true})),{as:'athlete',t:'t-1'},{later:true}),{page:'guest',params:{t:'t-1',enter:'1'}},'"later" skips the plan');
+ assert.deepEqual(flow.landing(paid(memberMe({organizer:true}),true)),{page:'tournaments',params:null},'paid with full access');
+ assert.deepEqual(flow.landing(null),{page:'chat',params:null});
+ const src=source('account-flow.js');
+ assert.doesNotMatch(src,/'Konto utworzone\.'\)\);goChat\(\)/,'no fixed chat after the sign-up');
+ assert.match(src,/act==='later'\)\{flowEnd\(\);if\(!land\(getMe\(\),\{later:true\}\)\)goChat\(\);\}/,'"Później" uses landing()');
+ assert.match(src,/act==='to-landing'\)\{S\.ret=null;if\(!land\(getMe\(\),\{later:true\}\)\)goChat\(\);\}/,'the return screen after a Checkout uses landing()');
+ assert.match(src,/act==='to-chat'\)\{S\.ret=null;clearTarget\(\);goChat\(\);\}/,'choosing the chat drops the sign-up target');
+});
+test('roleName (§4.5): Organizator, Zawodnik, Opiekun zawodnika, Członek; null for staff',()=>{
+ assert.equal(flow.roleName(memberMe({organizer:true},[ZOSIA])),'Organizator');
+ assert.equal(flow.roleName(memberMe({athlete:true},[{...ZOSIA,relation:'self'}])),'Zawodnik');
+ assert.equal(flow.roleName(memberMe({athlete:true},[ZOSIA])),'Opiekun zawodnika');
+ assert.equal(flow.roleName(memberMe({},[{...ZOSIA,archived:true}])),'Członek','an archived profile does not count');
+ assert.equal(flow.roleName(memberMe()),'Członek');assert.equal(flow.roleName({user:{role:'editor',caps:{}}}),null);assert.equal(flow.roleName(null),null);
+ assert.equal(inLanguage('en',()=>flow.roleName(memberMe({athlete:true},[ZOSIA]))),'Athlete’s guardian');
+});
+test('"Role" tab states: organizer on, off and blocked (with the support address); one athlete profile, never "add another" (§10.2, §17)',()=>{
+ const view=(me,st)=>String(flow.rolesView(me,st));
+ let html=view(memberMe());
+ assert.match(html,/data-acct-act="organizer-toggle" data-on="true">Włącz rolę organizatora/);assert.match(html,/Rola wyłączona/);
+ assert.match(html,/data-acct-act="athlete-add"/,'no profile yet: add one');assert.doesNotMatch(html,/athlete-edit|athlete-forget/);
+ html=view(memberMe({organizer:true,athlete:true},[ZOSIA]));
+ assert.match(html,/data-acct-act="organizer-toggle" data-on="false">Wyłącz rolę organizatora/);assert.match(html,/Rola włączona/);
+ assert.match(html,/Zosia Kowalska/);assert.match(html,/Dziecko lub podopieczny/);
+ for(const act of ['athlete-edit','athlete-archive','athlete-forget'])assert.match(html,new RegExp('data-acct-act="'+act+'" data-id="p1"'),act);
+ assert.doesNotMatch(html,/athlete-add/,'one athlete profile per account: no "add" once it exists');
+ assert.doesNotMatch(html,/kolejn|another/i);
+ html=view(memberMe({},[{...ZOSIA,archived:true}]));
+ assert.match(html,/data-archived="false">Przywróć profil zawodnika/);assert.match(html,/Zarchiwizowany/);assert.doesNotMatch(html,/athlete-add/,'an archived profile is restored, not replaced');
+ html=view(memberMe({organizerBlocked:true}));
+ assert.doesNotMatch(html,/organizer-toggle/,'blocked: no switch');assert.match(html,/Administrator wyłączył tę rolę\./);
+ assert.equal(flow.rolesState(memberMe({organizerBlocked:true})).organizer.blocked,true);
+ assert.deepEqual(flow.rolesState(memberMe({},[ZOSIA])).canAdd,false);assert.deepEqual(flow.rolesState(memberMe()).canAdd,true);
+ // The edit form of the tab: the shared athlete form.
+ html=view(memberMe({athlete:true},[ZOSIA]),{mode:'edit',f:athlete.newAthlete(),view:null,loading:false,error:''});
+ assert.match(html,/<form id="acct-athlete-form"/);assert.match(html,/Kogo zgłaszasz\?/);assert.match(html,/data-acct-act="athlete-cancel"/);
+ // The blocked text with the help address from public-config, as a mailto link.
+ const src=source('account-flow.js');
+ assert.match(src,/T\('Administrator wyłączył tę rolę\.'\)\} \$\{support\?h`\$\{T\('Napisz na'\)\} <a class="acct-link" href="mailto:\$\{support\}">\$\{support\}<\/a>\.`:''\}/);
+ assert.match(src,/athleteApi\('athlete-forget',\{profileId:id,password\}\)/,'deleting the athlete data asks for the password');
+ assert.match(src,/Client\.request\('roles',\{method:'POST',body:\{organizer:el\.dataset\.on==='true'\}\}\)/,'roles sends only the organizer flag');
+ assert.match(src,/athleteApi\('athlete-save',\{\.\.\.\(st\.f\.id\?\{id:st\.f\.id\}:\{\}\),\.\.\.athleteBody\(st\.f\)\}\)/);
+ for(const lang of ['pl','en'])inLanguage(lang,()=>{for(const me of [memberMe(),memberMe({organizer:true,athlete:true},[ZOSIA]),memberMe({organizerBlocked:true},[{...ZOSIA,archived:true}])])assert.doesNotMatch(view(me),lang==='en'?/[ąćęłńśźż]/:/\[object|undefined/,lang);});
+});
+test('banners and offers for the roles: view-only banner for organizers and athletes, join card, athlete CTA of open self-entry tournaments',()=>{
+ const me=(caps,access={full:false,state:'none'})=>({user:{role:'member',caps},access,billing:{enabled:true,enforce:true}});
+ assert.deepEqual(boot.bannerInfo(me({organizer:true})),{kind:'blocked',until:null,member:'organizer'});
+ assert.deepEqual(boot.bannerInfo(me({athlete:true})),{kind:'blocked',until:null,member:'athlete'});
+ assert.equal(boot.bannerInfo(me({})),null,'a member without roles gets the chat CTA');
+ assert.equal(boot.bannerInfo(me({athlete:true},{full:true,state:'active'})),null);
+ assert.match(source('account-boot.js'),/T\('Zgłaszaj się do turniejów'\),T\('Organizuj własne turnieje'\)/,'the join card lists both roles');
+ const open={id:'t-1',status:'open',selfEntry:true};
+ try{
+  setAccessKind('free',{translate:t});
+  const a=accessFor(open);assert.equal(a.cta,'Załóż konto zawodnika i zgłoś się');assert.deepEqual(a.target,{as:'athlete',t:'t-1'});assert.equal(a.note,ACCESS.variants.free.note);
+  assert.doesNotMatch(a.text,/Konta klubów|Administrator turnieju/,'no club-account sentence');
+  for(const t2 of [{...open,selfEntry:false},{...open,status:'closed'},{...open,selfEntry:undefined},null])assert.equal(accessFor(t2).target,null,JSON.stringify(t2));
+  setAccessKind('login');assert.equal(accessFor(open).target,null,'no sign-up: the login offer');assert.equal(accessFor(open).cta,'Zaloguj się');
+ }finally{setAccessKind('login');}
+ assert.match(source('account-boot.js'),/location\.hash=signupHash\(\{as:el\?\.dataset\?\.signupAs,t:el\?\.dataset\?\.tournamentId\}\)/,'the CTA leads to #signup?as=athlete&t=…');
+});
+
 // ---- Browser checks ----
 let chromium=null;try{({chromium}=createRequire(import.meta.url)('playwright'));}catch{}
 const BROWSER=process.env.MATDRAW_BROWSER_TESTS==='1'&&!!chromium,API=process.env.MATDRAW_TEST_URL,SHOTS=process.env.MATDRAW_ACCOUNT_SHOTS;
@@ -508,6 +700,179 @@ test('PHP build in a browser: sign-up, Checkout and return, portal, cancel, prof
   assert.equal(await page.inputValue('#acct-password-form [name="password"]'),'Czerwona-Herbata-2030','typed values kept');
   await page.unroute(isCommand);
   await ctx.close();
+  assert.deepEqual(errors,[]);
+ }finally{await browser.close();}
+});
+
+test('demo in a browser: the "Role" tab of the parent and of the organizer, PL and EN, 1440 and 390 px without horizontal scroll',{skip:!BROWSER&&'MATDRAW_BROWSER_TESTS=1 and Playwright needed',timeout:120000},async()=>{
+ const {server,url}=await serve(),browser=await chromium.launch().catch(e=>{server.close();throw e;}),errors=[];
+ try{
+  for(const [w,hh] of [[1440,900],[390,844]])for(const lang of ['pl','en']){
+   const ctx=await browser.newContext({viewport:{width:w,height:hh},locale:lang==='pl'?'pl-PL':'en-GB'});await ctx.addInitScript(l=>{try{localStorage.setItem('matdraw.language',l);}catch{}},lang);
+   const page=await ctx.newPage();watch(page,errors);
+   await page.goto(url);await page.click('[data-action="demo-login"][data-role="athlete"]');await page.waitForSelector('.app-shell');
+   await page.evaluate(()=>{location.hash='#profile?tab=roles';});await page.waitForSelector('.acct-role');
+   assert.equal(await page.getAttribute('#acct-tab-roles','aria-selected'),'true');
+   assert.equal(await page.textContent('.acct-role-name'),lang==='pl'?'Opiekun zawodnika':'Athlete’s guardian','role name of a parent');
+   assert.equal(await page.locator('[data-acct-act="athlete-add"]').count(),0,'one athlete profile: no add');
+   assert.equal(await page.locator('[data-acct-act="athlete-edit"]').count(),1);
+   await noOverflow(page,'demo roles parent '+w+' '+lang);await shot(page,`demo-roles-parent-${lang}-${w}`);
+   // Keyboard: the tabs move with the arrows (roving tabindex), Role sits between Profil and Subskrypcja.
+   await page.focus('#acct-tab-roles');await page.keyboard.press('ArrowLeft');assert.equal(await page.evaluate(()=>document.activeElement?.id),'acct-tab-profile');
+   await page.keyboard.press('ArrowRight');assert.equal(await page.evaluate(()=>document.activeElement?.id),'acct-tab-roles');
+   await page.click('[data-action="logout"]').catch(()=>{});await ctx.close();
+   const ctx2=await browser.newContext({viewport:{width:w,height:hh},locale:lang==='pl'?'pl-PL':'en-GB'});await ctx2.addInitScript(l=>{try{localStorage.setItem('matdraw.language',l);}catch{}},lang);
+   const page2=await ctx2.newPage();watch(page2,errors);
+   await page2.goto(url);await page2.click('[data-action="demo-login"][data-role="organizer"]');await page2.waitForSelector('.app-shell');
+   await page2.evaluate(()=>{location.hash='#profile?tab=roles';});await page2.waitForSelector('.acct-role');
+   assert.equal(await page2.getAttribute('[data-acct-act="organizer-toggle"]','data-on'),'false','the organizer can turn the role off');
+   assert.equal(await page2.locator('[data-acct-act="athlete-add"]').count(),1,'no athlete profile yet: add one');
+   await page2.click('[data-acct-act="athlete-add"]');await page2.waitForSelector('#acct-athlete-form');
+   assert.equal(await page2.evaluate(()=>document.activeElement?.name),'relation','focus on "Kogo zgłaszasz?"');
+   await page2.check('#acct-athlete-form input[name="relation"][value="self"]');
+   assert.equal(await page2.inputValue('#acct-athlete-form [name="athleteName"]'),'Marek Organizator','"Siebie" fills the own name');
+   await page2.fill('#acct-athlete-form [name="birthDate"]','2015-03-01');await page2.waitForFunction(()=>document.querySelector('[data-acct-minor]')?.textContent.length>0);
+   assert.doesNotMatch(await page2.textContent('[data-acct-minor]'),/zaznacz|tick|Moje dziecko|child or/i);
+   await page2.check('#acct-athlete-form input[name="relation"][value="guardian"]');
+   assert.equal(await page2.inputValue('#acct-athlete-form [name="athleteName"]'),'','the own name is removed for a child');
+   assert.equal(await page2.textContent('[data-acct-minor]'),'','no age message for a child');
+   await page2.selectOption('#acct-athlete-form [name="gradeType"]','dan');
+   assert.deepEqual(await page2.$$eval('#acct-athlete-form [name="grade"] option',o=>o.map(x=>x.value)),['','1','2','3','4','5','6','7','8','9'],'dan grades 1-9');
+   await noOverflow(page2,'demo roles organizer form '+w+' '+lang);await shot(page2,`demo-roles-organizer-form-${lang}-${w}`);
+   await page2.click('[data-acct-act="athlete-cancel"]');await page2.waitForSelector('[data-acct-act="athlete-add"]');
+   // #profile?tab=roles&add=1 (the athlete call to action) opens the form once: add=1 leaves the address, so "Anuluj" followed by
+   // a re-render of the page (language switch) does not open it again; then= stays for the way back until "Anuluj".
+   await page2.evaluate(()=>{location.hash='#profile?tab=roles&add=1&then=t-winter-2027';});await page2.waitForSelector('#acct-athlete-form');
+   assert.equal(await page2.evaluate(()=>location.hash),'#profile?tab=roles&then=t-winter-2027','add=1 is consumed');
+   await page2.click('[data-acct-act="athlete-cancel"]');await page2.waitForSelector('[data-acct-act="athlete-add"]');
+   assert.equal(await page2.evaluate(()=>location.hash),'#profile?tab=roles','"Anuluj" drops then');
+   const other=lang==='pl'?'en':'pl';await page2.click(`[data-set-lang="${other}"]`);await page2.waitForSelector('[data-acct-act="athlete-add"]');
+   assert.equal(await page2.locator('#acct-athlete-form').count(),0,'the cancelled form stays closed after a re-render');
+   await page2.click(`[data-set-lang="${lang}"]`);await page2.waitForSelector('[data-acct-act="athlete-add"]');
+   await ctx2.close();
+   // A sign-up target is dropped once the signed-out sign-up is left, so a later plain sign-up does not land on that tournament.
+   const ctx3=await browser.newContext({viewport:{width:w,height:hh}});const page3=await ctx3.newPage();watch(page3,errors);
+   await page3.goto(url+'#signup?as=athlete&t=t-winter-2027');await page3.waitForSelector('[data-acct-public]');
+   assert.equal(JSON.parse(await page3.evaluate(()=>sessionStorage.getItem('matdraw.signup.target'))||'null')?.t,'t-winter-2027');
+   await page3.evaluate(()=>{location.hash='';});await page3.waitForFunction(()=>!document.querySelector('[data-acct-public]'));
+   assert.equal(await page3.evaluate(()=>sessionStorage.getItem('matdraw.signup.target')),null,'left: the target is gone');
+   await ctx3.close();
+  }
+  assert.deepEqual(errors,[]);
+ }finally{await browser.close();server.close();}
+});
+
+test('PHP build in a browser: sign-up with the roles, the athlete step, landing and the "Role" tab (§4.5, §10.1, §10.2)',{skip:(!BROWSER||!API)&&'MATDRAW_BROWSER_TESTS=1 under scripts/test-http.sh needed',timeout:300000},async()=>{
+ const {fixture}=await import('./helpers/http-client.mjs');
+ fixture('reset-limits');
+ const app=API.replace(/api\/index\.php$/,''),browser=await chromium.launch(),errors=[],stubPort=Number(new URL(API).port)+1;
+ const stub=async(op,body={})=>{const r=await fetch(`http://127.0.0.1:${stubPort}/__control`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({op,...body})});return r.json();};
+ const tour=fixture('tournament',{name:'E2E Zapisy Zawodników',date:'2031-05-10',status:'open'}).id;
+ const title=page=>page.evaluate(()=>[document.activeElement?.id,document.querySelector('.acct-steps-label')?.textContent]);
+ try{
+  for(const [w,hh,lang] of [[1440,900,'pl'],[390,844,'en']]){
+   const ctx=await browser.newContext({viewport:{width:w,height:hh},locale:lang==='pl'?'pl-PL':'en-GB'});
+   await ctx.addInitScript(l=>{try{if(!localStorage.getItem('matdraw.language'))localStorage.setItem('matdraw.language',l);}catch{}},lang);
+   const page=await ctx.newPage();watch(page,errors);const pl=lang==='pl',both=w>800;
+   // 1440: from the athlete offer of a tournament (#signup?as=athlete&t=…), both roles, a child; 390: the organizer only.
+   await page.goto(app+(both?'#signup?as=athlete&t='+tour:'#signup'));await page.waitForSelector('#acct-signup-1');
+   const begun=Date.now();
+   assert.equal(await page.isChecked('#acct-signup-1 [name="role-athlete"]'),both,'as=athlete ticks "Zawodnik"');assert.equal(await page.isChecked('#acct-signup-1 [name="role-organizer"]'),false);
+   assert.deepEqual(JSON.parse(await page.evaluate(()=>sessionStorage.getItem('matdraw.signup.target'))||'null')?.t??null,both?tour:null,'the target is kept for the landing');
+   await page.check('#acct-signup-1 [name="role-organizer"]');
+   assert.match(await page.textContent('.acct-steps-label'),both?(pl?/Krok 1 z 4/:/Step 1 of 4/):/Step 1 of 3/,'the count follows the roles');
+   await noOverflow(page,'signup 1 '+w);await shot(page,'php-roles-signup1-'+w);
+   const email='e2e.roles.'+w+'.'+Date.now()+'@example.test';
+   await page.fill('#acct-signup-1 [name="email"]',email);await page.fill('#acct-signup-1 [name="password"]','Zielony-Rower-2026');
+   await page.click('#acct-signup-1 button[type="submit"]');await page.waitForSelector('#acct-signup-2');
+   await page.waitForFunction(()=>document.activeElement?.id==='acct-step-title');
+   assert.match((await title(page))[1],both?/Krok 2 z 4 · Profil/:/Step 2 of 3 · Profile/);
+   assert.match(await page.textContent('#acct-signup-2 button[type="submit"]'),both?/Dalej/:/Create account/);
+   // A different person per viewport, so the prefilled username is free in both runs.
+   const [first,last]=both?['Marta','Kowalska']:['Olga','Zielińska'];
+   await page.fill('#acct-signup-2 [name="firstName"]',first);await page.fill('#acct-signup-2 [name="lastName"]',last);await page.waitForSelector('#acct-signup-2 .acct-st.ok');
+   await page.click('[data-sport="taekwondo"]');
+   await page.waitForTimeout(Math.max(0,3500-(Date.now()-begun)));
+   const signup=page.waitForRequest(r=>new URL(r.url()).searchParams.get('route')==='signup');
+   if(both){
+    await page.click('#acct-signup-2 button[type="submit"]');await page.waitForSelector('#acct-signup-3');
+    await page.waitForFunction(()=>document.activeElement?.id==='acct-step-title');
+    assert.match((await title(page))[1],/Krok 3 z 4 · Zawodnik/,'the athlete step');
+    assert.equal(await page.evaluate(()=>location.hash),'#signup?step=athlete');
+    await page.check('#acct-signup-3 input[name="relation"][value="self"]');assert.equal(await page.inputValue('#acct-signup-3 [name="athleteName"]'),'Marta Kowalska');
+    await page.fill('#acct-signup-3 [name="birthDate"]','2014-05-05');await page.waitForFunction(()=>document.querySelector('[data-acct-minor]')?.textContent.length>0);
+    assert.equal(await page.textContent('[data-acct-minor]'),'Osoby poniżej 16 lat rejestruje rodzic lub opiekun. Poproś go o założenie konta.');
+    await page.check('#acct-signup-3 input[name="relation"][value="guardian"]');assert.equal(await page.inputValue('#acct-signup-3 [name="athleteName"]'),'');
+    await page.fill('#acct-signup-3 [name="athleteName"]','Zosia Kowalska');await page.selectOption('#acct-signup-3 [name="sex"]','F');
+    await page.fill('#acct-signup-3 [name="weight"]','40.5');await page.fill('#acct-signup-3 [name="height"]','150');await page.selectOption('#acct-signup-3 [name="grade"]','8');
+    await page.check('#acct-signup-3 input[name="athleteClubMode"][value="new"]');await page.fill('#acct-signup-3 [name="athleteClubName"]','UKS Smoki E2E '+Date.now().toString(36));
+    // Back and forward keep what was typed.
+    await page.click('#acct-signup-3 [data-acct-act="signup-back"]');await page.waitForSelector('#acct-signup-2');await page.click('#acct-signup-2 button[type="submit"]');await page.waitForSelector('#acct-signup-3');
+    assert.equal(await page.inputValue('#acct-signup-3 [name="athleteName"]'),'Zosia Kowalska');assert.equal(await page.isChecked('#acct-signup-3 input[name="relation"][value="guardian"]'),true);
+    await noOverflow(page,'signup athlete '+w);await shot(page,'php-roles-signup3-'+w);
+    await page.click('#acct-signup-3 button[type="submit"]');
+   }else{assert.equal(await page.locator('#acct-signup-3').count(),0);await page.click('#acct-signup-2 button[type="submit"]');}
+   const body=(await signup).postDataJSON();
+   assert.deepEqual(body.roles,{organizer:true,athlete:both});
+   if(both){assert.equal(body.athlete.relation,'guardian');assert.equal(body.athlete.name,'Zosia Kowalska');assert.equal(body.athlete.weight,40.5);assert.match(body.athlete.club.name,/^UKS Smoki E2E/);}
+   else assert.equal(body.athlete,undefined,'no athlete without the role');
+   // Payments are required here: the plan step first, counted from me.caps after the reload; "Później" uses landing().
+   await page.waitForSelector('.acct-plan .acct-pay',{timeout:20000});
+   assert.match(await page.textContent('.acct-steps-label'),both?/Krok 4 z 4 · Plan/:/Step 3 of 3 · Plan/);
+   await noOverflow(page,'plan '+w);
+   if(both){
+    // 1440: paid through Checkout from the plan step; the return screen continues where landing() says (the tournament), with the
+    // chat as the second choice. 390: "Później" uses landing().
+    await ctx.route('https://checkout.stripe.com/**',async route=>{const id=new URL(route.request().url()).pathname.split('/').pop();await stub('pay',{sessionId:id});await route.fulfill({status:302,headers:{location:app+'?billing=success&session_id='+id}});});
+    await page.click('[data-acct-act="checkout"]');await page.waitForSelector('.acct-return.success',{timeout:30000});
+    assert.equal(await page.textContent('.acct-return [data-acct-act="to-landing"]'),'Przejdź do zgłoszenia do turnieju');
+    assert.equal(await page.locator('.acct-return [data-acct-act="to-chat"]').count(),1,'the chat stays the second choice');
+    assert.equal(JSON.parse(await page.evaluate(()=>sessionStorage.getItem('matdraw.signup.target'))||'null')?.t,tour,'the target survives the Checkout');
+    await noOverflow(page,'return '+w);
+    await page.click('[data-acct-act="to-landing"]');
+    await page.waitForFunction(t=>location.hash.startsWith('#guest?t='+t),tour,{timeout:20000});
+    assert.equal(new URLSearchParams(await page.evaluate(()=>location.hash.split('?')[1])).get('enter'),'1','the entry window is asked for');
+    assert.equal(await page.evaluate(()=>sessionStorage.getItem('matdraw.signup.target')),null,'the target is used once');
+   }else{await page.click('[data-acct-act="later"]');await page.waitForFunction(()=>location.hash.startsWith('#tournaments'),null,{timeout:20000});}
+   // The "Role" tab of the new account.
+   await page.goto(app+'#profile?tab=roles');await page.waitForSelector('.acct-role [data-acct-act="organizer-toggle"]',{timeout:20000});
+   assert.equal(await page.getAttribute('[data-acct-act="organizer-toggle"]','data-on'),'false','the organizer role is on');
+   if(both){
+    assert.match(await page.textContent('.acct-athletes'),/Zosia Kowalska/);assert.equal(await page.locator('[data-acct-act="athlete-add"]').count(),0);
+    assert.equal(await page.textContent('.acct-role-name'),'Organizator');
+    await page.click('[data-acct-act="athlete-edit"]');await page.waitForSelector('#acct-athlete-form');
+    assert.equal(await page.inputValue('#acct-athlete-form [name="athleteName"]'),'Zosia Kowalska');assert.equal(await page.inputValue('#acct-athlete-form [name="weight"]'),'40.5');
+    await page.fill('#acct-athlete-form [name="weight"]','41');
+    const saved=page.waitForResponse(r=>new URL(r.url()).searchParams.get('route')==='athlete-save');await page.click('#acct-athlete-form button[type="submit"]');
+    assert.equal((await saved).status(),200);await page.waitForSelector('.acct-athletes');
+    await shot(page,'php-roles-tab-'+w);
+    // Turning the organizer role off reloads the page into the tab.
+    await page.click('[data-acct-act="organizer-toggle"]');await page.waitForFunction(()=>document.querySelector('[data-acct-act="organizer-toggle"]')?.dataset.on==='true',null,{timeout:20000});
+    assert.equal(await page.textContent('.acct-role-name'),'Opiekun zawodnika');
+    // Deleting the athlete data asks for the password.
+    await page.click('[data-acct-act="athlete-forget"]');await page.waitForSelector('#acct-athlete-forget-form');
+    await page.fill('#acct-athlete-forget-form [name="password"]','Zielony-Rower-2026');await page.click('#modal-root button[form="acct-athlete-forget-form"]');
+    await page.waitForSelector('[data-acct-act="athlete-add"]',{timeout:20000});assert.equal(await page.textContent('.acct-role-name'),'Członek');
+   }else{assert.equal(await page.locator('[data-acct-act="athlete-add"]').count(),1);await shot(page,'php-roles-tab-'+w);}
+   await noOverflow(page,'roles tab '+w);
+   if(!both){
+    // The member call to action "Dodaj dane zawodnika, aby się zgłosić" (#profile?tab=roles&add=1&then=<t>): add=1 leaves the
+    // address at once, and saving from #profile?tab=roles&then=<t> goes back to the tournament's member preview.
+    await page.goto(app+'#profile?tab=roles&add=1&then='+tour);await page.waitForSelector('#acct-athlete-form',{timeout:20000});
+    assert.equal(await page.evaluate(()=>location.hash),'#profile?tab=roles&then='+tour,'add=1 is consumed, then is kept');
+    await page.check('#acct-athlete-form input[name="relation"][value="self"]');assert.equal(await page.inputValue('#acct-athlete-form [name="athleteName"]'),'Olga Zielińska');
+    await page.fill('#acct-athlete-form [name="birthDate"]','1994-04-04');await page.selectOption('#acct-athlete-form [name="sex"]','F');
+    await page.fill('#acct-athlete-form [name="weight"]','62');await page.fill('#acct-athlete-form [name="height"]','168');await page.selectOption('#acct-athlete-form [name="grade"]','4');
+    await page.check('#acct-athlete-form input[name="athleteClubMode"][value="none"]');
+    const saved=page.waitForResponse(r=>new URL(r.url()).searchParams.get('route')==='athlete-save');await page.click('#acct-athlete-form button[type="submit"]');
+    assert.equal((await saved).status(),200);
+    await page.waitForFunction(t=>location.hash==='#guest?t='+t,tour,{timeout:20000});
+    // The preview is drawn (its call-to-action slot belongs to the athlete module and may still be empty, so only attached).
+    await page.waitForSelector(`[data-athlete-cta][data-tournament-id="${tour}"]`,{state:'attached',timeout:20000});
+    assert.equal(await page.locator('.access-card').count(),0,'the member preview, not the guest sign-up offer');
+   }
+   await ctx.close();
+  }
   assert.deepEqual(errors,[]);
  }finally{await browser.close();}
 });

@@ -14,6 +14,9 @@ import {ACCESS,setAccessKind} from './promo.js';
 import {t as T,getLanguage} from './i18n.js';
 
 export const FLOW_MARK='matdraw.flow.active',FLOW_MS=18e5,RETURN_KEY='matdraw.billing.return',RETURN_MS=36e5,KNOWN_DEVICE='matdraw.knownDevice',NOTICE_KEY='matdraw.account.notice';
+// Sign-up target (PLAN-REJESTRACJA-ROLE §4.5, §10.1): #signup?as=athlete|organizer[&t=<tournamentId>] is kept for this tab (purged at
+// sign-out with the other matdraw.signup.* keys, me.js) so the landing after the account is created can use it; 30 minutes at most.
+export const TARGET_KEY='matdraw.signup.target',SIGNUP_NOTICE='matdraw.signup.notice',TOURNAMENT_ID=/^[A-Za-z0-9_-]{1,64}$/;
 export const SESSION_ID=/^cs_(?:test|live)_[A-Za-z0-9]{10,250}$/;
 export const ROLES=['admin','editor','club','member'],FLOW_PAGES=['signup','billing'];
 const ui=()=>registry.use('ui');
@@ -54,15 +57,33 @@ export function readReturn(storage=sessionStore(),now=Date.now()){
   return {kind:r.kind,sessionId:SESSION_ID.test(r.sessionId||'')?r.sessionId:null};}catch{return null;}
 }
 export function clearReturn(storage=sessionStore()){try{storage?.removeItem(RETURN_KEY);}catch{}}
-/** Staff banner (plan §3.2, §6.6) for me at unix time now: {kind:'soon'|'grace',until} or {kind:'blocked'} or null. */
+/** Staff banner (plan §3.2, §6.6) for me at unix time now: {kind:'soon'|'grace',until} or {kind:'blocked'} or null. A member with
+ * the organizer or athlete role and no full access also gets the view-only banner (PLAN-REJESTRACJA-ROLE §4.4), with member set to
+ * 'organizer' or 'athlete' (its text names what needs an active account); other members get the chat CTA instead. */
 export function bannerInfo(me,now=Date.now()/1000){
  if(!me?.billing?.enabled||!me.billing.enforce)return null;
- const a=me.access||{};
+ const a=me.access||{},caps=me.user?.caps||{};
  if(a.state==='grace'&&a.until)return {kind:'grace',until:a.until};
  if(a.state==='free'&&a.until>now&&a.until-now<=14*86400)return {kind:'soon',until:a.until};
  if(a.full===false&&me.user?.role!=='member')return {kind:'blocked',until:null};
+ if(a.full===false&&(caps.organizer||caps.athlete))return {kind:'blocked',until:null,member:caps.organizer?'organizer':'athlete'};
  return null;
 }
+/** Address of the sign-up for a target {as:'athlete'|'organizer', t?}: '#signup?as=athlete&t=<id>'; a bad target gives '#signup'. */
+export function signupHash(target){
+ const as=['athlete','organizer'].includes(target?.as)?target.as:null,t=as&&TOURNAMENT_ID.test(String(target?.t??''))?String(target.t):null;
+ return as?'#signup?'+new URLSearchParams(t?{as,t}:{as}).toString():'#signup';
+}
+/** The target of #signup?as=…&t=… (URLSearchParams of the hash): {as, t} or null; t only with a well-formed id. */
+export function parseTarget(params){
+ const as=params?.get?.('as');if(!['athlete','organizer'].includes(as))return null;
+ const t=params.get('t');return {as,t:t&&TOURNAMENT_ID.test(t)?t:null};
+}
+export function saveTarget(target,storage=sessionStore(),now=Date.now()){if(target)try{storage?.setItem(TARGET_KEY,JSON.stringify({as:target.as,t:target.t||null,at:now}));}catch{}}
+export function readTarget(storage=sessionStore(),now=Date.now()){
+ try{const r=JSON.parse(storage?.getItem(TARGET_KEY)||'null');if(!r||!(now-Number(r.at)<FLOW_MS))return null;return parseTarget(new URLSearchParams(r.t?{as:String(r.as),t:String(r.t)}:{as:String(r.as)}));}catch{return null;}
+}
+export function clearTarget(storage=sessionStore()){try{storage?.removeItem(TARGET_KEY);}catch{}}
 export const formatDate=unix=>{try{return new Date(Number(unix)*1000).toLocaleDateString(getLanguage()==='pl'?'pl-PL':'en-GB',{day:'numeric',month:'long',year:'numeric'});}catch{return '';}};
 
 // ---- Runtime state ----
@@ -97,7 +118,7 @@ function joinCard(){
  const cur=priceCurrency(getLanguage()),other=cur==='pln'?'usd':'pln',a=config?.amounts||{};
  const price=kind==='paid'&&a[cur]?formatPrice(a[cur],cur):'',otherPrice=kind==='paid'&&a[other]?formatPrice(a[other],other):'';
  const fine=otherPrice?(cur==='pln'?T('Poza Polską: {price} / miesiąc · płatność przez Stripe',{price:otherPrice}):T('W Polsce: {price} / miesiąc · płatność przez Stripe',{price:otherPrice})):'';
- return h`<section class="acct-join" aria-labelledby="acct-join-title"><div class="acct-join-top"><div><span class="eyebrow">${T('NOWE KONTO')}</span><strong id="acct-join-title">${T('Dołącz do społeczności')}</strong></div>${price?h`<div class="acct-price"><b>${price}</b><span>${T('miesięcznie')}</span></div>`:''}</div><ul>${[T('Pisz w czatach i czatach turniejów'),T('Profil z Twoim sportem, krajem i klubem'),T('Widzisz, kto rozmawia')].map(b=>h`<li>${icon('check')}<span>${b}</span></li>`)}</ul><a class="btn secondary acct-join-cta" href="#signup">${T('Załóż konto')} ${icon('arrow')}</a>${fine?h`<p class="acct-fine">${fine}</p>`:''}</section>`;
+ return h`<section class="acct-join" aria-labelledby="acct-join-title"><div class="acct-join-top"><div><span class="eyebrow">${T('NOWE KONTO')}</span><strong id="acct-join-title">${T('Dołącz do społeczności')}</strong></div>${price?h`<div class="acct-price"><b>${price}</b><span>${T('miesięcznie')}</span></div>`:''}</div><ul>${[T('Pisz w czatach i czatach turniejów'),T('Zgłaszaj się do turniejów'),T('Organizuj własne turnieje'),T('Profil z Twoim sportem, krajem i klubem')].map(b=>h`<li>${icon('check')}<span>${b}</span></li>`)}</ul><a class="btn secondary acct-join-cta" href="#signup">${T('Załóż konto')} ${icon('arrow')}</a>${fine?h`<p class="acct-fine">${fine}</p>`:''}</section>`;
 }
 function helpView(){
  const support=typeof config?.support==='string'?config.support:'',signup=!!config?.signup;
@@ -114,8 +135,8 @@ function paintLogin(){
 // ---- Signed-in shell: banner, own photo, forced password change, pages ----
 function bannerView(b){
  const date=b.until?formatDate(b.until):'';
- const title=b.kind==='soon'?T('Od {date} konto wymaga płatności.',{date}):b.kind==='grace'?T('Karencja do {date}.',{date}):T('Konto wymaga płatności.');
- const text=b.kind==='soon'?T('Wybierz plan, aby zachować pełny dostęp.'):b.kind==='grace'?T('Darmowy okres się skończył. Po tym dniu konto będzie tylko do podglądu, dopóki nie wybierzesz planu.'):T('Masz dostęp tylko do podglądu. Wybierz plan, aby zapisywać zmiany.');
+ const title=b.kind==='soon'?T('Od {date} konto wymaga płatności.',{date}):b.kind==='grace'?T('Karencja do {date}.',{date}):b.member?T('Zgłoszenia do turniejów wymagają aktywnego konta.'):T('Konto wymaga płatności.');
+ const text=b.kind==='soon'?T('Wybierz plan, aby zachować pełny dostęp.'):b.kind==='grace'?T('Darmowy okres się skończył. Po tym dniu konto będzie tylko do podglądu, dopóki nie wybierzesz planu.'):b.member==='organizer'?T('Wybierz plan, aby tworzyć turnieje i zgłaszać zawodników. Podgląd i usuwanie danych działają bez opłaty.'):b.member?T('Wybierz plan, aby zgłaszać się do turniejów. Wycofanie zgłoszenia i zmiana danych działają bez opłaty.'):T('Masz dostęp tylko do podglądu. Wybierz plan, aby zapisywać zmiany.');
  return h`<span class="acct-banner-icon">${icon('card')}</span><p><strong>${title}</strong> ${text}</p><button type="button" class="btn primary acct-banner-btn" data-acct-act="plan">${T('Wybierz plan')}</button>`;
 }
 function paintBanner(page){
@@ -179,7 +200,8 @@ safely(()=>registry.registerPublicPage({id:'signup',render(params){
  flow().then(m=>m.mountPublic(app,params)).catch(error=>{try{console.error('MatBravo sign-up failed',error);}catch{}setHtml(app,h`<p class="acct-loading">${T('Nie udało się wczytać strony. Odśwież stronę.')}</p>`);});
 }}));
 // Guest access card, chat CTA and the plan prompt of unpaid members (plan §6.10, 05 §6.3): sign-up for guests, the plan when signed in.
-safely(()=>registry.registerAction('access-cta',(el,id,ctx={})=>{if(ctx.workspace||workspace())ui()?.navigate?.('billing');else if(ACCESS.kind!=='login')location.hash='#signup';},{public:true}));
+// The athlete offer of an open self-entry tournament (promo.js accessFor) carries data-signup-as and data-tournament-id on the button.
+safely(()=>registry.registerAction('access-cta',(el,id,ctx={})=>{if(ctx.workspace||workspace())ui()?.navigate?.('billing');else if(ACCESS.kind!=='login')location.hash=signupHash({as:el?.dataset?.signupAs,t:el?.dataset?.tournamentId});},{public:true}));
 safely(()=>registry.registerAction('my-account',()=>{if(workspace())ui()?.navigate?.('profile');}));
 // For other modules (e.g. the chat CTA): the loaded public-config, the access kind and price formatting.
 registry.provide('account',{ready:configReady,config:()=>config,accessKind:()=>ACCESS.kind,formatPrice,priceLabel:guestPrice,avatarSrc});
