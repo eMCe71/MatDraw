@@ -86,11 +86,11 @@ test('member commands through Repository::transaction with the actor; organizerS
  const org=fixture('member',{email:'organizator@domain.test',profile:true}),ath=fixture('member',{email:'zawodnik@domain.test',profile:true});
  assert.deepEqual(fixture('domain-organizer',{userId:org.id,organizer:true}),{organizer:true,organizerBlocked:false,organizerTrusted:false,athlete:false});
  const userRow=fixture('domain-row',{table:'users',id:org.id});
- const tr=run(org.id,'tournament.save',{name:'Turniej Społeczności Domeny',city:'Opole',date:day(700),mat:'Mata 1',status:'open'});assert.equal(tr.status,200,JSON.stringify(tr));
+ const tr=run(org.id,'tournament.save',{name:'Turniej Społeczności Domeny',city:'Opole',date:day(700),mat:'Mata 1',status:'open'},{config:{organizers_trust_required:true}});assert.equal(tr.status,200,JSON.stringify(tr));
  const t=tr.result.id,own=tr.view.tournaments.find(x=>x.id===t);assert.deepEqual([own.community,own.trusted,own.selfEntry,own.hidden],[true,false,true,false]);
  assert.equal(run(org.id,'tournament.save',{name:'Zapisy: www.spam.pl',city:'Opole',date:day(700),mat:'Mata 1',status:'open'}).status,422);
  // Paused publishing (flags from Settings::effective): the unconfirmed organizer is stopped, a confirmed one publishes even his first tournament.
- const paused={config:{organizers:'paused'}},conf=fixture('member',{email:'potwierdzony@domain.test'});fixture('domain-organizer',{userId:conf.id,organizer:true,trusted:true});
+ const paused={config:{organizers:'paused',organizers_trust_required:true}},conf=fixture('member',{email:'potwierdzony@domain.test'});fixture('domain-organizer',{userId:conf.id,organizer:true,trusted:true});
  assert.deepEqual(run(org.id,'tournament.save',{name:'Wstrzymany',city:'Opole',date:day(701),mat:'Mata 1',status:'open'},paused),{status:409,error:'Publikowanie nowych turniejów społeczności jest chwilowo wstrzymane przez Administratora.'});
  const first=run(conf.id,'tournament.save',{name:'Pierwszy Potwierdzony',city:'Opole',date:day(702),mat:'Mata 1',status:'open'},paused);assert.equal(first.status,200,JSON.stringify(first));
  assert.equal(run(conf.id,'tournament.save',{id:first.result.id,name:'Pierwszy Potwierdzony',city:'Opole',date:day(702),mat:'Mata 1',status:'draft'}).status,200,'back to draft for the next files');

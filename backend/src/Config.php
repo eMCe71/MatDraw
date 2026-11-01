@@ -7,14 +7,18 @@ namespace MatDraw;
  * every key below exists in the array the code reads, so a production config.php written before a release never
  * yields warnings or different defaults in different files. Code reads new keys only through that merged array.
  * validate() rejects the switch combinations of §6.8/§6.10 and an inconsistent Stripe setup (03 §4.1); its messages
- * are generic on purpose (no key, secret or value ever reaches a log).
+ * are generic on purpose (no key, secret or value ever reaches a log). It checks the file only: the combination in force
+ * with the Administrator's settings in the database comes from Settings::effective(), the allowed transitions from
+ * Settings::save() (PLAN-REJESTRACJA-ROLE §3.3).
  */
 final class Config {
  public const DEFAULTS=[
   // Existing keys (unchanged behaviour).
   'allow_insecure_http'=>false,'session_idle_seconds'=>1800,'session_max_seconds'=>43200,
-  // Accounts, sign-up and sessions (§3).
-  'signup_enabled'=>false,'signup_invite_token'=>null,'signup_free_beta'=>false,'support_email'=>null,
+  // Accounts, sign-up and sessions (§3). signup_enabled, billing_enforce and support_email are starting values only
+  // until the Administrator saves the panel "Ustawienia" (app_settings, Settings::effective, PLAN-REJESTRACJA-ROLE §3.1);
+  // signup_force_off closes sign-up above any saved setting (emergency switch over SSH).
+  'signup_enabled'=>false,'signup_invite_token'=>null,'signup_free_beta'=>false,'support_email'=>null,'signup_force_off'=>false,
   'signup_limit_ip_hour'=>30,'signup_limit_ip_day'=>100,'signup_limit_global_hour'=>200,
   'username_check_limit_session'=>30,'username_check_limit_ip'=>300,'login_limit_ip'=>100,
   'member_session_idle_seconds'=>1209600,'member_session_max_seconds'=>2592000,'anon_session_seconds'=>10800,
