@@ -5,13 +5,15 @@
 //             connection (twice: idempotence) and on its own result, Settings::flags, the number of queries (cache per PDO).
 //  normalize  {cases:[{data, config}]}: Settings::normalize.   defaults {cases:[config]}.   mode {cases:[data]}.
 //  save       {now, cases:[input]}: Settings::save input checks; a valid input reaches the database ('db').
+//  fingerprint {cases:[config]}: Settings::fingerprint.   rolesOpen {cases:[config]}: Settings::rolesOpen(Settings::effective).
+//  signupOpen {cases:[{config, row?, invite}]}: Members::signupOpen on the effective configuration (with a stored row).
 //  needs      {}: [auth, Routes::needsSettings without a cookie, with a session cookie, with a bad one, user] of every route.
 //  dispatch   {name, route, cookie?}: Routes::dispatch of one test route (the registry is replaced) with a database that
 //             cannot be opened ('nodriver:'), so any connection attempt answers 500. Prints the response and "STATUS <code>".
 declare(strict_types=1);
 require dirname(__DIR__).'/backend/bootstrap.php';
 date_default_timezone_set('Europe/Warsaw');
-use MatDraw\{AppError,ApiError,Config,RouteContext,Routes,Settings};
+use MatDraw\{AppError,ApiError,Config,Members,RouteContext,Routes,Settings};
 
 /** SQLite with app_settings (or none), counting queries. */
 final class CountingPdo extends PDO {
@@ -62,6 +64,9 @@ $out=match($in['job']){
   });
  },$in['cases']),
  'normalize'=>array_map(fn($c)=>Settings::normalize($c['data'],$c['config']),$in['cases']),
+ 'fingerprint'=>array_map(fn($c)=>Settings::fingerprint($c),$in['cases']),
+ 'rolesOpen'=>array_map(fn($c)=>Settings::rolesOpen(Settings::effective(null,$c)),$in['cases']),
+ 'signupOpen'=>array_map(fn($c)=>Members::signupOpen(Settings::effective(settings_pdo($c),$c['config']),$c['invite']??null),$in['cases']),
  'defaults'=>array_map(fn($c)=>Settings::defaults($c),$in['cases']),
  'mode'=>array_map(fn($d)=>Settings::mode($d),$in['cases']),
  'save'=>array_map(fn($b)=>$attempt(fn()=>Settings::save(new FailingPdo(),Config::DEFAULTS,['id'=>'admin'],$b,(int)$in['now'])),$in['cases']),

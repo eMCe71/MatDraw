@@ -45,7 +45,8 @@ after(async()=>{
 test('no row: config.php decides; the settings routes are for the Administrator only',{skip},async()=>{
  assert.equal(fixture('settings-row'),null);
  const v=await view();
- assert.deepEqual(Object.keys(v).sort(),['effective','freeSignups','history','limits','mode','organizers','organizersPending','payments','signup','stripe','support','trustRequired','updatedAt','updatedBy','version']);
+ assert.deepEqual(Object.keys(v).sort(),['effective','freeSignups','history','limits','mode','organizers','organizersPending','payments','signup','stripe','stripeCheck','support','trustRequired','updatedAt','updatedBy','version']);
+ assert.deepEqual(v.stripeCheck,{ok:false,stale:false,checkedAt:null,mode:null},'final review B4: no check yet');
  assert.deepEqual({version:v.version,signup:v.signup,payments:v.payments,organizers:v.organizers,trustRequired:v.trustRequired,mode:v.mode,effective:v.effective,support:v.support,stripe:v.stripe,updatedAt:v.updatedAt,updatedBy:v.updatedBy},
   {version:0,signup:'on',payments:'paid',organizers:'on',trustRequired:false,mode:'paid',effective:{mode:'paid',degraded:null},support:{email:'pomoc@example.test',source:'config'},stripe:{enabled:true,mode:'test',check:null},updatedAt:null,updatedBy:null});
  assert.deepEqual(Object.keys(v.limits).sort(),['adultAge','athletesPerAccount','clubsDayGlobal','clubsDayPerUser','communityDayGlobal','minorSelfAge','organizerActive','organizerDay','organizerProfilesDay','retentionMonths']);

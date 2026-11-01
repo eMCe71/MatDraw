@@ -51,6 +51,47 @@ test('Settings::effective: the full §3.3 matrix from a stored row, idempotent, 
   {organizers:'paused',trustRequired:true},{organizers:'paused',trustRequired:true},{organizers:'on',trustRequired:false}],'trustRequired defaults to false (§17), the row wins over config.php');
 });
 
+// Final review B4: payments run only against the Stripe configuration a stored check passed for. Without a stored check the
+// switch works as before (config.php alone); a failed check, or one made against another billing_mode, key, price keys or
+// amounts, closes the sign-up and lifts enforcement (degraded 'stripe-check') until a fresh check passes.
+test('Settings::effective: the stored Stripe check must have passed against the current Stripe configuration (fingerprint, B4)',{skip},()=>{
+ const key='rk_'+'test_'+'fingerprint'+'0'.repeat(12),stripe={billing_enabled:true,billing_mode:'test',stripe_secret_key:key,app_key:'k'.repeat(64),stripe_prices:{pln:'matbravo_monthly_pln',usd:'matbravo_monthly_usd'},billing_amounts:{pln:899,usd:299}};
+ const live={...stripe,billing_mode:'live',stripe_secret_key:'rk_'+'live_'+'fingerprint'+'0'.repeat(12)};
+ const [fp,fpLive,fpAmount,fpKey,fpOrder,fpOff]=bridge({job:'fingerprint',cases:[stripe,live,{...stripe,billing_amounts:{pln:1299,usd:299}},{...stripe,stripe_secret_key:key+'x'},{...stripe,stripe_prices:{usd:'matbravo_monthly_usd',pln:'matbravo_monthly_pln'}},{...stripe,billing_enabled:false}]});
+ assert.match(fp,/^[0-9a-f]{16}$/);assert.equal(fpOff,null,'no fingerprint without billing_enabled');assert.equal(fpOrder,fp,'the order of keys in config.php does not matter');
+ assert.equal(new Set([fp,fpLive,fpAmount,fpKey]).size,4,'mode, key, amounts each change it');
+ assert.ok(![fp,fpLive].some(f=>JSON.stringify(f).includes('fingerprint')),'never the key itself');
+ const check=(o)=>({at:1,ok:true,mode:'test',prices:{pln:true,usd:true},error:null,fp,...o});
+ const paid={signup:'on',payments:'paid'},window={signup:'off',payments:'paid'};
+ const cases=[
+  ['no stored check: config.php and the row decide as before',stripe,paid,[true,true,'paid',null,false]],
+  ['a passed check of this configuration',stripe,{...paid,stripeCheck:check()},[true,true,'paid',null,false]],
+  ['config.php switched to live keys after the check: sign-up closed, enforcement lifted',live,{...paid,stripeCheck:check()},[false,false,'off','stripe-check',true]],
+  ['a fresh check with the live keys opens it again',live,{...paid,stripeCheck:check({mode:'live',fp:fpLive})},[true,true,'paid',null,false]],
+  ['a failed manual check closes it',stripe,{...paid,stripeCheck:check({ok:false,error:'auth'})},[false,false,'off','stripe-check',true]],
+  ['amounts changed in config.php after the check',{...stripe,billing_amounts:{pln:1299,usd:299}},{...paid,stripeCheck:check()},[false,false,'off','stripe-check',true]],
+  ['a check stored without a fingerprint (older release)',stripe,{...paid,stripeCheck:check({fp:undefined})},[false,false,'off','stripe-check',true]],
+  ['the test window (sign-up off, enforcement) after the switch to live keys: enforcement lifted',live,{...window,stripeCheck:check()},[false,false,'off','stripe-check',true]],
+  ['payments free: a failed check changes nothing',stripe,{signup:'on',payments:'free',stripeCheck:check({ok:false,error:'auth'})},[true,false,'free',null,true]],
+  ['Stripe gone from config.php: billing-missing first',{...stripe,billing_enabled:false},{...paid,stripeCheck:check()},[false,false,'off','billing-missing',true]],
+ ];
+ const out=bridge({job:'effective',cases:cases.map(([,c,row])=>({config:{...FILE,...c},row}))});
+ cases.forEach(([label,,,want],i)=>{const o=out[i];assert.equal(o.status,200,label+': '+JSON.stringify(o));assert.deepEqual(Object.values(pick(o.result.effective)),want,label);assert.ok(o.result.again&&o.result.twice,label+': idempotent');});
+});
+// Final review B6: signup_force_off closes every self sign-up path, the invite token of the paid test window included.
+test('signup_force_off closes the invite path too: no token in the effective config, signupOpen false, the banner shows (B6)',{skip},()=>{
+ const token='t'.repeat(32),window={...FILE,billing_enabled:true,signup_invite_token:token},row={signup:'off',payments:'paid'};
+ const out=bridge({job:'signupOpen',cases:[{config:window,row,invite:token},{config:{...window,signup_force_off:true},row,invite:token},{config:{...window,signup_force_off:true},row,invite:null},{config:window,row,invite:'x'.repeat(32)},{config:{...window,signup_force_off:true,signup_enabled:true},invite:null}]});
+ assert.deepEqual(out,[true,false,false,false,false]);
+ const [eff]=bridge({job:'effective',cases:[{config:{...window,signup_force_off:true},row}]}).map(o=>o.result.effective);
+ assert.deepEqual([eff.signup_invite_token,eff.settings_degraded,eff.signup_mode],[null,'force-off','off'],'the panel shows the emergency close also in the test window');
+});
+// Final review B10: members gain roles only while sign-up is open; after the deploy (no row, config.php: off) nothing changes.
+test('Settings::rolesOpen: true only while the effective sign-up is open (B10)',{skip},()=>{
+ const out=bridge({job:'rolesOpen',cases:[FILE,{...FILE,signup_enabled:true},{...FILE,signup_enabled:true,billing_enabled:true,billing_enforce:true},{...FILE,signup_enabled:true,signup_force_off:true},{...FILE,signup_enabled:true,billing_enforce:true}]});
+ assert.deepEqual(out,[false,true,true,false,false],'off, free, paid, force-off, paid without Stripe (degraded)');
+});
+
 test('Settings::effective: a missing table gives the values of config.php alone (no 503); other database errors are not hidden',{skip},()=>{
  const cfg={...FILE,signup_enabled:true,billing_enabled:true,billing_enforce:true,support_email:'pomoc@example.test'};
  const [missing,other,none]=bridge({job:'effective',cases:[{config:cfg,table:false},{config:cfg,error:'HY000'},{config:cfg}]});
@@ -63,7 +104,7 @@ test('Settings::normalize and defaults: closed values, lower-case e-mail, stripe
  const check={at:1,ok:false,mode:'test',prices:{pln:true,usd:false,eur:true},error:'price_missing'};
  const [n1,n2,n3,n4]=bridge({job:'normalize',cases:[{data:{signup:'on',payments:'paid',organizers:'paused',trustRequired:true,supportEmail:'A@B.PL',stripeCheck:check,future:1},config:FILE},
   {data:{stripeCheck:{...check,error:'Stripe said: card <b>'}},config:FILE},{data:{stripeCheck:{...check,mode:'prod'}},config:FILE},{data:null,config:{...FILE,signup_enabled:true,billing_enforce:true}}]});
- assert.deepEqual(n1,{signup:'on',payments:'paid',organizers:'paused',trustRequired:true,supportEmail:'a@b.pl',stripeCheck:{at:1,ok:false,mode:'test',prices:{pln:true,usd:false},error:'price_missing'}});
+ assert.deepEqual(n1,{signup:'on',payments:'paid',organizers:'paused',trustRequired:true,supportEmail:'a@b.pl',stripeCheck:{at:1,ok:false,mode:'test',prices:{pln:true,usd:false},error:'price_missing',fp:null}});
  assert.equal(n2.stripeCheck,null,'free text never stored as an error code');assert.equal(n3.stripeCheck,null);
  assert.deepEqual(n4,{signup:'on',payments:'paid',organizers:'on',trustRequired:false,supportEmail:'hello@matbravo.com',stripeCheck:null});
  assert.deepEqual(bridge({job:'defaults',cases:[{},{support_email:'zły'},{organizers_trust_required:'yes'}]}).map(d=>[d.signup,d.payments,d.supportEmail,d.trustRequired]),
@@ -73,13 +114,13 @@ test('Settings::normalize and defaults: closed values, lower-case e-mail, stripe
 
 test('Settings::save: input checks before any database work (400 form, 422 e-mail and dates); valid input reaches the database',{skip},()=>{
  const now=Math.floor(Date.now()/1000),day=n=>warsawToday(new Date(Date.now()+n*864e5));
- const cases=[{},{version:'0'},{version:-1},{version:0,signup:'maybe'},{version:0,payments:1},{version:0,organizers:'off'},{version:0,trustRequired:'yes'},{version:0,confirmTestMode:1},
+ const cases=[{},{version:'0'},{version:-1},{version:0,signup:'maybe'},{version:0,payments:1},{version:0,organizers:'off'},{version:0,trustRequired:'yes'},{version:0,confirmTestMode:1},{version:0,allowTestMode:'yes'},
   {version:0,supportEmail:5},{version:0,supportEmail:''},{version:0,supportEmail:'nope'},{version:0,freePeriod:'keep'},{version:0,freePeriod:{action:'drop'}},
   {version:0,freePeriod:{action:'requireFrom',date:'2030-02-30'}},{version:0,freePeriod:{action:'requireFrom',date:day(13)}},
   {version:0,freePeriod:{action:'requireFrom',date:day(15)}},{version:0,signup:'on',payments:'free',organizers:'paused',trustRequired:true,supportEmail:'Pomoc@Klub.test',freePeriod:{action:'keep'},confirmTestMode:true}];
  const out=bridge({job:'save',now,cases});
- assert.deepEqual(out.map(o=>o.status),[400,400,400,400,400,400,400,400,400,422,422,400,400,422,422,'db','db']);
- assert.deepEqual([out[9].error,out[13].error,out[14].error],['Podaj poprawny e-mail.','Podaj poprawną datę.','Płatność można wymagać od daty co najmniej 14 dni od dziś.']);
+ assert.deepEqual(out.map(o=>o.status),[400,400,400,400,400,400,400,400,400,400,422,422,400,400,422,422,'db','db']);
+ assert.deepEqual([out[10].error,out[14].error,out[15].error],['Podaj poprawny e-mail.','Podaj poprawną datę.','Płatność można wymagać od daty co najmniej 14 dni od dziś.']);
 });
 
 test('Routes::needsSettings: session and upload routes always, peek routes only with a session cookie, public routes only when flagged; guests cost no connection',{skip},()=>{
