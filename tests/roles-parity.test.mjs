@@ -436,20 +436,32 @@ test('profile.forget and athlete.forget by someone who does not manage the tourn
  const admin=[...list,{actor:'demo-admin',type:'profile.forget',payload:{id:'p-club2'}}],a=runJs(rich(),admin),b=bridge({job:'execute',db:rich(),commands:admin});compare(a,b,admin);
  assert.deepEqual([a.results[4].status,Object.keys(a.db.tournaments.find(x=>x.id==='t-staff-self').draws)],[200,[]]);
 });
-// Final review round 1, R1.6: nobody runs a tournament whose organizer was blocked or deactivated, so it takes no new entries from outside.
-test('a blocked or deactivated organizer: no new self-entries or outside entries into his tournaments; withdrawals still work (R1.6)',{skip},()=>{
+// Final review round 1, R1.6: nobody runs a tournament whose organizer was blocked or deactivated, so it takes no new entries from
+// outside. Round 2, R2.1: only new entries; withdrawals and corrections of entries made earlier work as before (clubs, editors,
+// other organizers, owners), never 'Zapisy są zamknięte.'.
+test('a blocked or deactivated organizer: no new self-entries or outside entries into his tournaments; withdrawals and corrections still work (R1.6, R2.1)',{skip},()=>{
  const db=rich();db.users.find(u=>u.id==='u-org2').active=false;
+ // Another organizer entered his own athlete before the deactivation (a copy of the snapshot from his tournament).
+ const t2=db.tournaments.find(t=>t.id==='t-org2');t2.entries.push({...structuredClone(db.tournaments.find(t=>t.id==='t-org1').entries.find(e=>e.profileId==='p-o1a')),age:t2.entries.find(e=>e.profileId==='p-ed').age});
  const E={events:['forms'],weight:70,height:175,gradeType:'cup',grade:5},list=[
   {actor:'u-ath',type:'entry.self',payload:{tournamentId:'t-org3',profileId:'p-self',events:['forms']}},              // 0 adult, blocked organizer (was allowed)
   {actor:'u-ath',type:'entry.self',payload:{tournamentId:'t-org2',profileId:'p-self',events:['forms']}},              // 1 adult, deactivated organizer
-  {actor:'u-par',type:'entry.self',payload:{tournamentId:'t-org2',profileId:'p-kid',events:['forms'],update:true,weight:43}}, // 2 changing a self-entry there
-  {actor:'demo-club',type:'entry.save',payload:{...E,tournamentId:'t-org2',profileId:'p-club1'}},                     // 3 staff from outside
-  {actor:'u-par',type:'entry.remove',payload:{tournamentId:'t-org2',id:'p-kid'}},                                     // 4 the owner withdraws: allowed
-  {actor:'u-ath',type:'entry.self',payload:{tournamentId:'t-org1',profileId:'p-self',events:['forms']}},              // 5 active organizer: unchanged (already entered)
+  {actor:'demo-club',type:'entry.save',payload:{...E,tournamentId:'t-org2',profileId:'p-club1'}},                     // 2 staff from outside, new entry
+  {actor:'u-org1',type:'entry.save',payload:{...E,tournamentId:'t-org2',profileId:'p-o1b'}},                          // 3 another organizer, new entry
+  {actor:'u-par',type:'entry.self',payload:{tournamentId:'t-org2',profileId:'p-kid',events:['forms'],update:true,weight:43}}, // 4 correcting a self-entry: allowed
+  {actor:'u-club2',type:'entry.save',payload:{...E,tournamentId:'t-org2',profileId:'p-club2',update:true,weight:71}},  // 5 the club corrects its entry
+  {actor:'u-org1',type:'entry.save',payload:{...E,tournamentId:'t-org2',profileId:'p-o1a',update:true,weight:72}},    // 6 the other organizer corrects his
+  {actor:'u-club2',type:'entry.remove',payload:{tournamentId:'t-org2',id:'p-club2'}},                                 // 7 the club withdraws
+  {actor:'demo-editor',type:'entry.remove',payload:{tournamentId:'t-org2',id:'p-ed'}},                                // 8 the editor withdraws
+  {actor:'u-org1',type:'entry.remove',payload:{tournamentId:'t-org2',id:'p-o1a'}},                                    // 9 the other organizer withdraws
+  {actor:'u-par',type:'entry.remove',payload:{tournamentId:'t-org2',id:'p-kid'}},                                     // 10 the owner withdraws
+  {actor:'u-ath',type:'entry.self',payload:{tournamentId:'t-org1',profileId:'p-self',events:['forms']}},              // 11 active organizer: unchanged (already entered)
  ];
  const js=runJs(db,list),ph=bridge({job:'execute',db,commands:list});compare(js,ph,list);
- assert.deepEqual(STATUS(js.results),[403,403,403,403,200,409]);
+ assert.deepEqual(STATUS(js.results),[403,403,403,403,200,200,200,200,200,200,200,409]);
  assert.deepEqual([0,1,2,3].map(i=>js.results[i].error),Array(4).fill('Zapisy do tego turnieju są zamknięte.'));
+ for(const r of [js,ph])assert.deepEqual(r.db.tournaments.find(t=>t.id==='t-org2').entries.map(e=>e.profileId),['p-o2'],'every withdrawal went through');
+ const fixed=runJs(db,list.slice(0,7));const w=Object.fromEntries(fixed.db.tournaments.find(t=>t.id==='t-org2').entries.map(e=>[e.profileId,e.weight]));assert.deepEqual([w['p-kid'],w['p-club2'],w['p-o1a']],[43,71,72],'the corrections are saved');
  const open=rich(),ok=[list[0]],r=runJs(open,ok),p=bridge({job:'execute',db:open,commands:ok});compare(r,p,ok);
  assert.deepEqual(STATUS(r.results),[403],'blocked organizer');
  const active=rich();active.users.find(u=>u.id==='u-org3').organizerBlockedAt=null;const r2=runJs(active,ok),p2=bridge({job:'execute',db:active,commands:ok});compare(r2,p2,ok);
@@ -503,7 +515,10 @@ test('Domain::forgetMember (PHP only): owned profiles forgotten, upcoming tourna
  // R1.1: the saved draw of a tournament he did not manage stays; his athlete stays in it, the profile is anonymised.
  assert.deepEqual([p('p-o1a').name,Object.keys(t('t-staff-self').draws).length,t('t-staff-self').entries.map(e=>e.profileId).sort()],['Dane usunięte',1,['p-club2','p-ed','p-o1a','p-self']]);
  assert.deepEqual([p('p-self').name,p('p-self').ownerId,p('p-self').archived],['Dane usunięte',null,true],'owned profile kept by the closed tournament with a draw: anonymised');
- assert.ok(t('t-org2-closed').entries.some(e=>e.profileId==='p-self'&&e.name==='Zawodnik SELF Testowy'),'history keeps the name in snapshots (O7)');
+ // R2.2: the entries that stay in upcoming tournaments (an open one with a draw he did not manage, a closed one with a draw) get
+ // initials; the name stays only as results history of tournaments that took place (O7, the next test).
+ const name=(id,pid)=>t(id).entries.find(e=>e.profileId===pid).name;
+ assert.deepEqual([name('t-staff-self','p-o1a'),name('t-staff-self','p-self'),name('t-org2-closed','p-self')],['Z. T.','Z. T.','Z. T.']);
  assert.equal(p('p-kid'),undefined,'child profile (parent account) in an open tournament only: deleted');
  assert.deepEqual(out.withdrawals.map(w=>[w.profileId,w.tournamentId,w.by]),[['p-self','t-org1','system']],'other athletes in the hidden tournament');
  assert.deepEqual(counts.map(c=>c.tournaments),[1,0,0]);assert.ok(out.revision>db.revision);
@@ -513,6 +528,19 @@ test('Domain::forgetMember (PHP only): owned profiles forgotten, upcoming tourna
  const done=rich();done.tournaments.push({...structuredClone(done.tournaments.find(t=>t.id==='t-org1')),id:'t-org1-done',status:'finished',date:day(0),selfEntry:false});
  const {db:kept,out:n}=bridge({job:'forgetMember',db:done,users:['u-org1']}),k=kept.tournaments.find(t=>t.id==='t-org1-done');
  assert.deepEqual([k.status,k.hiddenBy??null,n[0].tournaments],['finished',null,1],'only t-org1 is hidden');assert.ok(k.entries.some(e=>e.profileId==='p-self'),'the results stay');
+});
+// Final review round 2, R2.2: account deletion keeps a full name only as results history (O7): in a finished tournament or one
+// that took place (dated before today, e.g. never switched to finished); an entry that stays in an upcoming one gets initials.
+test('Domain::forgetMember (PHP only): an entry kept in an upcoming tournament gets initials; finished and past tournaments keep the name (O7, R2.2)',{skip},()=>{
+ const db=rich(),base=db.tournaments.find(t=>t.id==='t-org2-closed');
+ db.tournaments.push({...structuredClone(base),id:'t-org2-past',date:day(-3)},{...structuredClone(base),id:'t-org2-done',status:'finished',date:day(-10)},
+  {...structuredClone(base),id:'t-org2-today',date:day(0)},{...structuredClone(base),id:'t-org2-hidden',status:'draft',hiddenBy:'demo-admin',hiddenFrom:'finished',date:day(-1)});
+ const {db:out}=bridge({job:'forgetMember',db,users:['u-ath']}),name=id=>out.tournaments.find(t=>t.id===id).entries.find(e=>e.profileId==='p-self')?.name??null;
+ assert.deepEqual(['t-org2-closed','t-org2-today','t-staff-self','t-org2-past','t-org2-done','t-org2-hidden'].map(name),['Z. T.','Z. T.','Z. T.','Zawodnik SELF Testowy','Zawodnik SELF Testowy','Zawodnik SELF Testowy']);
+ assert.equal(name('t-org1'),null,'an open tournament without a draw: withdrawn as before');
+ assert.equal(out.profiles.find(p=>p.id==='p-self').name,'Dane usunięte');
+ // The other draws and results are untouched.
+ for(const id of ['t-org2-closed','t-org2-past','t-org2-today'])assert.deepEqual(out.tournaments.find(t=>t.id===id).draws,db.tournaments.find(t=>t.id===id).draws);
 });
 /** rich() after commands that write log lines naming athletes: self-entries, withdrawals by the owner, the Administrator and an
  * organizer, check-in, then a rename of p-self and a corrected self-entry (the old name stays only in older lines and snapshots). */
@@ -533,11 +561,13 @@ function logged(){
 const NAMES=['Zawodnik SELF Testowy','Zawodnik KID Testowy','Nowe Imię Zawodnika'],logs=db=>db.tournaments.flatMap(t=>t.activity.map(x=>x.text));
 test('forgetting athletes leaves no full name in tournament logs: earlier names, withdrawals, PHP forgetMember and the JS mirror (§6.6)',{skip},()=>{
  const {db,list}=logged();assert.ok(NAMES.every(n=>logs(db).some(x=>x.endsWith(': '+n))),'every name is in a log before');
- // Account deletion (PHP only): snapshots kept as results history keep the name (O7), logs never.
- const {db:out}=bridge({job:'forgetMember',db,users:['u-ath','u-par']});
+ // Account deletion (PHP only): snapshots kept as results history of a tournament that took place keep the name (O7), logs never.
+ const past=structuredClone(db);past.tournaments.push({...structuredClone(past.tournaments.find(t=>t.id==='t-org2-closed')),id:'t-org2-past',date:day(-3),activity:[]});
+ const {db:out}=bridge({job:'forgetMember',db:past,users:['u-ath','u-par']});
  assert.deepEqual(logs(out).filter(x=>NAMES.some(n=>x.includes(n))),[],'no full name in any log');
  assert.ok(out.tournaments.find(t=>t.id==='t-staff-self').activity.some(x=>x.text==='Wycofano zgłoszenie: Z. T.'),'the withdrawal by the Administrator, as initials');
- assert.ok(out.tournaments.find(t=>t.id==='t-org2-closed').entries.some(e=>e.profileId==='p-self'&&e.name==='Zawodnik SELF Testowy'),'a snapshot kept as history keeps its name (O7)');
+ assert.ok(out.tournaments.find(t=>t.id==='t-org2-past').entries.some(e=>e.profileId==='p-self'&&e.name==='Zawodnik SELF Testowy'),'a snapshot kept as history keeps its name (O7)');
+ assert.ok(out.tournaments.find(t=>t.id==='t-org2-closed').entries.some(e=>e.profileId==='p-self'&&e.name==='Z. T.'),'kept in an upcoming tournament: initials (R2.2)');
  assert.ok(logs(out).includes('Wycofano zgłoszenie: Zawodnik ED Testowy'),'other athletes keep their names');
  // A namesake with an entry in the same tournament keeps his line.
  const twin=structuredClone(db),t3=twin.tournaments.find(t=>t.id==='t-org2');t3.entries.find(e=>e.profileId==='p-club2').name='Zawodnik KID Testowy';t3.activity.unshift({text:'Zgłoszono: Zawodnik KID Testowy',time:'2026-01-01T00:00:00.000Z'});

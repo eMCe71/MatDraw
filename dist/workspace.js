@@ -65,7 +65,7 @@ export function trustedOrganizer(db,userId){
  return !!o&&!o.blocked&&(!!o.trusted||!trustRequired(db));
 }
 export const trusted=(db,t)=>db?!community(db,t)||trustedOrganizer(db,t.createdBy):!t?.community||!!t?.trusted;
-/** Mirror of Domain::closedCreator (final review R1.6): a member creator blocked as organizer or deactivated; without db false. */
+/** Mirror of Domain::closedCreator (final review R1.6, R2.1): a member creator blocked as organizer or deactivated (no new entries from outside; canEnter does not read it); without db false. */
 export function closedCreator(db,t){
  if(!db||typeof t?.createdBy!=='string')return false;let o=isObj(db.organizers)&&Object.hasOwn(db.organizers,t.createdBy)?db.organizers[t.createdBy]:null;
  if(!o){const u=db.users.find(x=>x.id===t.createdBy&&x.role==='member');if(u)o={blocked:isset(u.organizerBlockedAt),active:u.active!==false};}
@@ -79,7 +79,7 @@ export function managesProfile(user,a,db){
  if(user.role==='club')return staffProfile(db,a)&&a.clubId===user.clubId;
  return (user.role==='editor'||organizer(user))&&a.createdBy===user.id;
 }
-export const outsideEntry=(user,t,db)=>!!user&&!!t&&t.status==='open'&&trusted(db,t)&&!closedCreator(db,t)&&(user.role==='club'||user.role==='editor'||organizer(user)&&t.selfEntry===true);
+export const outsideEntry=(user,t,db)=>!!user&&!!t&&t.status==='open'&&trusted(db,t)&&(user.role==='club'||user.role==='editor'||organizer(user)&&t.selfEntry===true);
 export const canEnter=(user,t,db)=>!!user&&!!t&&t.status!=='finished'&&(manages(user,t)||outsideEntry(user,t,db));
 export const canCreateTournament=user=>!!user&&(user.role==='admin'||user.role==='editor'||organizer(user));
 const byId=rows=>new Map(rows.map(r=>[r.id,r]));
@@ -296,13 +296,15 @@ export function detach(t,entryId,keep=false){
 }
 const erasureKeeps=(db,actor,t)=>!actor||!manages(actor,t)&&guarded(db,actor,t);
 // Logs never keep a forgotten name: lines marked with the profile in every tournament; unmarked (older) lines by name only where the
-// profile has an entry or the actor manages the tournament, namesakes with entries excepted. Snapshots only with useInitials.
+// profile has an entry or the actor manages the tournament, namesakes with entries excepted. Snapshots with useInitials, otherwise
+// only those that stay in an upcoming tournament (final review R2.2: the name stays as results history of tournaments that took place).
+const upcoming=(t,today)=>(isset(t.hiddenBy)?t.hiddenFrom??t.status:t.status)!=='finished'&&t.date>=today;
 export function forgetProfile(db,profileId,useInitials=false,actor=null){
  const i=db.profiles.findIndex(a=>a.id===profileId);if(i<0)return 'missing';
- const names=[...new Set([db.profiles[i].name,...db.tournaments.flatMap(t=>t.entries.filter(e=>e.profileId===profileId).map(e=>e.name))].map(n=>String(n??'')))].filter(n=>n!==''&&n!==DELETED);let left=false;
+ const names=[...new Set([db.profiles[i].name,...db.tournaments.flatMap(t=>t.entries.filter(e=>e.profileId===profileId).map(e=>e.name))].map(n=>String(n??'')))].filter(n=>n!==''&&n!==DELETED);let left=false;const today=warsawToday();
  for(const t of db.tournaments){
-  const entered=t.entries.some(e=>e.profileId===profileId);if(entered&&!detach(t,profileId,erasureKeeps(db,actor,t)))left=true;
-  if(useInitials)for(const e of t.entries)if(e.profileId===profileId)e.name=initials(String(e.name));
+  const entered=t.entries.some(e=>e.profileId===profileId),kept=entered&&!detach(t,profileId,erasureKeeps(db,actor,t));if(kept)left=true;
+  if(useInitials||kept&&upcoming(t,today))for(const e of t.entries)if(e.profileId===profileId)e.name=initials(String(e.name));
   unname(t,profileId,names,entered||!!actor&&manages(actor,t));
  }
  if(!left){db.profiles.splice(i,1);return 'deleted';}
@@ -449,6 +451,7 @@ function apply(db,user,type,p){
  if(type==='entry.save'){
   if(!canEnter(user,t,db))fail('Zapisy do tego turnieju są zamknięte.',403);
   const manager=manages(user,t),existing=t.entries.find(e=>e.profileId===p.profileId)??null;
+  if(!manager&&!existing&&closedCreator(db,t))fail('Zapisy do tego turnieju są zamknięte.',403);
   const a=prof(db,user,p.profileId,!!existing&&manager);if(a.archived)fail('Zawodnik jest zarchiwizowany.');
   if(user.role==='club'&&(a.clubId!==user.clubId||!staffProfile(db,a)))fail('Możesz zgłaszać tylko zawodników swojego klubu.',403);
   if(!existing&&user.role==='editor'&&!(community(db,t)?!isset(a.ownerId)&&a.createdBy===user.id:staffProfile(db,a)))fail('Nie możesz zgłosić tego zawodnika.',403);
@@ -504,13 +507,13 @@ function removeEntry(db,user,p){
  reconcile(t,t.entries.filter(x=>x.id!==a.id));audit(t,'Wycofano zgłoszenie: '+a.name,a.profileId);
  if(a.self)withdrawn(db,a,t.id,user.role==='admin'?'admin':'organizer');return {id:a.id};
 }
-/** entry.self (§7.1–§7.2): an athlete enters an own profile; never into a category with a saved draw nor a tournament of a blocked or deactivated organizer (R1.6); minors only in trusted tournaments. */
+/** entry.self (§7.1–§7.2): an athlete enters an own profile; never into a category with a saved draw nor newly into a tournament of a blocked or deactivated organizer (R1.6, R2.1); minors only in trusted tournaments. */
 function selfEntry(db,user,p,owned){
  if(typeof p.profileId!=='string'||p.profileId==='')fail('Najpierw uzupełnij dane zawodnika.',409);
  let a=owned(p.profileId);if(!a)fail('Zawodnik nie istnieje.',404);if(a.archived)fail('Najpierw uzupełnij dane zawodnika.',409);
  const t=db.tournaments.find(x=>x.id===p.tournamentId&&x.status!=='draft');if(!t)fail('Turniej nie jest dostępny.',404);
- if(t.status!=='open'||t.selfEntry!==true||t.date<warsawToday()||closedCreator(db,t))fail('Zapisy do tego turnieju są zamknięte.',403);
  const old=t.entries.find(e=>e.profileId===a.id)??null,update=p.update===true;
+ if(t.status!=='open'||t.selfEntry!==true||t.date<warsawToday()||!old&&closedCreator(db,t))fail('Zapisy do tego turnieju są zamknięte.',403);
  if(old&&!update)fail('Jesteś już zgłoszony do tego turnieju.',409);if(!old&&update)fail('Zgłoszenie nie istnieje.',404);
  keepDraws(t,old,null,'');
  if(!trusted(db,t)&&(a.relation!=='self'||ageAt(String(a.birthDate),t.date)<ADULT_AGE))fail('Zgłoszenia osób niepełnoletnich do tego turnieju będą możliwe, gdy MatBravo potwierdzi organizatora.',409);
