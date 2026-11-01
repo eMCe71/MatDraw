@@ -50,7 +50,10 @@ export default {
  'Stripe zwrócił błąd.':'Stripe returned an error.',
  'Stripe w trybie testowym':'Stripe in test mode',
  'W trybie testowym karty testowe przechodzą, a prawdziwe płatności nie. Przełącz Stripe na tryb live w config.php przed prawdziwym otwarciem płatności.':'In test mode test cards pass and real payments do not. Switch Stripe to live mode in config.php before opening payments for real.',
- 'Potwierdzam tryb testowy':'I confirm test mode',
+ 'Stripe działa w trybie testowym — każdy dostanie pełny dostęp kartą testową. Otworzyć mimo to?':'Stripe is in test mode — anyone gets full access with a test card. Open anyway?',
+ 'Otwórz mimo to':'Open anyway',
+ 'Konfiguracja Stripe zmieniła się od ostatniego sprawdzenia — sprawdź ponownie':'The Stripe configuration has changed since the last check — check again',
+ 'Płatna rejestracja i wymaganie płatności są wstrzymane, dopóki nowa kontrola Stripe nie przejdzie.':'Paid sign-up and payment enforcement are paused until a new Stripe check passes.',
  // Help address.
  'Adres pomocy':'Help address',
  'E-mail pomocy':'Help e-mail',

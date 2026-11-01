@@ -85,12 +85,12 @@ test('the decision dialog shows both group counts and sends keep or requireFrom;
  try{
   const fields=S.changedFields(VIEW(),S.modeFields('paid'));
   const r1=await S.attempt(VIEW(),fields);assert.deepEqual([r1.ok,r1.kind],[false,'test_mode']);
-  const r2=await S.attempt(VIEW(),fields,{confirmTestMode:true});assert.deepEqual([r2.ok,r2.kind,r2.counts],[false,'decision',{a:4,b:7}]);
-  const r3=await S.attempt(VIEW(),fields,{confirmTestMode:true,freePeriod:S.decisionBody('requireFrom','2026-12-01',today).freePeriod});assert.equal(r3.ok,true);assert.equal(r3.view.version,4);
+  const r2=await S.attempt(VIEW(),fields,{allowTestMode:true});assert.deepEqual([r2.ok,r2.kind,r2.counts],[false,'decision',{a:4,b:7}]);
+  const r3=await S.attempt(VIEW(),fields,{allowTestMode:true,freePeriod:S.decisionBody('requireFrom','2026-12-01',today).freePeriod});assert.equal(r3.ok,true);assert.equal(r3.view.version,4);
   assert.deepEqual(sent.map(([route,o])=>[route,o.method]),[['admin-settings-save','POST'],['admin-settings-save','POST'],['admin-settings-save','POST']]);
   assert.deepEqual(sent[0][1].body,{version:3,signup:'on',payments:'paid'},'no confirmation before it is given');
-  assert.deepEqual(sent[1][1].body,{version:3,signup:'on',payments:'paid',confirmTestMode:true});
-  assert.deepEqual(sent[2][1].body,{version:3,signup:'on',payments:'paid',confirmTestMode:true,freePeriod:{action:'requireFrom',date:'2026-12-01'}});
+  assert.deepEqual(sent[1][1].body,{version:3,signup:'on',payments:'paid',allowTestMode:true,confirmTestMode:true},'contract (c) allowTestMode, and the field of older servers');
+  assert.deepEqual(sent[2][1].body,{version:3,signup:'on',payments:'paid',allowTestMode:true,confirmTestMode:true,freePeriod:{action:'requireFrom',date:'2026-12-01'}});
   answers.push(conflict('stale'),conflict('stripe_not_ready'),Object.assign(new Error('Brak uprawnień.'),{status:403}));
   assert.equal((await S.attempt(VIEW(),{signup:'on'})).kind,'stale');assert.equal((await S.attempt(VIEW(),{signup:'on'})).kind,'stripe');
   await assert.rejects(S.attempt(VIEW(),{signup:'on'}),/Brak uprawnień/,'403 is not a dialog');
@@ -198,11 +198,11 @@ test('a refused resend from a dialog: stale closes the dialog and reloads; strip
   S.state.view=VIEW();
   replies.push(conflict('test_mode'),conflict('stripe_not_ready'),conflict('test_mode'),conflict('stale'),VIEW({version:4}));
   await S.save(el,{signup:'on',payments:'paid'});assert.equal(open,true);assert.deepEqual(S.pendingSave().fields,{signup:'on',payments:'paid'});
-  const p=S.pendingSave();await S.save(el,p.fields,{...p.extra,confirmTestMode:true},p.done);
+  const p=S.pendingSave();await S.save(el,p.fields,{...p.extra,allowTestMode:true},p.done);
   assert.equal(open,true,'the test-mode dialog stays');assert.equal(box.textContent,'x');assert.ok(S.pendingSave(),'its confirm button can send again');
-  assert.deepEqual(S.pendingSave().extra,{confirmTestMode:true});
+  assert.deepEqual(S.pendingSave().extra,{allowTestMode:true});
   // Another Administrator saved meanwhile: the dialog closes and the page reloads the new version.
-  box.textContent='';await S.save(el,{signup:'on',payments:'paid'});const q=S.pendingSave();await S.save(el,q.fields,{...q.extra,confirmTestMode:true},q.done);
+  box.textContent='';await S.save(el,{signup:'on',payments:'paid'});const q=S.pendingSave();await S.save(el,q.fields,{...q.extra,allowTestMode:true},q.done);
   assert.equal(open,false);assert.equal(S.pendingSave(),null);assert.equal(S.state.view.version,4);assert.equal(log.at(-1),'toast:x');assert.equal(log.at(-2),'admin-settings');
   assert.equal(meRefreshed,0,'nothing saved, nothing to refresh');
   // A saved change of the organizer confirmation refreshes me (the nav badge of #members); the help address does not.
@@ -213,6 +213,41 @@ test('a refused resend from a dialog: stale closes the dialog and reloads; strip
  }finally{Object.assign(S.io,io);delete globalThis.document;S.state.view=null;}
 });
 
+test('contract (c): a 409 with confirmTestMode asks "Otworzyć mimo to?" and its button resends with allowTestMode:true',async()=>{
+ const refusal=Object.assign(new Error('Stripe w trybie testowym.'),{status:409,data:{error:'Stripe w trybie testowym.',confirmTestMode:true}});
+ assert.equal(S.outcome(refusal).kind,'test_mode','the flag alone (no code) is the test-mode question');
+ assert.equal(S.outcome(conflict('test_mode')).kind,'test_mode','the code of older servers too');
+ assert.equal(S.outcome(Object.assign(new Error('x'),{status:409,data:{confirmTestMode:false}})).kind,'error');
+ const log=[],modals=[],sent=[];let open=false;const replies=[refusal,VIEW({version:4,signup:'off',payments:'paid'})];
+ registry.provide('ui',{modal:(title,body,actions)=>{open=true;modals.push([title,String(body),String(actions)]);},closeModal:()=>{open=false;log.push('close');},toast:m=>log.push('toast:'+m)});
+ globalThis.document={querySelector:sel=>sel==='#modal-root .modal'?(open?{}:null):null};
+ const io={...S.io};S.io.request=async(route,o)=>{sent.push([route,o?.body]);const r=replies.shift();if(r instanceof Error)throw r;return r;};S.io.refreshMe=()=>{};
+ try{
+  S.state.view=VIEW();
+  // Enforcement for existing accounts (mode off, payments paid) in test mode: the server asks, the panel shows the question.
+  await S.save({closest:()=>null},{payments:'paid'});
+  assert.equal(modals.length,1);assert.match(modals[0][1],/Stripe działa w trybie testowym — każdy dostanie pełny dostęp kartą testową\. Otworzyć mimo to\?/);
+  assert.match(modals[0][2],/data-set-act="test-go">Otwórz mimo to</);
+  assert.deepEqual(sent[0][1],{version:3,payments:'paid'},'no permission before the question');
+  const p=S.pendingSave();await S.save({closest:()=>null},p.fields,{...p.extra,allowTestMode:true},p.done);
+  assert.equal(sent[1][1].allowTestMode,true,'the resend carries allowTestMode:true');assert.equal(open,false);assert.equal(S.state.view.version,4);
+ }finally{Object.assign(S.io,io);delete globalThis.document;S.state.view=null;}
+ assert.equal(S.saveBody(VIEW(),{payments:'paid'},{allowTestMode:true}).allowTestMode,true);
+ assert.ok(/'test-go':el=>busy\(el,\(\)=>pending&&save\(el,pending\.fields,\{\.\.\.pending\.extra,allowTestMode:true\}/.test(await import('node:fs').then(fs=>fs.readFileSync(new URL('../dist/admin-settings.js',import.meta.url),'utf8'))),'the dialog button sends allowTestMode');
+});
+test('contract (b): a stale Stripe check says "sprawdź ponownie" and that paid sign-up and enforcement wait for a passing check',()=>{
+ const fresh={ok:true,stale:false,checkedAt:'2026-10-30T10:00:00Z',mode:'test'};
+ assert.deepEqual(S.stripeState(VIEW()),{stale:false,paused:false},'no stripeCheck (older server): nothing');
+ assert.deepEqual(S.stripeState(VIEW({stripeCheck:fresh,payments:'paid'})),{stale:false,paused:false});
+ assert.deepEqual(S.stripeState(VIEW({stripeCheck:{...fresh,stale:true},payments:'paid'})),{stale:true,paused:true});
+ assert.deepEqual(S.stripeState(VIEW({stripeCheck:{...fresh,stale:true}})),{stale:true,paused:false},'payments not required: nothing is paused');
+ assert.deepEqual(S.stripeState(VIEW({stripeCheck:{ok:false,stale:false,checkedAt:null,mode:null},payments:'paid',signup:'on'})),{stale:false,paused:true},'never checked or failed');
+ const stale=S.pageView(VIEW({signup:'on',payments:'paid',mode:'paid',stripeCheck:{...fresh,stale:true}})).html;
+ assert.match(stale,/class="set-alert" role="alert"><strong>Konfiguracja Stripe zmieniła się od ostatniego sprawdzenia — sprawdź ponownie<\/strong> Płatna rejestracja i wymaganie płatności są wstrzymane, dopóki nowa kontrola Stripe nie przejdzie\./);
+ assert.match(stale,/data-set-form="mode">[\s\S]*Płatna rejestracja i wymaganie płatności są wstrzymane[\s\S]*Zapisz tryb rejestracji/,'the sign-up section says it too');
+ assert.doesNotMatch(S.pageView(VIEW({signup:'on',payments:'paid',mode:'paid',stripeCheck:fresh})).html,/sprawdź ponownie|wstrzymane, dopóki/);
+ english(()=>assert.match(S.pageView(VIEW({stripeCheck:{...fresh,stale:true}})).html,/The Stripe configuration has changed since the last check — check again/));
+});
 test('confirm organizer on a tournament card: a blocked organizer is reported, not confirmed',()=>{
  assert.deepEqual(C.trustOutcome({id:'m',caps:{organizer:true,organizerTrusted:true}}),{ok:true,message:'Organizator potwierdzony.'});
  const blocked=C.trustOutcome({id:'m',caps:{organizer:false,organizerBlocked:true,organizerTrusted:true}});
