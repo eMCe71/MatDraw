@@ -14,7 +14,9 @@ declare(strict_types=1);
  * the public club list nor named in public brackets (PLAN-REJESTRACJA-ROLE §6.3). --remove deletes the staff-created
  * profiles without an owner in those clubs, their entries, the draws that contain them and the clubs; it refuses and
  * changes nothing while a demo club holds any other profile or entry (community data) or is a merge target. Clubs with
- * user accounts are never deleted.
+ * user accounts are never deleted. A demo club is a club whose name is exactly one of the six names (one rule for seeding
+ * and --remove); a club whose name only resembles one (Clubs::key) stops the seeding until it is renamed. Seeding and
+ * --remove first unverify demo clubs left verified by an earlier version (migration 0007 verified every existing club).
  */
 if(PHP_SAPI!=='cli'){http_response_code(404);exit;}
 require dirname(__DIR__).'/bootstrap.php';
@@ -40,6 +42,8 @@ try {
   exit(0);
  }
 
+ if(($hidden=hideDemoClubs($pdo))>0)$out("Unverified $hidden demo clubs (off the public club list).");
+
  if(isset($opts['remove'])){
   $n=remove($pdo);
   $out($n===null?'No sample data found.':"Removed $n sample athletes, their entries, draws and demo clubs.");
@@ -60,7 +64,9 @@ try {
 
   $names=SampleAthletes::clubNames();$clubIds=[];
   foreach($names as $name){
-   $club=null;foreach($db['clubs'] as $c)if(Clubs::key($c['name'])===Clubs::key($name))$club=$c;
+   // The exact name, as --remove finds it; a club that only resembles it (Clubs::key) or has accounts would stay behind.
+   $club=null;foreach($db['clubs'] as $c)if($c['name']===$name)$club=$c;elseif(Clubs::key($c['name'])===Clubs::key($name))throw new RuntimeException("The club \"{$c['name']}\" resembles the demo club \"$name\"; rename it in the app (Kluby) first.");
+   if($club)foreach($db['users'] as $x)if($x['clubId']===$club['id'])throw new RuntimeException("The demo club \"$name\" has user accounts; rename it in the app (Kluby) first.");
    if($club)foreach($db['profiles'] as $p)if($p['clubId']===$club['id'])throw new RuntimeException('Sample athletes already exist. Run with --remove first.');
    // Unverified and created by the seeding administrator: off the public club list and out of public brackets (§6.3).
    if(!$club){$club=['id'=>Domain::id(),'name'=>$name,'verified'=>false,'createdBy'=>$admin['id'],'createdAt'=>time(),'mergedInto'=>null];$db['clubs'][]=$club;}
@@ -101,6 +107,26 @@ function summary(array $athletes,?array $clubNames,string $date,callable $out,?s
  foreach($unassigned as $u)$out("  unassigned: $u");
 }
 
+/** Ids of the demo clubs without accounts: the exact names (the column's collation also matches case and accents). */
+function demoClubs(PDO $pdo,bool $verified=false):array {
+ $names=SampleAthletes::clubNames();$in=implode(',',array_fill(0,count($names),'?'));
+ $q=$pdo->prepare("SELECT c.id,c.name FROM clubs c WHERE c.name IN ($in)".($verified?' AND c.verified=1':'')." AND NOT EXISTS (SELECT 1 FROM users u WHERE u.club_id=c.id)");$q->execute($names);
+ return array_values(array_map(fn($r)=>$r['id'],array_filter($q->fetchAll(PDO::FETCH_ASSOC),fn($r)=>in_array($r['name'],$names,true))));
+}
+
+/** Unverifies demo clubs (off the public club list and out of public brackets, §6.3) under the workspace lock; staff_rev=revision=R as Domain stamps a club change. */
+function hideDemoClubs(PDO $pdo):int {
+ $pdo->beginTransaction();
+ try {
+  $pdo->query('SELECT revision FROM app_meta WHERE id=1 FOR UPDATE')->fetch();
+  $ids=demoClubs($pdo,true);if(!$ids){$pdo->rollBack();return 0;}
+  $R=(int)$pdo->query('SELECT revision FROM app_meta WHERE id=1')->fetchColumn()+1;
+  $pdo->prepare('UPDATE clubs SET verified=0 WHERE id IN ('.implode(',',array_fill(0,count($ids),'?')).')')->execute($ids);
+  $pdo->prepare('UPDATE app_meta SET revision=?,staff_rev=? WHERE id=1')->execute([$R,$R]);
+  $pdo->commit();return count($ids);
+ }catch(Throwable $e){$pdo->rollBack();throw $e;}
+}
+
 /**
  * Deletes the demo clubs (only those without accounts) with their staff-created profiles without an owner, the entries of
  * those profiles and the draws that contain them, under the workspace lock. Refuses (RuntimeException, nothing changed)
@@ -111,9 +137,7 @@ function remove(PDO $pdo):?int {
  $pdo->beginTransaction();
  try {
   $pdo->query('SELECT revision FROM app_meta WHERE id=1 FOR UPDATE')->fetch();
-  $names=SampleAthletes::clubNames();$in=implode(',',array_fill(0,count($names),'?'));
-  $q=$pdo->prepare("SELECT c.id FROM clubs c WHERE c.name IN ($in) AND NOT EXISTS (SELECT 1 FROM users u WHERE u.club_id=c.id)");$q->execute($names);
-  $clubs=$q->fetchAll(PDO::FETCH_COLUMN);
+  $clubs=demoClubs($pdo);
   if(!$clubs){$pdo->rollBack();return null;}
   $cin=implode(',',array_fill(0,count($clubs),'?'));
   $q=$pdo->prepare("SELECT p.id FROM profiles p JOIN users u ON u.id=p.created_by WHERE p.club_id IN ($cin) AND p.owner_user_id IS NULL AND u.role IN ('admin','editor','club')");$q->execute($clubs);
