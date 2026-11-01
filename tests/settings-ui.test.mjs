@@ -110,7 +110,7 @@ test('organizers: the switch "require confirmation of organizers" with its effec
  assert.ok(!/nikogo nie zatrzyma/.test(S.pageView(VIEW({organizers:'paused',trustRequired:true})).html));
  assert.match(off,/Opublikowane nadchodzące turnieje organizatora<\/dt><dd>10/,'limits are read only');
  assert.deepEqual(S.changedFields(VIEW(),{organizers:'on',trustRequired:true}),{trustRequired:true});
- english(()=>assert.match(S.pageView(VIEW()).html,/Require confirmation of organisers/));
+ english(()=>assert.match(S.pageView(VIEW()).html,/Require confirmation of organizers/));
 });
 
 test('history: actor labels translated, server codes as words, every value escaped',()=>{
@@ -218,7 +218,7 @@ test('confirm organizer on a tournament card: a blocked organizer is reported, n
  const blocked=C.trustOutcome({id:'m',caps:{organizer:false,organizerBlocked:true,organizerTrusted:true}});
  assert.equal(blocked.ok,false);assert.match(blocked.message,/rola organizatora tej osoby jest odebrana/);assert.match(blocked.message,/panelu Członkowie/);
  assert.equal(C.trustOutcome(null).ok,true);
- english(()=>assert.match(C.trustOutcome({caps:{organizerBlocked:true}}).message,/organiser role is taken away/));
+ english(()=>assert.match(C.trustOutcome({caps:{organizerBlocked:true}}).message,/organizer role is taken away/));
 });
 
 test('the members nav badge counts organizers waiting for confirmation for the Administrator only',()=>{

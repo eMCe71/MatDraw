@@ -89,7 +89,7 @@ test('privacy notice for every tournament: staff, confirmed and unconfirmed comm
  assert.deepEqual(flow.noticeTexts({community:false,trusted:true}),[base,'Turniej prowadzi zespół MatBravo.']);
  assert.deepEqual(flow.noticeTexts({community:true,trusted:false,organizer:{n:'Ula U.'}}),[base,'Organizator: Ula U. Turniej społeczności — organizator niepotwierdzony przez MatBravo.']);
  assert.deepEqual(flow.noticeTexts({community:true,trusted:true,organizer:null}),[base,'Turniej społeczności — prowadzi go członek MatBravo, nie zespół MatBravo.']);
- inLanguage('en',()=>{const [a,b]=flow.noticeTexts({community:true,trusted:false,organizer:{n:'Ula U.'}});assert.match(a,/^The /);assert.equal(b,'Organiser: Ula U. Community tournament — the organiser is not confirmed by MatBravo.');});
+ inLanguage('en',()=>{const [a,b]=flow.noticeTexts({community:true,trusted:false,organizer:{n:'Ula U.'}});assert.match(a,/^The /);assert.equal(b,'Organizer: Ula U. Community tournament — the organizer is not confirmed by MatBravo.');});
 });
 
 /** A workspace with the child's own entries in every state of §7.6 (dates in 2030, staff tournaments unless stated). */

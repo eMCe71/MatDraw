@@ -88,6 +88,16 @@ test('every T()/t() key used in the interface has an English entry with the same
   }
  }
 });
+test('English uses the US spelling "organizer" everywhere (final review F8: one spelling, never "organiser")',()=>{
+ const bad=[];
+ for(const [name,dict] of DICTIONARY_SOURCES)for(const [key,value] of Object.entries(dict)){
+  const forms=typeof value==='object'?[value.one,value.other]:typeof value==='function'?[value(1),value(5)]:[value];
+  if(forms.some(f=>/organis/i.test(String(f))))bad.push(name+': '+key);
+ }
+ assert.deepEqual(bad,[]);
+ assert.ok(/organizer/.test(EN['Potwierdź hasło, aby otworzyć narzędzia organizatora.']));
+ assert.ok(!/organis/i.test(read('dist/architecture.html')),'the English architecture page');
+});
 test('no visible Polish text in interface modules outside T() (thrown messages are translated when shown)',()=>{
  const left=UI_MODULES.flatMap(file=>stripTexts(uiSource(file)).split('\n').filter(line=>POLISH_LETTERS.test(line)).map(line=>file+': '+line.trim().slice(0,160)));
  assert.deepEqual(left,[]);

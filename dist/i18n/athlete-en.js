@@ -21,7 +21,7 @@ export default {
  'Moje zgłoszenia':'My entries',
  'Nie masz jeszcze zgłoszeń.':'You have no entries yet.',
  'Wybierz turniej z listy „Otwarte turnieje” i zgłoś się.':'Choose a tournament under “Open tournaments” and enter.',
- 'Gdy organizator otworzy zapisy, turniej pojawi się poniżej.':'When an organiser opens entries, the tournament will appear below.',
+ 'Gdy organizator otworzy zapisy, turniej pojawi się poniżej.':'When an organizer opens entries, the tournament will appear below.',
  'Zgłoszenie przyjęte':'Entry accepted',
  'Zapisy zamknięte — czekaj na kontrolę startową':'Entries closed — wait for the check-in',
  'Obecność potwierdzona':'Attendance confirmed',
@@ -30,7 +30,7 @@ export default {
  'Nieobecna na kontroli startowej':'Absent at the check-in',
  'Turniej zakończony':'Tournament finished',
  'Turniej wstrzymany':'Tournament paused',
- 'Organizator lub Administrator wstrzymał ten turniej. Twoje zgłoszenie zostaje zapisane.':'The organiser or the Administrator has paused this tournament. Your entry stays saved.',
+ 'Organizator lub Administrator wstrzymał ten turniej. Twoje zgłoszenie zostaje zapisane.':'The organizer or the Administrator has paused this tournament. Your entry stays saved.',
  'Losowanie: walka {n}, runda {r}, przeciwnik {opponent}':'Draw: fight {n}, round {r}, opponent {opponent}',
  'Losowanie: walka {n}, runda {r}':'Draw: fight {n}, round {r}',
  'Losowanie: walka {n}, runda {r}, przeciwnik jeszcze nieznany':'Draw: fight {n}, round {r}, opponent not known yet',
@@ -49,7 +49,7 @@ export default {
  'Zgłoszenie zmienione.':'Entry changed.',
  // Withdrawn entries (tombstones)
  'Wycofane':'Withdrawn',
- 'Zgłoszenie wycofane przez organizatora':'Entry withdrawn by the organiser',
+ 'Zgłoszenie wycofane przez organizatora':'Entry withdrawn by the organizer',
  'Zgłoszenie wycofane przez Administratora':'Entry withdrawn by the Administrator',
  'Zgłoszenie wycofane, bo turniej odwołano':'Entry withdrawn because the tournament was cancelled',
  // Open tournaments
@@ -59,21 +59,21 @@ export default {
  'Zgłoś się':'Enter',
  'Zgłoś się: {name}':'Enter: {name}',
  'Na liście zgłoszeń':'On the entry list',
- 'Organizator: {n}.':'Organiser: {n}.',
+ 'Organizator: {n}.':'Organizer: {n}.',
  // Entry window
  'Zgłoszenie do turnieju':'Tournament entry',
  'Wiek w dniu zawodów: {n}':'Age on the day of the tournament: {n}',
  'Kategoria':'Category',
  'Wybierz konkurencję, aby zobaczyć kategorię.':'Choose an event to see the category.',
  'Uzupełnij wagę, wzrost i stopień, aby zobaczyć kategorię.':'Fill in weight, height and grade to see the category.',
- 'Kategorię ustali organizator':'The organiser will decide the category',
+ 'Kategorię ustali organizator':'The organizer will decide the category',
  'Niedostępne: {reason}':'Not available: {reason}',
- 'Niedostępne: losowanie tej kategorii już się odbyło. Zgłoszenie może dodać organizator.':'Not available: this category has already been drawn. The organiser can add the entry.',
+ 'Niedostępne: losowanie tej kategorii już się odbyło. Zgłoszenie może dodać organizator.':'Not available: this category has already been drawn. The organizer can add the entry.',
  'Zapisz też w profilu':'Also save in the profile',
  'Waga, wzrost i stopień zmienią się w Twoim profilu zawodnika. Wcześniejsze zgłoszenia zostają bez zmian.':'Weight, height and grade change in your athlete profile. Earlier entries stay as they are.',
  'Sprawdź wagę (10–250 kg), wzrost (70–250 cm) i stopień.':'Check the weight (10–250 kg), height (70–250 cm) and grade.',
  'Turniej prowadzi zespół MatBravo.':'The MatBravo team runs this tournament.',
- 'Turniej społeczności — organizator niepotwierdzony przez MatBravo.':'Community tournament — the organiser is not confirmed by MatBravo.',
+ 'Turniej społeczności — organizator niepotwierdzony przez MatBravo.':'Community tournament — the organizer is not confirmed by MatBravo.',
  'Turniej społeczności — prowadzi go członek MatBravo, nie zespół MatBravo.':'Community tournament — run by a MatBravo member, not by the MatBravo team.',
  // Call to action in the tournament preview
  'Zapisy są otwarte':'Entries are open',
@@ -85,6 +85,6 @@ export default {
  'Status, kategorię i drabinkę znajdziesz w „Moich startach”.':'You will find the status, category and bracket in “My competitions”.',
  'Samodzielne zgłoszenie niedostępne':'Self-entry not available',
  'Ten turniej już się odbył.':'This tournament has already taken place.',
- 'Organizator nie włączył samodzielnych zgłoszeń. Zgłosi Cię klub albo organizator turnieju.':'The organiser has not switched on self-entries. Your club or the tournament organiser will enter you.',
- 'Tego turnieju nie ma jeszcze na Twojej liście „Otwarte turnieje”. Sprawdź ponownie bliżej terminu zawodów albo zapytaj organizatora.':'This tournament is not on your “Open tournaments” list yet. Check again closer to the competition date or ask the organiser.'
+ 'Organizator nie włączył samodzielnych zgłoszeń. Zgłosi Cię klub albo organizator turnieju.':'The organizer has not switched on self-entries. Your club or the tournament organizer will enter you.',
+ 'Tego turnieju nie ma jeszcze na Twojej liście „Otwarte turnieje”. Sprawdź ponownie bliżej terminu zawodów albo zapytaj organizatora.':'This tournament is not on your “Open tournaments” list yet. Check again closer to the competition date or ask the organizer.'
 };

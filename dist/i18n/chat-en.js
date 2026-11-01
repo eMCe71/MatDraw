@@ -72,7 +72,7 @@ export default {
  'Nowe wiadomości w kanale {channel}: {n}':'New messages in {channel}: {n}',
  'Ty':'You',
  'Moderator':'Moderator',
- 'Organizator':'Organiser',
+ 'Organizator':'Organizer',
  'Uczestnik':'Participant',
  'Konto usunięte':'Deleted account',
  'Konto nieaktywne':'Inactive account',
