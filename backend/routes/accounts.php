@@ -10,8 +10,14 @@
 // after the password (the login limits on the own e-mail, new session id and CSRF token).
 // Calls into slices of the same wave (class_exists): ChatSettings::health(PDO) and StripeClient::probe($config) for
 // diagnostics; the others are listed in Members.
+// diagnostics also reports settings {mode, degraded, version, source} (Settings::diagnostics: the effective sign-up mode and
+// whether the row or config.php decides, PLAN-REJESTRACJA-ROLE §8.1) and, with ?probe=perf (6 per hour), the performance
+// budget of §12 measured on this database: perf {loadMs (Repository::snapshot, the workspace of staff and of every
+// command), organizerSnapshotMs (Repository::organizerSnapshot of the member with the most tournaments, null without one),
+// unchangedMs (the query of bootstrap?t&rev by key), counts {profiles, tournaments, entries, members, staff}, budget};
+// medians of 3 runs in milliseconds, counts and times only (no ids, names or e-mails).
 declare(strict_types=1);
-use MatDraw\{Accounts,AppError,Auth,Avatars,Capabilities,Chat,ChatSettings,Members,Migrator,Paths,Profiles,RouteContext,Routes,StripeClient};
+use MatDraw\{Accounts,AppError,Auth,Avatars,Capabilities,Chat,ChatSettings,Members,Migrator,Paths,Profiles,Repository,RouteContext,Routes,Settings,StripeClient};
 
 /** Number of session files in the app's own directory (at most 100000 entries and about one second), or null. */
 $sessionFiles=static function(array $c):?int{
@@ -24,6 +30,19 @@ $backupAge=static function(array $c):?int{
  $dir=Paths::backups($c);if($dir===null||!is_dir($dir)||!is_readable($dir))return null;$newest=0;
  foreach(new DirectoryIterator($dir) as $f)if($f->isFile()&&!$f->isLink())$newest=max($newest,$f->getMTime());
  return $newest?intdiv(max(0,time()-$newest),3600):null;
+};
+/** The performance budget of PLAN-REJESTRACJA-ROLE §12 on this database (diagnostics?probe=perf): medians of 3 runs in ms, and counts. */
+$perf=static function(PDO $pdo):array{
+ $median=static function(callable $fn):float{$t=[];for($i=0;$i<3;$i++){$s=hrtime(true);$fn();$t[]=(hrtime(true)-$s)/1e6;}sort($t);return round($t[1],1);};
+ $repo=new Repository($pdo);$count=static fn(string $sql):int=>(int)$pdo->query($sql)->fetchColumn();
+ $organizer=$pdo->query("SELECT t.created_by FROM tournaments t JOIN users u ON u.id=t.created_by WHERE u.role='member' GROUP BY t.created_by ORDER BY COUNT(*) DESC,t.created_by LIMIT 1")->fetchColumn();
+ $tournament=$pdo->query('SELECT id FROM tournaments ORDER BY id LIMIT 1')->fetchColumn();$today=date('Y-m-d');
+ $byKey=$pdo->prepare('SELECT rev FROM tournaments WHERE id=?');
+ return ['loadMs'=>$median(fn()=>$repo->snapshot()),'organizerSnapshotMs'=>is_string($organizer)?$median(fn()=>$repo->organizerSnapshot($organizer,$today)):null,
+  'unchangedMs'=>is_string($tournament)?$median(function()use($byKey,$tournament){$byKey->execute([$tournament]);$byKey->fetchColumn();$byKey->closeCursor();}):null,
+  'counts'=>['profiles'=>$count('SELECT COUNT(*) FROM profiles'),'tournaments'=>$count('SELECT COUNT(*) FROM tournaments'),'entries'=>$count('SELECT COUNT(*) FROM entries'),
+   'members'=>$count("SELECT COUNT(*) FROM users WHERE role='member'"),'staff'=>$count("SELECT COUNT(*) FROM users WHERE role IN ('admin','editor','club')")],
+  'budget'=>['loadMs'=>400,'organizerSnapshotMs'=>50,'unchangedMs'=>20]];
 };
 return [
  'signup-begin'=>['method'=>'POST','auth'=>'session','user'=>'anon','handler'=>fn(RouteContext $ctx):array=>Members::signupBegin($ctx->pdo(),$ctx->config,$ctx->body)],
@@ -51,9 +70,10 @@ return [
  // Server state for the Admin (§4.3): no secrets, no personal data. server.afterResponse: whether this SAPI can send
  // the response early (fastcgi/litespeed_finish_request); without it the lazy payment sync and the background jobs that
  // need it (billing-due, billing-events) never run on web requests, so the stripe-sync.php cron becomes mandatory.
- 'diagnostics'=>['method'=>'GET','auth'=>'peek','user'=>'admin','handler'=>function(RouteContext $ctx)use($sessionFiles,$backupAge):array{
+ 'diagnostics'=>['method'=>'GET','auth'=>'peek','user'=>'admin','handler'=>function(RouteContext $ctx)use($sessionFiles,$backupAge,$perf):array{
   $c=$ctx->config;$pdo=$ctx->pdo();$probe=$ctx->query('probe');
-  if($probe!==null&&$probe!=='stripe')throw new AppError('Nieznana operacja.',400);
+  if($probe!==null&&$probe!=='stripe'&&$probe!=='perf')throw new AppError('Nieznana operacja.',400);
+  $timing=null;if($probe==='perf'){Members::limit($pdo,$c,'diagnostics-perf','all',6,3600);$timing=$perf($pdo);}
   $writable=false;try{$dir=Paths::uploads($c);$writable=is_dir($dir)&&is_writable($dir);}catch(\RuntimeException){}
   $chatOn=!Routes::chatOff($c)&&class_exists(Chat::class);$health=null;
   if(class_exists(ChatSettings::class)&&method_exists(ChatSettings::class,'health'))try{$health=ChatSettings::health($pdo);}catch(\Throwable $e){Routes::logThrowable($e,'MatDraw diagnostics');}
@@ -68,6 +88,7 @@ return [
    'server'=>['sapi'=>PHP_SAPI,'afterResponse'=>function_exists('fastcgi_finish_request')||function_exists('litespeed_finish_request')],
    'uploadsWritable'=>$writable,'avatarMode'=>Capabilities::avatarMode($c),'schema'=>['db'=>$m->current(),'code'=>Migrator::target(dirname(__DIR__).'/migrations')],
    'sessions'=>['handler'=>(string)ini_get('session.save_handler'),'ownDir'=>Paths::ownSessions($c)!==null,'files'=>$sessionFiles($c)],'backups'=>['newestAgeHours'=>$backupAge($c)],
-   'billing'=>['enabled'=>!empty($c['billing_enabled']),'mode'=>$c['billing_mode']],'chat'=>['on'=>$chatOn,'health'=>$health],'stripe'=>$stripe];
+   'billing'=>['enabled'=>!empty($c['billing_enabled']),'mode'=>$c['billing_mode']],'chat'=>['on'=>$chatOn,'health'=>$health],'stripe'=>$stripe,
+   'settings'=>Settings::diagnostics($pdo,$ctx->file),'perf'=>$timing];
  }],
 ];

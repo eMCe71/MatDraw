@@ -15,6 +15,8 @@ use PDO;
 final class Repository {
  private const KEYS=['clubs'=>['id'],'profiles'=>['id'],'tournaments'=>['id'],'entries'=>['tournament_id','profile_id'],'draws'=>['tournament_id','category_key']];
  public function __construct(private PDO $pdo){}
+ /** Placeholders for an IN list of $values. */
+ private static function in(array $values):string{return implode(',',array_fill(0,count($values),'?'));}
  private static function json(mixed $v):string{return json_encode($v,JSON_THROW_ON_ERROR|JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);}
  private static function decode(string $v):array{return json_decode($v,true,512,JSON_THROW_ON_ERROR);}
  public function snapshot():array {
@@ -99,15 +101,26 @@ final class Repository {
  public function organizerSnapshot(string $userId,?string $today=null):array {
   $this->pdo->beginTransaction();
   try{
-   [$revision,$staffRev]=$this->meta();$own="SELECT id FROM profiles WHERE created_by=? OR owner_user_id=?";
+   [$revision,$staffRev]=$this->meta();
    $db=['schemaVersion'=>2,'revision'=>$revision,'staffRev'=>$staffRev,'clubs'=>$this->clubs(),'users'=>$this->staff(),'profiles'=>[],'tournaments'=>[],'organizers'=>$this->organizers(),'withdrawals'=>[]];
    $q=$this->pdo->prepare('SELECT * FROM profiles WHERE created_by=? OR owner_user_id=? ORDER BY id');$q->execute([$userId,$userId]);foreach($q->fetchAll() as $a)$db['profiles'][]=self::profile($a);
+   // Where his profiles are entered: keys only, from the profiles indexes (created_by, owner) and the covering profile_id index of
+   // entries (an OR or a subquery over all profiles, or full entry rows, would read far more: the §12 budget).
+   $q=$this->pdo->prepare('SELECT e.tournament_id,e.profile_id FROM profiles p JOIN entries e ON e.profile_id=p.id WHERE p.created_by=? UNION ALL SELECT e.tournament_id,e.profile_id FROM profiles p JOIN entries e ON e.profile_id=p.id WHERE p.owner_user_id=? AND p.created_by<>?');
+   $q->execute([$userId,$userId,$userId]);$keys=$q->fetchAll();$entered=array_values(array_unique(array_column($keys,'tournament_id')));
    // The log (it names athletes) and the hide reason only of his own tournaments, the log not of the hidden ones: publicData shows nothing more.
-   $q=$this->pdo->prepare("SELECT id,created_by,created_at,name,city,event_date,mat,status,self_entry,rev,hidden_by,hidden_from,CASE WHEN created_by=? THEN hide_reason END AS hide_reason,CASE WHEN created_by=? AND hidden_by IS NULL THEN activity ELSE '[]' END AS activity FROM tournaments WHERE created_by=? OR (status='open' AND self_entry=1 AND hidden_by IS NULL) OR id IN (SELECT tournament_id FROM entries WHERE profile_id IN ($own)) ORDER BY event_date,id");
-   $q->execute([$userId,$userId,$userId,$userId,$userId]);$index=[];
+   $q=$this->pdo->prepare("SELECT id,created_by,created_at,name,city,event_date,mat,status,self_entry,rev,hidden_by,hidden_from,CASE WHEN created_by=? THEN hide_reason END AS hide_reason,CASE WHEN created_by=? AND hidden_by IS NULL THEN activity ELSE '[]' END AS activity FROM tournaments WHERE created_by=? OR (status='open' AND self_entry=1 AND hidden_by IS NULL)".($entered?' OR id IN ('.self::in($entered).')':'').' ORDER BY event_date,id');
+   $q->execute([$userId,$userId,$userId,...$entered]);$index=[];
    foreach($q->fetchAll() as $t){$index[$t['id']]=count($db['tournaments']);$db['tournaments'][]=self::tournament($t);}
-   $q=$this->pdo->prepare("SELECT e.* FROM entries e JOIN tournaments t ON t.id=e.tournament_id WHERE t.created_by=? OR e.profile_id IN ($own) ORDER BY e.tournament_id,e.profile_id");$q->execute([$userId,$userId,$userId]);
-   foreach($q->fetchAll() as $e){if(!isset($index[$e['tournament_id']]))continue;$t=&$db['tournaments'][$index[$e['tournament_id']]];$s=self::decode($e['snapshot']);if($t['createdBy']!==$userId||$t['hiddenBy']===null||empty($s['self']))$t['entries'][]=$s;unset($t);}
+   $q=$this->pdo->prepare('SELECT e.* FROM entries e JOIN tournaments t ON t.id=e.tournament_id WHERE t.created_by=? ORDER BY e.tournament_id,e.profile_id');$q->execute([$userId]);$rows=$q->fetchAll();
+   // His entries in other people's tournaments (few): the rows of exactly those keys, ordered like load() (tournament, then profile).
+   $outside=[];foreach($keys as $k)if(isset($index[$k['tournament_id']])&&$db['tournaments'][$index[$k['tournament_id']]]['createdBy']!==$userId)$outside[$k['tournament_id']."\n".$k['profile_id']]=$k;
+   if($outside){
+    $ts=array_values(array_unique(array_column($outside,'tournament_id')));$ps=array_values(array_unique(array_column($outside,'profile_id')));
+    $q=$this->pdo->prepare('SELECT * FROM entries WHERE tournament_id IN ('.self::in($ts).') AND profile_id IN ('.self::in($ps).') ORDER BY tournament_id,profile_id');$q->execute([...$ts,...$ps]);
+    foreach($q->fetchAll() as $e)if(isset($outside[$e['tournament_id']."\n".$e['profile_id']]))$rows[]=$e;
+   }
+   foreach($rows as $e){$t=&$db['tournaments'][$index[$e['tournament_id']]];$s=self::decode($e['snapshot']);if($t['createdBy']!==$userId||$t['hiddenBy']===null||empty($s['self']))$t['entries'][]=$s;unset($t);}
    $q=$this->pdo->prepare('SELECT d.* FROM draws d JOIN tournaments t ON t.id=d.tournament_id WHERE t.created_by=? ORDER BY d.tournament_id,d.category_key');$q->execute([$userId]);
    foreach($q->fetchAll() as $d)$db['tournaments'][$index[$d['tournament_id']]]['draws'][$d['category_key']]=self::decode($d['data']);
    $this->pdo->commit();return $db;
