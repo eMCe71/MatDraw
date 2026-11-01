@@ -422,7 +422,7 @@ test('role badges and organizer actions from the sparse fields caps, trusted and
  assert.match(row,/data-mem-act="org-trust"/);assert.match(row,/data-mem-act="org-block"/);assert.match(row,/data-mem-select="u1"/);assert.ok(!/ checked/.test(row));
  assert.match(memberRow({id:'u1',email:'a@b.pl',active:true,billing:null},{selected:true}).html,/data-mem-select="u1" checked/);
  assert.ok(!/org-/.test(memberRow({id:'u2',email:'b@b.pl',active:true,billing:null}).html),'no organizer actions without the role');
- setLanguage('en',{persist:false});try{assert.deepEqual(texts({caps:{organizer:true,organizerTrusted:true}}),['Organiser — confirmed']);}finally{setLanguage('pl',{persist:false});}
+ setLanguage('en',{persist:false});try{assert.deepEqual(texts({caps:{organizer:true,organizerTrusted:true}}),['Organizer — confirmed']);}finally{setLanguage('pl',{persist:false});}
 });
 
 test('trust, untrust, block and restore of the organizer role, the account block with hidden tournaments, create with the role',()=>{
