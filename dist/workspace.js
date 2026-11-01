@@ -14,7 +14,7 @@ const fail=(message,status=422,data)=>{throw new DomainError(message,status,data
 const find=(list,id,label)=>list.find(x=>x.id===id)||fail(label+' nie istnieje.',404);
 const text=(v,label,max=100)=>{if(typeof v!=='string'||!v.trim()||v.trim().length>max)fail('Sprawdź pole: '+label+'.');return v.trim();};
 const id=()=>Array.from(crypto.getRandomValues(new Uint8Array(16)),b=>b.toString(16).padStart(2,'0')).join('');
-export const ORGANIZER_DAY=3,ORGANIZER_ACTIVE=10,COMMUNITY_DAY_GLOBAL=50,ORGANIZER_PROFILES_DAY=300,CLUBS_DAY_PER_USER=3,CLUBS_DAY_GLOBAL=30,MINOR_SELF_AGE=16,ADULT_AGE=18,ATHLETES_PER_ACCOUNT=5,RETENTION_MONTHS=24;
+export const ORGANIZER_DAY=3,ORGANIZER_ACTIVE=10,COMMUNITY_DAY_GLOBAL=50,ORGANIZER_PROFILES_DAY=300,CLUBS_DAY_PER_USER=3,CLUBS_DAY_GLOBAL=30,MINOR_SELF_AGE=16,ADULT_AGE=18,ATHLETES_PER_ACCOUNT=1,RETENTION_MONTHS=24;
 export const STAFF=['admin','editor','club'];
 export const ORGANIZER_TYPES=['tournament.save','profile.save','profile.archive','profile.forget','entry.save','entry.remove','checkin.save','draw.create','result.save','result.clear'];
 /** Web addresses, e-mails and numbers of 9+ digits in texts of members (§5.4); the same pattern as Domain::CONTACT. */
@@ -359,7 +359,7 @@ function apply(db,user,type,p){
   const f=athleteFields(p,today);let old=null;
   if(isset(p.id)){old=owned(p.id);if(!old)fail('Zawodnik nie istnieje.',404);}
   const mine=db.profiles.filter(a=>a.ownerId===user.id);
-  if(!old&&mine.length>=ATHLETES_PER_ACCOUNT)fail('Na jednym koncie może być najwyżej 5 zawodników.',409);
+  if(!old&&mine.length>=ATHLETES_PER_ACCOUNT)fail('Na jednym koncie może być tylko jeden zawodnik.',409);
   if(f.relation==='self'&&mine.some(a=>a.id!==old?.id&&a.relation==='self'))fail('Na koncie jest już Twój własny profil zawodnika.',409);
   const pick=pickClub(db.clubs,user,f.club,now,clubCounts(db.clubs,user,now));
   if(old&&(pick.clubId!==old.clubId||f.birthDate!==(old.birthDate??null)||f.sex!==(old.sex??null))&&pending(db,old.id))fail('Masz zgłoszenia do turniejów, które jeszcze się nie odbyły. Klub, datę urodzenia i płeć zmienisz po turnieju albo po wycofaniu zgłoszenia.',409);

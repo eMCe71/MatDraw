@@ -19,7 +19,7 @@ class AppError extends \RuntimeException{public function __construct(string $mes
  * never another tenant's tournament for a namesake; publicData() shows text and time only.
  */
 final class Domain {
- public const ORGANIZER_DAY=3,ORGANIZER_ACTIVE=10,COMMUNITY_DAY_GLOBAL=50,ORGANIZER_PROFILES_DAY=300,CLUBS_DAY_PER_USER=3,CLUBS_DAY_GLOBAL=30,MINOR_SELF_AGE=16,ADULT_AGE=18,ATHLETES_PER_ACCOUNT=5,RETENTION_MONTHS=24;
+ public const ORGANIZER_DAY=3,ORGANIZER_ACTIVE=10,COMMUNITY_DAY_GLOBAL=50,ORGANIZER_PROFILES_DAY=300,CLUBS_DAY_PER_USER=3,CLUBS_DAY_GLOBAL=30,MINOR_SELF_AGE=16,ADULT_AGE=18,ATHLETES_PER_ACCOUNT=1,RETENTION_MONTHS=24;
  public const STAFF=['admin','editor','club'];
  public const ORGANIZER_TYPES=['tournament.save','profile.save','profile.archive','profile.forget','entry.save','entry.remove','checkin.save','draw.create','result.save','result.clear'];
  /** Web addresses, e-mails and numbers of 9+ digits in texts of members (§5.4); the same pattern is CONTACT in dist/workspace.js. */
@@ -359,7 +359,7 @@ final class Domain {
    $f=self::athleteFields($p,$today);$old=null;
    if(isset($p['id'])){$old=$owned($p['id']);if(!$old)throw new AppError('Zawodnik nie istnieje.',404);}
    $mine=array_filter($db['profiles'],fn($a)=>($a['ownerId']??null)===$u['id']);
-   if(!$old&&count($mine)>=self::ATHLETES_PER_ACCOUNT)throw new AppError('Na jednym koncie może być najwyżej 5 zawodników.',409);
+   if(!$old&&count($mine)>=self::ATHLETES_PER_ACCOUNT)throw new AppError('Na jednym koncie może być tylko jeden zawodnik.',409);
    if($f['relation']==='self')foreach($mine as $a)if($a['id']!==($old['id']??null)&&($a['relation']??null)==='self')throw new AppError('Na koncie jest już Twój własny profil zawodnika.',409);
    $pick=Clubs::pick($db['clubs'],$u,$f['club'],$now,Clubs::counts($db['clubs'],$u,$now));
    if($old&&($pick['clubId']!==$old['clubId']||$f['birthDate']!==($old['birthDate']??null)||$f['sex']!==($old['sex']??null))&&self::pending($db,$old['id']))throw new AppError('Masz zgłoszenia do turniejów, które jeszcze się nie odbyły. Klub, datę urodzenia i płeć zmienisz po turnieju albo po wycofaniu zgłoszenia.',409);

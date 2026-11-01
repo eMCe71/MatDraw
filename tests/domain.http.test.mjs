@@ -100,6 +100,10 @@ test('member commands through Repository::transaction with the actor; organizerS
  assert.equal(run(org.id,'entry.save',{...E,tournamentId:t,profileId:p}).status,200);
  const ar=run(ath.id,'athlete.save',{...A,relation:'self',name:'Samodzielna Zawodniczka',sex:'F',club:{none:true}});assert.equal(ar.status,200,JSON.stringify(ar));
  assert.equal(fixture('domain-row',{table:'profiles',id:ar.result.id}).owner_user_id,ath.id);
+ // One athlete profile per account (§17): a second one, self or guardian, is refused on the database path too and writes nothing.
+ const one={status:409,error:'Na jednym koncie może być tylko jeden zawodnik.'};
+ assert.deepEqual(run(ath.id,'athlete.save',{...A,relation:'self',name:'Druga Zawodniczka',sex:'F',club:{none:true}}),one);
+ assert.deepEqual(run(ath.id,'athlete.save',{...A,relation:'guardian',name:'Dziecko Zawodniczki',sex:'F',birthDate:'2016-04-04',weight:30,height:130,grade:9,club:{none:true}}),one);
  const se=run(ath.id,'entry.self',{tournamentId:t,profileId:ar.result.id,events:['forms']});assert.equal(se.status,200,JSON.stringify(se));
  assert.deepEqual(fixture('domain-row',{table:'users',id:org.id}),userRow,'member rows are never written by the workspace');
  // 404s for members are identical for missing and unseen tournaments.

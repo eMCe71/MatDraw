@@ -24,7 +24,7 @@ export default {
  // Athlete profiles of an account and self-entries (§6.1, §7).
  'Wybierz, kogo zgłaszasz.':'Choose whom you are entering.',
  'Osoby poniżej 16 lat rejestruje rodzic lub opiekun. Poproś go o założenie konta.':'People under 16 are registered by a parent or guardian. Ask them to create the account.',
- 'Na jednym koncie może być najwyżej 5 zawodników.':'One account can have at most 5 athletes.',
+ 'Na jednym koncie może być tylko jeden zawodnik.':'One account can have only one athlete.',
  'Na koncie jest już Twój własny profil zawodnika.':'This account already has your own athlete profile.',
  'Masz zgłoszenia do turniejów, które jeszcze się nie odbyły. Klub, datę urodzenia i płeć zmienisz po turnieju albo po wycofaniu zgłoszenia.':'You have entries in tournaments that have not taken place yet. You can change the club, date of birth and sex after the tournament or after withdrawing the entry.',
  'Najpierw wycofaj zgłoszenia do turniejów, które jeszcze się nie odbyły.':'First withdraw the entries in tournaments that have not taken place yet.',
