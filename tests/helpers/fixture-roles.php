@@ -43,7 +43,8 @@ return [
  'roles-flags'=>fn(PDO $pdo):array=>fixture_roles_flags($pdo),
  'roles-settings-restore'=>function(PDO $pdo,array $p):array{
   $old=(array)($p['old']??[]);fixture_config_set((array)($old['config']??[]),['organizers','organizers_trust_required'],'roles-settings-restore');
-  if(($old['row']??false)!==false&&fixture_roles_has($pdo,'app_settings')){
+  // array_key_exists, not ??: a missing row was saved as null, and null ?? false would skip the restore.
+  if(array_key_exists('row',$old)&&$old['row']!==false&&fixture_roles_has($pdo,'app_settings')){
    if($old['row']===null)$pdo->exec('DELETE FROM app_settings WHERE id=1');
    else{$r=$old['row'];$pdo->prepare('UPDATE app_settings SET version=?,data=?,updated_at=?,updated_by=? WHERE id=1')->execute([$r['version'],$r['data'],$r['updated_at'],$r['updated_by']]);}
   }
