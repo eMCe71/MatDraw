@@ -13,7 +13,7 @@ import {warsawToday} from '../dist/guest-view.js';
 const php=process.env.PHP_BIN;const skip=!php;
 function bridge(input){const r=spawnSync(php,['tests/php-bridge-roles.php'],{input:JSON.stringify(input),encoding:'utf8',maxBuffer:50_000_000});assert.equal(r.status,0,r.stderr||r.stdout);return JSON.parse(r.stdout);}
 const NOW=Math.floor(Date.now()/1000);
-export const day=n=>warsawToday(new Date(Date.now()+n*864e5));
+const day=n=>warsawToday(new Date(Date.now()+n*864e5));
 const yearsAgo=(y,d=0)=>{const [Y,M,D]=day(-d).split('-').map(Number);return String(Y-y)+'-'+String(M).padStart(2,'0')+'-'+String(Math.min(D,28)).padStart(2,'0');};
 // Old messages that differ between PHP and the demo (plan §12, DR-10): [PHP, JS]. No new path may add a pair.
 const KNOWN=[['Możesz zgłaszać tylko własny klub.','Możesz zgłaszać tylko zawodników swojego klubu.'],['Klub może zmienić Administrator.','Klub zawodnika może zmienić Administrator.'],
@@ -23,7 +23,7 @@ const KNOWN=[['Możesz zgłaszać tylko własny klub.','Możesz zgłaszać tylko
 
 /** Rich data set: staff, organizers (unconfirmed, confirmed, blocked), an athlete account, a member without roles, clubs (unverified,
  * merged), staff/organizer/owned profiles and tournaments of staff and community (open with self-entries, hidden, closed with a draw). */
-export function rich(){
+function rich(){
  const db=initialWorkspace(),u=(id,o)=>({id,clubId:null,email:id+'@roles.test',role:'member',active:true,authVersion:1,organizer:false,organizerBlockedAt:null,organizerTrustedAt:null,...o});
  db.users.push(u('u-org1',{organizer:true}),u('u-org2',{organizer:true,organizerTrustedAt:NOW-9000}),u('u-org3',{organizer:true,organizerTrustedAt:NOW-9000,organizerBlockedAt:NOW-500}),u('u-ath'),u('u-mem'),
   {id:'u-club2',clubId:'club-2',email:'club2@roles.test',role:'club',active:true,authVersion:1},{id:'u-editor2',clubId:'club-1',email:'editor2@roles.test',role:'editor',active:true,authVersion:1});
@@ -50,7 +50,7 @@ export function rich(){
  return db;
 }
 /** Commands over rich(): every command type, every actor, the new error paths. '@N' is the result id of command N, '#club:Name' a club id. */
-export function commands(){
+function commands(){
  const A={sex:'M',birthDate:'1995-04-04',weight:70,height:175,gradeType:'cup',grade:5,events:['forms']},E={events:['forms'],weight:70,height:175,gradeType:'cup',grade:5},T={city:'Łódź',mat:'Mata 1'};
  return [
   ['u-org1','tournament.save',{...T,name:'Turniej Org1 B',date:day(70),status:'open'}],                      // 0 new, self-entries by default
@@ -148,7 +148,7 @@ const HEX=/^[0-9a-f]{32}$/;
 const RESULT_LOG=['Zapisano wynik walki.','Wycofano wynik walki.'];
 const DROP=new Set(['createdAt','guardianConsentAt','guardianDeclaredAt','time','seed','at','passwordHash','passwordSalt','organizers','flags','withdrawalsPurge']);
 /** Normalised state: random ids → tokens in order of appearance (sorted keys, lists in order; draw slots last, as sets), no times. */
-export function normalize(db){
+function normalize(db){
  const map=new Map(),tok=v=>HEX.test(v)?(map.has(v)||map.set(v,'#'+(map.size+1)),map.get(v)):v;
  const walk=(v,key)=>{
   if(typeof v==='string')return key==='text'&&RESULT_LOG.includes(v)?'Zaktualizowano wynik walki.':tok(v);
