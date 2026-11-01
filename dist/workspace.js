@@ -262,15 +262,21 @@ export function detach(t,entryId){
  const next=structuredClone(t);try{reconcile(next,t.entries.filter(x=>x.id!==entryId));}catch(err){if(err instanceof DomainError)return false;throw err;}
  t.entries=next.entries;t.draws=next.draws;audit(t,'Wycofano zgłoszenie: '+initials(String(e.name)));return true;
 }
+// Logs never keep a forgotten name (every name of the profile, every tournament, namesakes with entries excepted); snapshots only with useInitials.
 export function forgetProfile(db,profileId,useInitials=false){
  const i=db.profiles.findIndex(a=>a.id===profileId);if(i<0)return 'missing';
- const name=String(db.profiles[i].name??''),short=initials(name);let left=false;
+ const names=[...new Set([db.profiles[i].name,...db.tournaments.flatMap(t=>t.entries.filter(e=>e.profileId===profileId).map(e=>e.name))].map(n=>String(n??'')))].filter(n=>n!==''&&n!==DELETED);let left=false;
  for(const t of db.tournaments){
   if(t.entries.some(e=>e.profileId===profileId)&&!detach(t,profileId))left=true;
-  if(useInitials){for(const e of t.entries)if(e.profileId===profileId)e.name=initials(String(e.name));if(name!=='')for(const x of t.activity)if(String(x.text).endsWith(': '+name))x.text=String(x.text).slice(0,-name.length)+short;}
+  if(useInitials)for(const e of t.entries)if(e.profileId===profileId)e.name=initials(String(e.name));
+  unname(t,profileId,names);
  }
  if(!left){db.profiles.splice(i,1);return 'deleted';}
  Object.assign(db.profiles[i],{name:DELETED,birthDate:null,ownerId:null,relation:null,guardianDeclaredAt:null,guardianConsentAt:null,consentBy:null,pendingClubName:null,archived:true});return 'anonymized';
+}
+function unname(t,profileId,names){
+ if(!names.length)return;const kept=new Set(t.entries.filter(e=>e.profileId!==profileId).map(e=>String(e.name)));
+ for(const x of t.activity){const s=String(x.text),n=names.find(n=>!kept.has(n)&&s.endsWith(': '+n));if(n!==undefined)x.text=s.slice(0,s.length-n.length)+initials(n);}
 }
 function apply(db,user,type,p){
  const now=nowSeconds(),today=warsawToday(),member=user.role==='member',admin=user.role==='admin';
@@ -308,6 +314,7 @@ function apply(db,user,type,p){
  }
  if(type==='profile.save'){
   const old=isset(p.id)?prof(db,user,p.id):null;
+  if(!old&&member&&!organizer(user))fail('Brak uprawnień.',403);
   if(old&&(!managesProfile(user,old,db)||isset(old.ownerId)&&!admin))fail('Nie możesz edytować tej kartoteki zawodnika.',403);
   let pick=null,choice={},clubId;
   if(user.role==='club'){clubId=user.clubId;find(db.clubs,clubId,'Klub');}
@@ -380,6 +387,7 @@ function apply(db,user,type,p){
   }
   if(type==='club.merge'){
    const into=find(db.clubs,p.into??null,'Klub');if(into.id===c.id||isset(into.mergedInto))fail('Tego klubu nie można zmienić.',409);
+   if(into.id===UNAFFILIATED&&db.users.some(x=>STAFF.includes(x.role)&&x.clubId===c.id))fail('Ten klub ma konta personelu. Przypisz je do innego klubu przed scaleniem z „Niezrzeszony”.',409);
    for(const a of db.profiles)if(a.clubId===c.id)a.clubId=into.id;
    for(const x of db.users)if(STAFF.includes(x.role)&&x.clubId===c.id){x.clubId=into.id;x.authVersion++;}
    for(const x of db.clubs)if(x.id===c.id||x.mergedInto===c.id)x.mergedInto=into.id;

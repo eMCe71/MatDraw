@@ -135,6 +135,10 @@ function commands(){
   ['demo-admin','checkin.save',{tournamentId:'t-autumn-2026',id:'a1',presence:'present',actualWeight:65},10], // 79 old revision, untouched tournament: fresh (R15)
   ['demo-admin','entry.save',{...E,tournamentId:'t-org1',profileId:'p-ed',events:['forms']},10],            // 80 old revision, changed tournament: stale
   ['demo-admin','profile.save',{...A,name:'Nowy Personel',clubId:'club-1'},10],                              // 81 creation after staff changes (68, 72): stale
+  ['u-mem','profile.save',{...A,name:'Bez Roli',club:{none:true}}],                                          // 82 member without the organizer role: 403
+  ['u-org3','profile.save',{...A,name:'Zablokowany Zawodnik',club:{name:'Klub Zablokowanego'}}],             // 83 blocked organizer: 403, no club
+  ['demo-admin','club.merge',{id:'club-1',into:UNAFFILIATED}],                                               // 84 staff accounts cannot become unaffiliated
+  ['demo-admin','club.merge',{id:'#club:Klub Członka',into:UNAFFILIATED}],                                   // 85 a club of athletes only: into unaffiliated
  ].map(([actor,type,payload,revision])=>({actor,type,payload,...(revision!==undefined?{revision}:{})}));
 }
 function runJs(db,list,flags){
@@ -185,6 +189,11 @@ test('commands: equal statuses, messages of the new paths and normalised state i
  assert.deepEqual([s[46],s[47],s[48],s[49],s[50],s[51],s[52],s[54],s[55]],[409,200,200,200,403,200,403,403,200]);
  assert.deepEqual([s[56],s[57],s[58],s[59],s[60],s[63],s[64],s[65],s[66],s[67],s[68],s[69],s[70],s[71],s[72]],[200,409,200,200,200,200,200,200,200,409,200,409,403,422,200]);
  assert.deepEqual([s[75],s[76],s[77],s[78],s[79],s[80],s[81]],[403,200,200,429,200,409,409]);
+ assert.deepEqual([s[82],s[83],s[84],s[85]],[403,403,409,200]);assert.deepEqual([js.results[82].error,js.results[83].error],['Brak uprawnień.','Brak uprawnień.']);
+ assert.equal(js.results[84].error,'Ten klub ma konta personelu. Przypisz je do innego klubu przed scaleniem z „Niezrzeszony”.');
+ assert.ok(!js.db.clubs.some(c=>c.name==='Klub Zablokowanego')&&!js.db.profiles.some(p=>['Bez Roli','Zablokowany Zawodnik'].includes(p.name)),'nothing created by members without the role');
+ const merged=js.db.clubs.find(c=>c.name==='Klub Członka');assert.equal(merged.mergedInto,UNAFFILIATED);assert.equal(js.db.profiles.find(p=>p.id===ids(js)[45]).clubId,UNAFFILIATED);
+ assert.ok(js.db.users.filter(u=>['admin','editor','club'].includes(u.role)).every(u=>u.clubId!==UNAFFILIATED),'no staff account is unaffiliated');
  assert.equal(js.results[64].result.notice,'club-pending');assert.deepEqual(ph.results[78].data.retry>0,true);
  assert.equal(js.results[25].error,'Zgłoszenia osób niepełnoletnich do tego turnieju będą możliwe, gdy MatBravo potwierdzi organizatora.');
  const w=js.db.withdrawals.map(x=>[x.profileId===ids(js)[45]?'@45':x.profileId,x.tournamentId,x.by]);
@@ -308,6 +317,48 @@ test('Domain::forgetMember (PHP only): owned profiles forgotten, upcoming tourna
  const again=bridge({job:'forgetMember',db:out,users:['u-org1','u-ath']});assert.deepEqual(again.db,out,'idempotent: nothing changes, not even the revision');
  assert.deepEqual(again.out.map(c=>c.tournaments),[0,0]);
 });
+/** rich() after commands that write log lines naming athletes: self-entries, withdrawals by the owner, the Administrator and an
+ * organizer, check-in, then a rename of p-self and a corrected self-entry (the old name stays only in older lines and snapshots). */
+function logged(){
+ const P={sex:'M',birthDate:'2000-05-05',weight:70,height:175,gradeType:'cup',grade:5};
+ const list=[
+  {actor:'u-ath',type:'entry.self',payload:{tournamentId:'t-staff-self',profileId:'p-kid',events:['forms']}},
+  {actor:'u-ath',type:'entry.remove',payload:{tournamentId:'t-staff-self',id:'p-kid'}},
+  {actor:'u-ath',type:'entry.self',payload:{tournamentId:'t-staff-self',profileId:'p-kid',events:['forms']}},
+  {actor:'demo-admin',type:'entry.remove',payload:{tournamentId:'t-staff-self',id:'p-kid'}},
+  {actor:'u-org1',type:'checkin.save',payload:{tournamentId:'t-org1',id:'p-self',presence:'present',actualWeight:70}},
+  {actor:'u-ath',type:'athlete.save',payload:{...P,id:'p-self',relation:'self',name:'Nowe Imię Zawodnika',club:{id:'club-1'}}},
+  {actor:'u-ath',type:'entry.self',payload:{tournamentId:'t-org1',profileId:'p-self',events:['forms'],update:true}},
+  {actor:'u-org2',type:'entry.remove',payload:{tournamentId:'t-org2',id:'p-ed'}},
+ ];
+ const out=runJs(rich(),list);assert.deepEqual(STATUS(out.results),list.map(()=>200));return {db:out.db,list};
+}
+const NAMES=['Zawodnik SELF Testowy','Zawodnik KID Testowy','Nowe Imię Zawodnika'],logs=db=>db.tournaments.flatMap(t=>t.activity.map(x=>x.text));
+test('forgetting athletes leaves no full name in tournament logs: earlier names, withdrawals, PHP forgetMember and the JS mirror (§6.6)',{skip},()=>{
+ const {db,list}=logged();assert.ok(NAMES.every(n=>logs(db).some(x=>x.endsWith(': '+n))),'every name is in a log before');
+ // Account deletion (PHP only): snapshots kept as results history keep the name (O7), logs never.
+ const {db:out}=bridge({job:'forgetMember',db,users:['u-ath']});
+ assert.deepEqual(logs(out).filter(x=>NAMES.some(n=>x.includes(n))),[],'no full name in any log');
+ assert.ok(out.tournaments.find(t=>t.id==='t-staff-self').activity.some(x=>x.text==='Wycofano zgłoszenie: Z. T.'),'the withdrawal by the Administrator, as initials');
+ assert.ok(out.tournaments.find(t=>t.id==='t-org2-closed').entries.some(e=>e.profileId==='p-self'&&e.name==='Zawodnik SELF Testowy'),'a snapshot kept as history keeps its name (O7)');
+ assert.ok(logs(out).includes('Wycofano zgłoszenie: Zawodnik ED Testowy'),'other athletes keep their names');
+ // A namesake with an entry in the same tournament keeps his line.
+ const twin=structuredClone(db),t3=twin.tournaments.find(t=>t.id==='t-org2');t3.entries.find(e=>e.profileId==='p-club2').name='Zawodnik KID Testowy';t3.activity.unshift({text:'Zgłoszono: Zawodnik KID Testowy',time:'2026-01-01T00:00:00.000Z'});
+ assert.equal(bridge({job:'forgetMember',db:twin,users:['u-ath']}).db.tournaments.find(t=>t.id==='t-org2').activity.find(x=>x.text.startsWith('Zgłoszono: ')).text,'Zgłoszono: Zawodnik KID Testowy');
+ // athlete.forget: the same rule in PHP and JS, snapshots as initials too.
+ const more=[...list,{actor:'u-ath',type:'athlete.forget',payload:{profileId:'p-kid'}},{actor:'u-ath',type:'athlete.forget',payload:{profileId:'p-self'}}];
+ const js=runJs(rich(),more),ph=bridge({job:'execute',db:rich(),commands:more});compare(js,ph,more);
+ assert.deepEqual(STATUS(js.results).slice(-2),[200,200]);
+ const json=JSON.stringify(js.db.tournaments);assert.ok(NAMES.every(n=>!json.includes(n)),'neither logs nor snapshots name them');
+});
+test('Domain::retain turns the names in logs of old community tournaments into initials, also of entries withdrawn long ago (§6.7)',{skip},()=>{
+ const {db}=logged(),{db:out,out:counts}=bridge({job:'retain',db,cutoff:day(400),limit:0});
+ const community=new Set(['t-org1','t-org1-hidden','t-org2','t-org2-closed','t-org3']);
+ for(const t of out.tournaments.filter(t=>community.has(t.id)))for(const x of t.activity)assert.doesNotMatch(x.text,/Testowy|Zawodnika/,t.id+': '+x.text);
+ assert.ok(out.tournaments.find(t=>t.id==='t-org2').activity.some(x=>x.text==='Wycofano zgłoszenie: Z. T.'),'a withdrawn entry, named in no snapshot');
+ assert.ok(out.tournaments.find(t=>t.id==='t-staff-self').activity.some(x=>x.text==='Wycofano zgłoszenie: Zawodnik KID Testowy'),'staff tournaments keep names');
+ assert.equal(counts.logs,3);assert.equal(counts.profiles,0);
+});
 test('Domain::retain (PHP only): idle organizer profiles forgotten up to the limit, community names as initials, tombstones purged (§6.7)',{skip},()=>{
  const db=rich();db.withdrawals=[];
  const {db:out,out:counts}=bridge({job:'retain',db,cutoff:day(400),limit:2});
@@ -318,5 +369,5 @@ test('Domain::retain (PHP only): idle organizer profiles forgotten up to the lim
  for(const id of ['t-org1','t-org2','t-org2-closed','t-org3'])for(const e of out.tournaments.find(t=>t.id===id).entries)assert.match(e.name,/^\p{Lu}\.( \p{Lu}\.)?$/u,id+': '+e.name);
  assert.ok(out.tournaments.find(t=>t.id==='t-staff-self').entries.some(e=>e.name==='Zawodnik ED Testowy'),'staff tournaments keep names');
  assert.ok(counts.snapshots>0);assert.match(out.withdrawalsPurge,/^\d{4}-\d{2}-\d{2}$/);
- const none=bridge({job:'retain',db,cutoff:'2000-01-01'});assert.deepEqual(none.out,{profiles:0,snapshots:0});assert.equal(none.db.revision,db.revision,'nothing to retain: no new revision');
+ const none=bridge({job:'retain',db,cutoff:'2000-01-01'});assert.deepEqual(none.out,{profiles:0,snapshots:0,logs:0});assert.equal(none.db.revision,db.revision,'nothing to retain: no new revision');
 });

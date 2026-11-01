@@ -325,6 +325,29 @@ test('profile.forget and athlete.forget always finish: brackets with results kee
  assert.equal(code(()=>run(w,'mem','athlete.forget',{profileId:mine})),404);assert.equal(run(w,'ath','athlete.forget',{profileId:mine}).result.state,'deleted');
 });
 
+test('profile.forget: the logs of every tournament lose every name of the profile, an earlier one and one of a withdrawn entry too (§6.6)',()=>{
+ let db=world();
+ db=seq(db,[['org2','tournament.save',{...T,name:'Dziennik Jeden',date:day(20),status:'open'}],['org2','tournament.save',{...T,name:'Dziennik Dwa',date:day(21),status:'open'}]]).db;const [t1,t2]=db.tournaments.slice(-2).map(t=>t.id);
+ db=run(db,'org2','profile.save',{...A,name:'Ala Stara',club:{none:true}}).db;const a=db.profiles.at(-1).id;
+ db=seq(db,[['org2','entry.save',{...E,tournamentId:t1,profileId:a}],['org2','entry.save',{...E,tournamentId:t2,profileId:a}],['org2','profile.save',{...A,id:a,name:'Ala Nowa',club:{id:UNAFFILIATED}}],
+  ['org2','checkin.save',{tournamentId:t2,id:a,presence:'present',actualWeight:70}],['demo-admin','entry.remove',{tournamentId:t1,id:a}]]).db;
+ const text=()=>JSON.stringify(db.tournaments.filter(t=>t.id===t1||t.id===t2));
+ assert.ok(text().includes('Wycofano zgłoszenie: Ala Stara')&&text().includes('Kontrola startowa: Ala Stara'),'the snapshot of t2 keeps the old name, t1 has no entry left');
+ db=run(db,'org2','profile.forget',{id:a}).db;
+ assert.ok(!/Ala (Stara|Nowa)/.test(text()),text());assert.ok(db.tournaments.find(t=>t.id===t1).activity.some(x=>x.text==='Wycofano zgłoszenie: A. S.'));
+});
+
+test('profile.save: a member without the organizer role or with a blocked one creates nothing; club.merge into unaffiliated only without staff accounts',()=>{
+ const db=world();
+ for(const id of ['mem','ath','org3'])assert.deepEqual(err(()=>run(db,id,'profile.save',{...A,name:'Bez Roli',club:{name:'Klub Bez Roli'}})),[403,'Brak uprawnień.'],id);
+ let w=run(db,'org1','profile.save',{...A,name:'Bez Klubu Naprawdę',club:{name:'Nie Mam Klubu'}}).db;const p=w.profiles.at(-1),c=w.clubs.find(x=>x.id===p.clubId);
+ assert.deepEqual(err(()=>run(w,'demo-admin','club.merge',{id:'club-1',into:UNAFFILIATED})),[409,'Ten klub ma konta personelu. Przypisz je do innego klubu przed scaleniem z „Niezrzeszony”.']);
+ w=run(w,'demo-admin','club.merge',{id:c.id,into:UNAFFILIATED}).db;
+ assert.deepEqual([w.profiles.find(x=>x.id===p.id).clubId,w.clubs.find(x=>x.id===c.id).mergedInto],[UNAFFILIATED,UNAFFILIATED]);
+ assert.equal(pickClub(w.clubs,w.users.find(u=>u.id==='org1'),{name:'nie mam klubu'},NOW).clubId,UNAFFILIATED,'the name now leads to unaffiliated');
+ assert.ok(w.users.filter(u=>['admin','editor','club'].includes(u.role)).every(u=>u.clubId!==UNAFFILIATED));
+});
+
 test('clubs: verify, rename with the key check, merge re-points profiles and staff, unaffiliated is fixed',()=>{
  let db=world();db=run(db,'org1','profile.save',{...A,name:'Z Nowego',club:{name:'Nowy Klubik'}}).db;const p=db.profiles.at(-1),c=db.clubs.find(x=>x.id===p.clubId);
  assert.equal(code(()=>run(db,'org1','club.save',{id:c.id,verified:true})),403);

@@ -19,6 +19,7 @@ export default {
  'Klub o podobnej nazwie już istnieje. Wybierz go z listy.':'A club with a similar name already exists. Choose it from the list.',
  'Klub o takiej nazwie już istnieje. Użyj scalania.':'A club with this name already exists. Use merging.',
  'Tego klubu nie można zmienić.':'This club cannot be changed.',
+ 'Ten klub ma konta personelu. Przypisz je do innego klubu przed scaleniem z „Niezrzeszony”.':'This club has staff accounts. Assign them to another club before merging it into “Unaffiliated”.',
  'Wybierz zawodników.':'Choose athletes.',
  // Athlete profiles of an account and self-entries (§6.1, §7).
  'Wybierz, kogo zgłaszasz.':'Choose whom you are entering.',

@@ -23,6 +23,8 @@ final class Domain {
  /** Web addresses, e-mails and numbers of 9+ digits in texts of members (§5.4); the same pattern is CONTACT in dist/workspace.js. */
  public const CONTACT='~(?:https?://|www\.|@|(?<![\p{L}\p{N}_])[\p{L}\p{N}-]+\.(?:pl|com|eu|net|org|info|io|me|app|link|ly|gg|online|site|shop|xyz)(?![\p{L}\p{N}_])|\p{Nd}(?:[\s./-]?\p{Nd}){8,})~iu';
  public const DELETED='Dane usunięte';
+ /** Tournament log lines that end with an athlete's name (entries, self-entries, check-in, withdrawals); retain() turns the name into initials. */
+ private const NAMED='/^((?:Zgłoszono|Zmieniono zgłoszenie|Zgłoszenie własne|Zmieniono zgłoszenie własne|Zmieniono klub w zgłoszeniu|Kontrola startowa|Wycofano zgłoszenie): )(.+)$/su';
  private const TOURNAMENT_SCOPE=['entry.remove','checkin.save','draw.create','result.save','result.clear','tournament.hide'];
  public static function id():string{return bin2hex(random_bytes(16));}
  public static function txt(mixed $v,string $label,int $max=100):string{if(!is_string($v)||trim($v)===''||mb_strlen(trim($v))>$max)throw new AppError('Sprawdź pole: '.$label.'.');return trim($v);}
@@ -219,21 +221,29 @@ final class Domain {
  }
  /**
   * Forgets profile $id: every entry is detached; without remaining entries the profile leaves $db (persist() deletes the
-  * row), otherwise it is anonymized. $initials (profile.forget, athlete.forget) also turns the name in the remaining
-  * snapshots and in the tournament logs into initials. Returns 'deleted', 'anonymized' or 'missing'.
+  * row), otherwise it is anonymized. Tournament logs never keep its name: every line ending with a name the profile had
+  * (the current one and those of its snapshots, also of entries withdrawn earlier) gets initials in every tournament,
+  * unless an entry of another profile there carries the same name. $initials (profile.forget, athlete.forget) also turns
+  * the name in the remaining snapshots into initials; otherwise they keep it as results history (O7). Returns 'deleted',
+  * 'anonymized' or 'missing'.
   */
  public static function forgetProfile(array &$db,string $id,bool $initials=false):string {
   $i=null;foreach($db['profiles'] as $k=>$a)if($a['id']===$id)$i=$k;if($i===null)return 'missing';
-  $name=(string)($db['profiles'][$i]['name']??'');$left=false;$short=GuestView::initials($name);
+  $names=[(string)($db['profiles'][$i]['name']??'')];foreach($db['tournaments'] as $t)foreach($t['entries'] as $e)if($e['profileId']===$id)$names[]=(string)$e['name'];
+  $names=array_values(array_diff(array_unique($names),['',self::DELETED]));$left=false;
   foreach($db['tournaments'] as $k=>$t){
    if(in_array($id,array_column($t['entries'],'profileId'),true)&&!self::detach($t,$id))$left=true;
-   if($initials){foreach($t['entries'] as $j=>$e)if($e['profileId']===$id)$t['entries'][$j]['name']=GuestView::initials((string)$e['name']);
-    if($name!=='')foreach($t['activity'] as $j=>$x)if(str_ends_with((string)$x['text'],': '.$name))$t['activity'][$j]['text']=substr((string)$x['text'],0,-strlen($name)).$short;}
-   $db['tournaments'][$k]=$t;
+   if($initials)foreach($t['entries'] as $j=>$e)if($e['profileId']===$id)$t['entries'][$j]['name']=GuestView::initials((string)$e['name']);
+   self::unname($t,$id,$names);$db['tournaments'][$k]=$t;
   }
   if(!$left){array_splice($db['profiles'],$i,1);return 'deleted';}
   $db['profiles'][$i]=array_replace($db['profiles'][$i],['name'=>self::DELETED,'birthDate'=>null,'ownerId'=>null,'relation'=>null,'guardianDeclaredAt'=>null,'guardianConsentAt'=>null,'consentBy'=>null,'pendingClubName'=>null,'archived'=>true]);
   return 'anonymized';
+ }
+ /** Log lines of $t ending with ': '.<one of $names> get initials, unless an entry of a profile other than $id still carries that name (a namesake). */
+ private static function unname(array &$t,string $id,array $names):void {
+  if(!$names)return;$kept=[];foreach($t['entries'] as $e)if($e['profileId']!==$id)$kept[(string)$e['name']]=true;
+  foreach($t['activity'] as $j=>$x){$s=(string)$x['text'];foreach($names as $n)if(!isset($kept[$n])&&str_ends_with($s,': '.$n)){$t['activity'][$j]['text']=substr($s,0,-strlen($n)).GuestView::initials($n);break;}}
  }
  /** Account deletion (§6.6, PHP only, idempotent): owned profiles forgotten; as organizer, upcoming tournaments hidden by 'system' (self-entries of others detached, tombstone 'system') and created profiles forgotten. */
  public static function forgetMember(array &$db,string $userId):array {
@@ -247,18 +257,26 @@ final class Domain {
   foreach($db['profiles'] as $a)if(($a['ownerId']??null)===null&&($a['createdBy']??null)===$userId&&($a['name']??null)!==self::DELETED&&self::forgetProfile($db,$a['id'])!=='missing')$out['profiles']++;
   self::stamp($before,$db,false);return $out;
  }
- /** Retention of community data (§6.7, PHP only): organizers' profiles idle since $cutoff are forgotten (at most $limit), names in community tournaments before $cutoff become initials, old tombstones are purged. */
+ /**
+  * Retention of community data (§6.7, PHP only): organizers' profiles idle since $cutoff are forgotten (at most $limit),
+  * names in snapshots and log lines of community tournaments before $cutoff become initials (also of entries withdrawn
+  * long ago), old tombstones are purged. Returns counts only.
+  */
  public static function retain(array &$db,string $cutoff,int $limit=200):array {
-  $db['withdrawals']??=[];$before=$db;$last=[];$n=0;$s=0;
+  $db['withdrawals']??=[];$before=$db;$last=[];$n=0;$s=0;$l=0;
   foreach($db['tournaments'] as $t)foreach($t['entries'] as $e)$last[$e['profileId']]=max($last[$e['profileId']]??'',$t['date']);
   foreach($db['profiles'] as $a){
    if($n>=$limit)break;if(($a['ownerId']??null)!==null||self::staffProfile($db,['ownerId'=>null,'createdBy'=>$a['createdBy']??null])||($a['name']??null)===self::DELETED)continue;
    $ref=$last[$a['id']]??(is_numeric($a['createdAt']??null)?date('Y-m-d',(int)$a['createdAt']):null);
    if($ref!==null&&$ref<$cutoff&&self::forgetProfile($db,$a['id'])!=='missing')$n++;
   }
-  foreach($db['tournaments'] as $k=>$t){if($t['date']>=$cutoff||!self::community($db,$t))continue;foreach($t['entries'] as $j=>$e){$x=GuestView::initials((string)$e['name']);if($x!==$e['name']){$db['tournaments'][$k]['entries'][$j]['name']=$x;$s++;}}}
+  foreach($db['tournaments'] as $k=>$t){
+   if($t['date']>=$cutoff||!self::community($db,$t))continue;
+   foreach($t['entries'] as $j=>$e){$x=GuestView::initials((string)$e['name']);if($x!==$e['name']){$db['tournaments'][$k]['entries'][$j]['name']=$x;$s++;}}
+   foreach($t['activity'] as $j=>$a)if(preg_match(self::NAMED,(string)$a['text'],$m)&&($x=$m[1].GuestView::initials($m[2]))!==$a['text']){$db['tournaments'][$k]['activity'][$j]['text']=$x;$l++;}
+  }
   $db['withdrawalsPurge']=date('Y-m-d',strtotime('-30 days'));self::stamp($before,$db,false);
-  return ['profiles'=>$n,'snapshots'=>$s];
+  return ['profiles'=>$n,'snapshots'=>$s,'logs'=>$l];
  }
  private static function apply(array &$db,array $u,string $type,array $p):array {
   $now=time();$today=date('Y-m-d');$member=$u['role']==='member';$admin=$u['role']==='admin';
@@ -298,6 +316,7 @@ final class Domain {
   }
   if($type==='profile.save'){
    $old=isset($p['id'])?self::prof($db,$u,$p['id']):null;
+   if(!$old&&$member&&!self::organizer($u))throw new AppError('Brak uprawnień.',403);
    if($old&&(!self::managesProfile($u,$old,$db)||($old['ownerId']??null)!==null&&!$admin))throw new AppError('Nie możesz edytować tej kartoteki.',403);
    $pick=null;$choice=[];if($u['role']==='club'){$clubId=$u['clubId'];self::entity($db['clubs'],$clubId,'Klub');}
    else{$choice=self::clubChoice($p);$pick=Clubs::pick($db['clubs'],$u,$choice,$now,$member?Clubs::counts($db['clubs'],$u,$now):[]);$clubId=$pick['clubId'];}
@@ -368,6 +387,8 @@ final class Domain {
    }
    if($type==='club.merge'){
     $into=self::entity($db['clubs'],$p['into']??null,'Klub');if($into['id']===$c['id']||($into['mergedInto']??null)!==null)throw new AppError('Tego klubu nie można zmienić.',409);
+    // 'unaffiliated' may absorb a club of athletes (e.g. a member's "no club" entry), never staff accounts: account.save refuses it and a club account there would see every unaffiliated staff profile.
+    if($into['id']===Clubs::UNAFFILIATED)foreach($db['users'] as $x)if(in_array($x['role']??null,self::STAFF,true)&&($x['clubId']??null)===$c['id'])throw new AppError('Ten klub ma konta personelu. Przypisz je do innego klubu przed scaleniem z „Niezrzeszony”.',409);
     foreach($db['profiles'] as &$a)if($a['clubId']===$c['id'])$a['clubId']=$into['id'];unset($a);
     foreach($db['users'] as &$x)if(in_array($x['role'],self::STAFF,true)&&$x['clubId']===$c['id']){$x['clubId']=$into['id'];$x['authVersion']++;}unset($x);
     foreach($db['clubs'] as &$x)if($x['id']===$c['id']||($x['mergedInto']??null)===$c['id'])$x['mergedInto']=$into['id'];unset($x);
