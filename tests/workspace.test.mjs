@@ -104,3 +104,41 @@ test('Warsaw date for the public cut-off, across midnight and daylight saving ti
  assert.equal(warsawToday(new Date('2026-10-31T23:30:00Z')),'2026-11-01');
  assert.equal(warsawToday(new Date('2026-07-01T22:30:00Z')),'2026-07-02');
 });
+
+// Roles plan (PLAN-REJESTRACJA-ROLE §5.8, §10.7): revision stamps and the demo workspace.
+import {guestTournaments,stale} from '../dist/workspace.js';
+test('initialWorkspace: unaffiliated club, verified clubs, staffRev, demo organizer and athlete accounts, self-entries in t-winter-2027 only',()=>{
+ const db=seed();
+ assert.equal(db.staffRev,1);assert.equal(db.revision,1);
+ assert.deepEqual(db.clubs.at(-1),{id:'unaffiliated',name:'Niezrzeszony',verified:true});assert.ok(db.clubs.every(c=>c.verified===true));
+ assert.deepEqual(db.tournaments.map(t=>[t.id,t.selfEntry]),[['t-autumn-2026',false],['t-winter-2027',true],['t-gp-gdansk-2026',false],['t-spring-2027',false]]);
+ const org=db.users.find(u=>u.id==='demo-organizer'),ath=db.users.find(u=>u.id==='demo-athlete');
+ assert.deepEqual([org.role,org.organizer,org.organizerTrustedAt,ath.role,ath.organizer],['member',true,null,'member',false]);
+ const kid=db.profiles.find(p=>p.ownerId==='demo-athlete');
+ assert.deepEqual([kid.relation,kid.createdBy,ageAt(kid.birthDate,'2026-11-01'),db.tournaments.some(t=>t.entries.some(e=>e.profileId===kid.id))],['guardian','demo-athlete',14,false]);
+ // The staff views are unchanged by the demo members: no member account, no owned profile outside the Admin view.
+ const admin=publicWorkspace(db,db.users[0]);assert.deepEqual(admin.users.map(u=>u.id),['demo-admin','demo-editor','demo-club']);
+ assert.ok(!publicWorkspace(db,db.users[1]).profiles.some(p=>p.id===kid.id));assert.ok(admin.profiles.some(p=>p.id===kid.id));
+ assert.deepEqual(publicWorkspace(db,ath).profiles,[],'a member without the organizer role has the empty workspace');
+});
+test('revision stamps: changed tournaments and profiles get the new revision, staffRev follows staff accounts and existing clubs',()=>{
+ let db=seed();
+ db=run(db,'demo-admin','checkin.save',{tournamentId:'t-autumn-2026',id:'a1',presence:'present',actualWeight:65}).db;
+ assert.deepEqual([db.revision,db.tournaments[0].rev,db.tournaments[1].rev,db.staffRev],[2,2,undefined,1]);
+ const profileOut=run(db,'demo-club','profile.save',data);db=profileOut.db;
+ assert.deepEqual([db.revision,db.profiles.find(p=>p.id===profileOut.result.id).rev,db.staffRev],[3,3,1],'a new profile is stamped, staff unchanged');
+ db=run(db,'demo-admin','account.save',{id:'demo-editor',email:'editor@matdraw.example',role:'editor',clubId:'club-2'}).db;assert.deepEqual([db.revision,db.staffRev],[4,4]);
+ db=run(db,'demo-admin','account.save',{email:'nowy@matdraw.example',role:'club',clubName:'Nowy Klub Demo'}).db;
+ assert.deepEqual([db.revision,db.staffRev],[5,5],'a new staff account is a staff change; its new club alone would not be');
+ // The stale table: an old revision is fine for an untouched tournament, refused for a changed one.
+ assert.equal(stale(db,'checkin.save',{tournamentId:'t-winter-2027'},1),false);assert.equal(stale(db,'checkin.save',{tournamentId:'t-autumn-2026'},1),true);
+ assert.throws(()=>run(db,'demo-admin','checkin.save',{tournamentId:'t-winter-2027',id:'x',presence:'pending'},1),e=>e.status===404,'not stale: the 404 of the missing entry follows');
+ assert.throws(()=>run(db,'demo-admin','checkin.save',{tournamentId:'t-autumn-2026',id:'a1',presence:'pending'},1),e=>e.status===409);
+});
+test('guestTournaments: community flags and the current club of every entry, as Repository::guestTournaments',()=>{
+ const db=seed();db.clubs.push({id:'c-new',name:'Nowy',verified:false},{id:'c-old',name:'Stary',verified:true,mergedInto:'club-2'});
+ db.tournaments[0].entries[0].clubId='c-new';db.tournaments[0].entries[1].clubId='c-old';db.tournaments[0].entries[2].clubId='unaffiliated';
+ const [t]=guestTournaments(db);assert.deepEqual([t.community,t.trusted],[false,true]);
+ assert.deepEqual(t.entries.slice(0,4).map(e=>e.currentClub),[{id:'c-new',name:null},{id:'club-2',name:'KS Tiger Kraków'},{id:'unaffiliated',name:''},{id:t.entries[3].clubId,name:db.clubs.find(c=>c.id===t.entries[3].clubId).name}]);
+ assert.equal(db.tournaments[0].entries[0].currentClub,undefined,'the workspace is not changed');
+});

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {slotOrder,makeDraw,resolveDraw,saveWinner,clearWinner,clubConflicts,initialState,categories,classify,validateAthlete,eligibility} from '../dist/engine.js';
+import {slotOrder,makeDraw,resolveDraw,saveWinner,clearWinner,clubConflicts,fingerprintCounts,sameClub,firstPairs,initialState,categories,classify,validateAthlete,eligibility} from '../dist/engine.js';
 const roster=n=>Array.from({length:n},(_,i)=>({id:'p'+i,name:'Zawodnik '+i,club:'Klub '+i%6,champion:false}));
 test('Nine-person placement matches the coach diagram, including the ninth position',()=>{assert.deepEqual(slotOrder(16).slice(0,9),[0,15,7,8,1,14,6,9,2]);assert.deepEqual(slotOrder(8),[0,7,1,6,2,5,3,4]);});
 test('Every size has unique positions, correct athlete counts and exactly n-1 played matches',()=>{
@@ -70,4 +70,15 @@ test('Sample counts are derived from real sample records',()=>{
 test('Form validation rejects missing, invalid and age-incompatible entries',()=>{
  const a=initialState().athletes[9];assert.equal(validateAthlete(a),true);
  assert.throws(()=>validateAthlete({...a,name:''}));assert.throws(()=>validateAthlete({...a,weight:NaN}));assert.throws(()=>validateAthlete({...a,events:[]}));assert.throws(()=>validateAthlete({...a,age:8}));
+});
+test('Unaffiliated athletes are never separated: their pairs cost nothing, conflicts and club counts skip them (PLAN-REJESTRACJA-ROLE §6.3)',()=>{
+ const free=(id,o={})=>({id,name:'Bez Klubu '+id,club:'Niezrzeszony',clubId:'unaffiliated',champion:false,...o});
+ assert.equal(sameClub(free('a'),free('b')),false);assert.equal(sameClub({club:'A',clubId:'c1'},{club:'A',clubId:'c1'}),true);assert.equal(sameClub({club:'A'},{club:'B'}),false);
+ const all=Array.from({length:8},(_,i)=>free('u'+i));
+ for(const seed of [1,2,3]){const d=makeDraw(all,seed);assert.equal(clubConflicts(d,all),0);assert.equal(firstPairs(d.slots).length,4);}
+ // Six unaffiliated and two of Klub A: the two always meet someone else, as if the unaffiliated were six different clubs.
+ const mixed=[...all.slice(0,6),{id:'k1',name:'K 1',club:'Klub A',clubId:'cA'},{id:'k2',name:'K 2',club:'Klub A',clubId:'cA'}];
+ for(const seed of [4,5,6,7])assert.equal(clubConflicts(makeDraw(mixed,seed),mixed),0);
+ const counts=fingerprintCounts([...mixed.map(a=>({...a,age:20,sex:'M',gradeType:'cup',grade:5,weight:70,height:175,events:['forms'],presence:'pending'}))]);
+ assert.equal(counts.clubs,1,'Niezrzeszony is not a club');
 });

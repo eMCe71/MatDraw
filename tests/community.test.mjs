@@ -7,7 +7,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
 import {readFileSync} from 'node:fs';
-import {COUNTRIES,SPORTS,SPORT_COLORS,RESERVED,RESERVED_PREFIXES,validateUsername,normalizeUsername,validateName,slugName,suggestUsernames,cleanText} from '../dist/profile-data.js';
+import {COUNTRIES,SPORTS,SPORT_COLORS,RESERVED,RESERVED_PREFIXES,validateUsername,normalizeUsername,validateName,slugName,suggestUsernames,cleanText,clubKey} from '../dist/profile-data.js';
 const php=process.env.PHP_BIN;const skip=!php;
 function bridge(input,ini=[]){const r=spawnSync(php,[...ini.flatMap(v=>['-d',v]),'tests/php-bridge-community.php'],{input:JSON.stringify(input),encoding:'utf8',maxBuffer:50_000_000});assert.equal(r.status,0,r.stderr||r.stdout);return JSON.parse(r.stdout);}
 const POLISH_LETTERS=/[ąćęłńóśźżĄĆĘŁŃÓŚŹŻ]/;
@@ -88,6 +88,15 @@ test('cleanText mirrors Text::clean: format and control characters, NFC, lines (
  assert.equal(cleanText('\uD800x'),null,'ill-formed (JS) like invalid UTF-8 (PHP)');assert.deepEqual(bridge({job:'clean',cases:[{hex:'61ff62'}]}),[null]);
 });
 
+const CLUB_NAMES=['Kraków','Krakow','KRAKÓW','  kraków ','Straße','Strasse','Тигр Київ','Дракон Львів','ΟΔΟΣ','οδος','Ærøskøbing','태권도','UKS Orły-2','Łódź','Lodz','a‮b','Niezrzeszony','Bez klubu','—','x','',null,5,'İzmir','ﬁt Club'];
+test('club keys (PLAN-REJESTRACJA-ROLE §6.3): Clubs::key equals clubKey; Kraków/Krakow match, non-Latin names keep their letters',{skip},()=>{
+ const out=bridge({job:'clubKey',cases:CLUB_NAMES.map(s=>({s}))});
+ CLUB_NAMES.forEach((s,i)=>assert.equal(clubKey(s),out[i],JSON.stringify(s)));
+ assert.equal(clubKey('Kraków'),'krakow');assert.equal(clubKey('  KRAKÓW '),clubKey('Krakow'));assert.equal(clubKey('Łódź'),clubKey('Lodz'));
+ assert.equal(clubKey('Тигр Київ'),'тигркиів');assert.notEqual(clubKey('Тигр Київ'),clubKey('Дракон Львів'));assert.equal(clubKey('ΟΔΟΣ'),clubKey('οδος'),'final sigma');
+ assert.equal(clubKey('Niezrzeszony'),'niezrzeszony');assert.equal(clubKey('Bez klubu'),'bezklubu');assert.equal(clubKey(null),'');assert.equal(clubKey('—'),'');
+ assert.notEqual(clubKey('Straße'),clubKey('Strasse'),'ß/ss is left to the unique key of the database (409)');
+});
 test('Profiles::validate: complete and partial profiles, one message per field',{skip},()=>{
  const ok={firstName:' Marta ',lastName:'Kowalska',username:'Marta.K',country:'PL',sports:['karate','taekwondo','karate'],clubText:' KS ‮Tygrys ',showClub:true};
  const cases=[

@@ -1,10 +1,10 @@
 <?php
-// Bridge for tests/community.test.mjs (plan §11): profile rules, Text::clean, Capabilities and the avatar pipeline of the
+// Bridge for tests/community.test.mjs (plan §11): profile rules, Text::clean, Clubs::key, Capabilities and the avatar pipeline of the
 // accounts-profiles-backend slice, called with JSON on STDIN, without a database. Binary data travels as base64 and
 // invalid UTF-8 as hex.
 declare(strict_types=1);
 require dirname(__DIR__).'/backend/bootstrap.php';
-use MatDraw\{Avatars,Capabilities,Config,Profiles,Text};
+use MatDraw\{Avatars,Capabilities,Clubs,Config,Profiles,Text};
 function attempt(callable $fn):array{try{return ['ok'=>$fn()];}catch(Throwable $e){return ['error'=>$e->getMessage(),'status'=>$e instanceof MatDraw\AppError?$e->status:null];}}
 $in=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR);
 $str=fn(array $c)=>isset($c['hex'])?hex2bin($c['hex']):($c['s']??null);
@@ -13,6 +13,7 @@ $out=match($in['job']){
  'username'=>array_map(fn($c)=>Profiles::usernameStatus($str($c)),$in['cases']),
  'names'=>array_map(fn($c)=>Profiles::cleanName($str($c)),$in['cases']),
  'slug'=>array_map(fn($c)=>Profiles::slug($str($c)),$in['cases']),
+ 'clubKey'=>array_map(fn($c)=>Clubs::key($c['s']??null),$in['cases']),
  'candidates'=>array_map(fn($c)=>Profiles::candidates($c[0],$c[1],$c[2]??'',($in['full']??true)!==false),$in['cases']),
  'clean'=>array_map(fn($c)=>Text::clean($str($c),['multiline'=>!empty($c['multiline'])]),$in['cases']),
  'validate'=>array_map(fn($c)=>attempt(fn()=>Profiles::validate($c['in'],!empty($c['partial']))),$in['cases']),
