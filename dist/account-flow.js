@@ -8,6 +8,12 @@
  *    delete the account (password, then a second confirmation when the server answers confirmEnd).
  *  - #billing: plan (currency from the country, price from the server; billing-checkout sends no currency), return states after
  *    Stripe (confirm every 3 s for up to 30 s), portal return (billing-sync). Stripe pages open only after the origin check.
+ * Roles (PLAN-REJESTRACJA-ROLE §4.5, §10.1, §10.2, §17): step 1 asks who the person is (athlete / tournament organizer, both optional;
+ *    #signup?as=…&t=… ticks one and keeps the target in sessionStorage); a ticked "Zawodnik" adds the athlete step (athlete-form.js)
+ *    before the account is created; the step labels follow the roles before the account exists and me.caps after the reload.
+ *    landing(me, target) replaces the fixed chat after the sign-up and after "later" in the plan step. #profile?tab=roles: the
+ *    organizer role (POST roles; a reload brings the organizer workspace) and the one athlete profile of the account (§17: add when
+ *    there is none, edit, archive or restore, delete with the password).
  * Demo (plan §8.8): sign-up and payments show the demo message; profile edits and the photo (data: URL) stay in localStorage.
  * Every value from the API reaches the DOM through h`…`/setHtml or textContent (plan §5.9). Form ids carry the acct- prefix. */
 import {registry,h,setHtml} from './registry.js';
@@ -16,7 +22,10 @@ import {getMe,loadMe,saveDemoProfile,purgeSession} from './me.js';
 import {t as T,getLanguage,translateMessage} from './i18n.js';
 import {COUNTRIES,SPORTS,SPORTS_MAX,CLUB_MAX,validateUsername,normalizeUsername,validateName,suggestUsernames,slugName,cleanText} from './profile-data.js';
 import {openCrop} from './avatar-crop.js';
-import {flowStart,flowEnd,readReturn,clearReturn,formatPrice,formatDate,publicConfig,takePaymentMessage,avatarSrc,KNOWN_DEVICE,NOTICE_KEY} from './account-boot.js';
+import {flowStart,flowEnd,readReturn,clearReturn,formatPrice,formatDate,publicConfig,takePaymentMessage,avatarSrc,KNOWN_DEVICE,NOTICE_KEY,SIGNUP_NOTICE,TOURNAMENT_ID,parseTarget,saveTarget,readTarget,clearTarget} from './account-boot.js';
+import {newAthlete,athleteBody,athleteError,athleteFieldsHtml,readAthlete,syncAthlete,accountName} from './athlete-form.js';
+import {warsawToday} from './guest-view.js';
+import {ATHLETES_PER_ACCOUNT} from './workspace.js';
 
 export const CHECKOUT_ORIGIN='https://checkout.stripe.com',PORTAL_ORIGIN='https://billing.stripe.com',CHECK_DELAY=400,CONFIRM_EVERY=3000,SYNC_EVERY=11000,CONFIRM_LIMIT=30000;
 const CODES=new Set(COUNTRIES.map(c=>c[0])),EMAIL=/^[^\s@]+@[^\s@]+\.[^\s@]+$/,COMMON=/pass(?:word)?|has(?:l|\u0142)o|qwert|12345|abcde|matbravo|matdraw|taekwondo/;
@@ -132,18 +141,78 @@ export async function handleReturn(ret,{request,wait=ms=>new Promise(r=>setTimeo
  }
 }
 
+/** Steps of the sign-up (§4.5): account, profile, the athlete step only with the athlete role, the plan only while payments are
+ * required. roles are those ticked in step 1 before the account exists, me.user.caps after the reload (never a fixed count). */
+export const signupSteps=(roles,paid)=>['account','profile',...(roles?.athlete?['athlete']:[]),...(paid?['plan']:[])];
+export const STEP_LABELS={account:'Konto',profile:'Profil',athlete:'Zawodnik',plan:'Plan'};
+/** "Krok n z total · name" of step key in steps (Polish keys; translated when shown). */
+export const stepLabel=(steps,key)=>({n:Math.max(1,steps.indexOf(key)+1),total:steps.length,name:STEP_LABELS[key]||''});
+/**
+ * Where a new account lands (§10.1, UX-3) instead of the chat for everyone: {page, params}. Payments required without full
+ * access: the plan step (page 'signup'), unless later (the "later" button). Then a tournament the sign-up started from (target
+ * t, #signup?as=athlete&t=…): its preview (#guest?t=…; enter=1 asks the athlete module to open the entry window for an athlete);
+ * an organizer: #tournaments (the first-run card), unless the sign-up started as an athlete; an athlete: #starts; others: chat.
+ */
+export function landing(me,stored=null,{later=false}={}){
+ const caps=me?.user?.caps||{},t=typeof stored?.t==='string'&&TOURNAMENT_ID.test(stored.t)?stored.t:null;
+ if(!later&&me?.billing?.enabled&&me.access?.full===false)return {page:'signup',params:{step:'3'}};
+ if(t)return {page:'guest',params:caps.athlete?{t,enter:'1'}:{t}};
+ if(caps.organizer&&(stored?.as!=='athlete'||!caps.athlete))return {page:'tournaments',params:null};
+ if(caps.athlete)return {page:'starts',params:null};
+ return {page:'chat',params:null};
+}
+/** Role name of a member's account (§4.5), translated: organizer; athlete (an own profile); athlete's guardian (only guardian
+ * profiles); member. Archived profiles do not count. null for staff (their role names come from the shell). */
+export function roleName(me){
+ if(me?.user?.role!=='member')return null;
+ const athletes=(Array.isArray(me.athletes)?me.athletes:[]).filter(a=>a&&!a.archived);
+ if(me.user.caps?.organizer)return T('Organizator');
+ if(athletes.some(a=>a.relation==='self'))return T('Zawodnik');
+ if(athletes.length&&athletes.every(a=>a.relation==='guardian'))return T('Opiekun zawodnika');
+ return T('Członek');
+}
+/** The state of the "Role" tab (§10.2, §17) from me: organizer {on, blocked}, the account's athlete profiles and whether another
+ * one may be added (one profile per account: only while there is none, archived ones included). */
+export function rolesState(me){
+ const caps=me?.user?.caps||{},athletes=Array.isArray(me?.athletes)?me.athletes.filter(a=>a&&typeof a.profileId==='string'):[];
+ return {organizer:{on:!!caps.organizer,blocked:!!caps.organizerBlocked},athletes,canAdd:athletes.length<ATHLETES_PER_ACCOUNT};
+}
+
 // ---- State ----
 const ui=()=>registry.use('ui');
 const icon=(name,cls='')=>ui()?.icon?.(name,cls)??h``;
 const languages=()=>{try{return navigator.languages?.length?[...navigator.languages]:[navigator.language];}catch{return [];}};
 const message=error=>translateMessage(String(error?.message||error||''));
 const workspace=()=>{try{return ui()?.getWorkspace?.()||null;}catch{return null;}};
-const newSignup=()=>({step:1,email:'',password:'',website:'',invite:null,begin:null,beginError:'',f:newFields(null,languages()),avatar:null,error:''});
-const S={signup:null,draft:null,draftFor:null,ret:null,payment:'',del:null,portal:''};
+const newSignup=()=>({step:1,email:'',password:'',website:'',invite:null,begin:null,beginError:'',f:newFields(null,languages()),avatar:null,error:'',roles:{athlete:false,organizer:false},athlete:newAthlete()});
+const newRoles=()=>({mode:null,f:null,view:null,loading:false,error:''});
+const S={signup:null,draft:null,draftFor:null,ret:null,payment:'',del:null,portal:'',roles:newRoles(),clubs:null};
 S.signup=newSignup();
 const sportLabel=slug=>SPORTS.find(s=>s[0]===slug)?.[1]||slug;
 const initials=f=>((f?.first||'').trim()[0]||'')+((f?.last||'').trim()[0]||'');
 const goChat=()=>{const role=getMe()?.user?.role||workspace()?.user?.role;ui()?.navigate?.(registry.allows(registry.page('chat'),role)?'chat':registry.defaultPage(role));};
+/** Goes where landing() says; a page this account may not open (e.g. #starts before its module exists) falls back to the chat. */
+function land(m,options){
+ const d=landing(m,readTarget(),options),user=workspace()?.user,role=user?.role||m?.user?.role;
+ if(d.page==='signup')return false;
+ clearTarget();
+ if(d.page==='guest'){ui()?.navigate?.('guest',d.params);return true;}
+ // #tournaments is a page of app.js itself (not in the registry): open for an organizer, as registry.defaultPage says.
+ const open=d.page==='tournaments'?registry.organizerUser(user):registry.allows(registry.page(d.page),role,user);
+ if(open)ui()?.navigate?.(d.page,d.params||undefined);else goChat();
+ return true;
+}
+const takeNotice=()=>{try{const n=sessionStorage.getItem(SIGNUP_NOTICE);sessionStorage.removeItem(SIGNUP_NOTICE);return n;}catch{return null;}};
+const clubPending=()=>T('Klub zapiszemy po sprawdzeniu przez Administratora. Do tego czasu jesteś „Niezrzeszony”.');
+/** Clubs for the picker: public-clubs (verified, not merged), or the demo workspace's clubs; [] when they cannot be read. */
+function loadClubs(){
+ if(S.clubs)return S.clubs.ready;
+ const out=S.clubs={list:[],ready:null};
+ out.ready=(Client.isDemo?Promise.resolve((workspace()?.clubs||[]).filter(c=>c.verified!==false)):Client.publicGet({route:'public-clubs'}).then(({status,data})=>status===200&&Array.isArray(data?.clubs)?data.clubs:[]))
+  .then(list=>{out.list=list.filter(c=>c&&typeof c.id==='string'&&typeof c.name==='string');return out.list;},()=>{S.clubs=null;return [];});
+ return out.ready;
+}
+const clubList=()=>S.clubs?.list||[];
 const planStep=()=>!!publicConfig()?.billing;
 /** After a page change that a person did not trigger by moving focus (account created, forced password change, password changed),
  * focus goes to what the page is about once it is drawn, instead of staying on <body> (WCAG 2.4.3); never steals focus already placed. */
@@ -196,15 +265,22 @@ function paintMeter(input){
 // ---- Sign-up (public steps 1-2, signed-in step 3) ----
 const LOGO=h`<picture><source media="(max-width:650px)" srcset="./brand/matbravo-mark-white.svg" width="84" height="62"><img class="brand-logo" src="./brand/matbravo-logo-white.svg" alt="MatBravo" width="525" height="74"></picture>`;
 const langSwitch=()=>h`<div class="lang-switch" role="group" aria-label="Język / Language">${[['pl','PL','Polski'],['en','EN','English']].map(([code,label,name])=>h`<button type="button" class="lang-option" data-set-lang="${code}" lang="${code}" aria-pressed="${getLanguage()===code}" aria-label="${name}" title="${name}">${label}</button>`)}</div>`;
-function stepsView(n,total){
- const names=[T('Konto'),T('Profil'),T('Plan')].slice(0,total);
- return h`<div class="acct-steps"><p class="acct-steps-label">${T('Krok {n} z {total}',{n,total})} · ${names[n-1]}</p><ol aria-hidden="true">${names.map((x,i)=>h`<li class="${i+1<n?'done':i+1===n?'current':''}"><span>${i+1<n?icon('check'):String(i+1)}</span>${x}</li>`)}</ol></div>`;
+function stepsView(steps,key){
+ const {n,total,name}=stepLabel(steps,key);
+ return h`<div class="acct-steps"><p class="acct-steps-label">${T('Krok {n} z {total}',{n,total})} · ${T(name)}</p><ol aria-hidden="true">${steps.map((k,i)=>h`<li class="${i+1<n?'done':i+1===n?'current':''}"><span>${i+1<n?icon('check'):String(i+1)}</span>${T(STEP_LABELS[k])}</li>`)}</ol></div>`;
+}
+const PUBLIC_STEPS=['account','profile','athlete'];
+function rolesFieldset(roles){
+ const items=[['athlete',T('Zawodnik'),T('Zgłaszasz do turniejów siebie albo swoje dziecko lub podopiecznego. Zapytamy o datę urodzenia, wagę i klub.')],
+  ['organizer',T('Organizator turnieju'),T('Tworzysz własne turnieje, dodajesz zawodników i prowadzisz kontrolę startową. Widzisz tylko swoje turnieje.')]];
+ return h`<fieldset class="acct-roles-pick"><legend>${T('Kim jesteś? (opcjonalnie, możesz to zmienić później)')}</legend><div class="acct-options">${items.map(([k,label,hint])=>h`<label class="acct-option"><input type="checkbox" name="role-${k}"${roles[k]?h` checked`:''}><span><strong>${label}</strong><small>${hint}</small></span></label>`)}</div></fieldset>`;
 }
 function stepOne(){
  const s=S.signup;
  if(!s.begin||s.begin==='pending')return h`<section class="acct-card"><p class="acct-loading" role="status">${T('Wczytywanie…')}</p></section>`;
  if(s.begin!=='ok')return h`<section class="acct-card"><h1 id="acct-step-title" tabindex="-1">${T('Załóż konto MatBravo')}</h1><div class="notice info-notice">${icon('info')}<p>${s.beginError}</p></div><div class="acct-actions">${s.begin==='error'?h`<button type="button" class="btn secondary" data-acct-act="signup-retry">${icon('refresh')} ${T('Spróbuj ponownie')}</button>`:''}<button type="button" class="btn primary" data-acct-act="to-login">${T('Wróć do logowania')}</button></div></section>`;
- return h`<form id="acct-signup-1" class="acct-card" novalidate><h1 id="acct-step-title" tabindex="-1">${T('Załóż konto MatBravo')}</h1><p class="acct-lead">${T('Konto członka społeczności: czaty, profil i podglądy turniejów. Konta klubów zakłada Administrator turnieju.')}</p>
+ return h`<form id="acct-signup-1" class="acct-card" novalidate><h1 id="acct-step-title" tabindex="-1">${T('Załóż konto MatBravo')}</h1><p class="acct-lead">${T('Konto MatBravo: czaty, zgłoszenia do turniejów i własne turnieje. Wybierz, kim jesteś — możesz to zmienić później.')}</p>
+${publicConfig()?.roles===false?'':rolesFieldset(s.roles)}
 <label class="field-label">${T('E-mail')}<input name="email" type="email" inputmode="email" autocomplete="email" autocapitalize="none" spellcheck="false" required maxlength="254" value="${s.email}"></label>
 ${passwordField({name:'password',id:'acct-signup-pw',label:T('Hasło'),autocomplete:'new-password',meter:true})}
 <div class="acct-consents" data-acct-consents></div>
@@ -214,11 +290,16 @@ ${passwordField({name:'password',id:'acct-signup-pw',label:T('Hasło'),autocompl
 function stepTwo(){
  const s=S.signup,photos=!!publicConfig()?.avatars;
  return h`<form id="acct-signup-2" class="acct-card" novalidate><h1 id="acct-step-title" tabindex="-1">${T('Twój profil')}</h1><p class="acct-lead">${T('Te dane widzą członkowie MatBravo. Adres e-mail pozostaje prywatny.')}</p>${photos?photoView(s.avatar?.preview||null,s.f,{remove:true}):''}${fieldsView(s.f,{id:'acct-s',signup:true})}
+<div class="form-error" role="alert">${s.error}</div><div class="acct-actions"><button type="button" class="btn secondary" data-acct-act="signup-back">${icon('left')} ${T('Wstecz')}</button><button type="submit" class="btn primary">${s.roles.athlete?T('Dalej'):T('Utwórz konto')} ${icon('arrow')}</button></div></form>`;
+}
+function stepAthlete(){
+ const s=S.signup;
+ return h`<form id="acct-signup-3" class="acct-card" novalidate data-acct-athlete><h1 id="acct-step-title" tabindex="-1">${T('Dane zawodnika')}</h1><p class="acct-lead">${T('Na ich podstawie zgłosisz się do turniejów. Możesz je później zmienić w profilu.')}</p>${athleteFieldsHtml(s.athlete,{id:'acct-s3',clubs:clubList()})}
 <div class="form-error" role="alert">${s.error}</div><div class="acct-actions"><button type="button" class="btn secondary" data-acct-act="signup-back">${icon('left')} ${T('Wstecz')}</button><button type="submit" class="btn primary">${T('Utwórz konto')} ${icon('arrow')}</button></div></form>`;
 }
 function publicView(){
- const s=S.signup;
- return h`<div class="guest-shell acct-public" data-acct-public="signup"><header class="guest-bar"><div class="guest-bar-inner"><button type="button" class="brand guest-brand" data-acct-act="to-login" aria-label="${T('MatBravo — wróć do logowania')}">${LOGO}</button><div class="guest-bar-actions">${langSwitch()}<button type="button" class="btn guest-login" data-acct-act="to-login">${icon('lock')}<span><span class="acct-wide">${T('Masz konto?')} </span>${T('Zaloguj się')}</span></button></div></div></header><main id="main" class="acct-main"><div class="acct-column">${s.begin==='ok'?stepsView(s.step,planStep()?3:2):''}${s.step===2&&s.begin==='ok'?stepTwo():stepOne()}</div></main></div>`;
+ const s=S.signup,steps=signupSteps(s.roles,planStep()),form=s.begin!=='ok'?stepOne():s.step===3&&s.roles.athlete?stepAthlete():s.step===2?stepTwo():stepOne();
+ return h`<div class="guest-shell acct-public" data-acct-public="signup"><header class="guest-bar"><div class="guest-bar-inner"><button type="button" class="brand guest-brand" data-acct-act="to-login" aria-label="${T('MatBravo — wróć do logowania')}">${LOGO}</button><div class="guest-bar-actions">${langSwitch()}<button type="button" class="btn guest-login" data-acct-act="to-login">${icon('lock')}<span><span class="acct-wide">${T('Masz konto?')} </span>${T('Zaloguj się')}</span></button></div></div></header><main id="main" class="acct-main"><div class="acct-column"><div data-acct-steps>${s.begin==='ok'?stepsView(steps,PUBLIC_STEPS[s.step-1]):''}</div>${form}</div></main></div>`;
 }
 function renderPublic(focusTitle=false){
  const app=document.querySelector('#app');if(!app)return;
@@ -239,10 +320,13 @@ async function begin(){
 }
 /** Public #signup (steps 1-2). An invite token from the address is kept in memory and removed from the address bar. */
 export async function mountPublic(app,params){
- wire();const s=S.signup,invite=params?.get?.('invite');
+ wire();const s=S.signup,invite=params?.get?.('invite'),target=parseTarget(params);
  if(invite&&invite!==s.invite){s.invite=invite.slice(0,256);s.begin=null;}
  if(invite)try{history.replaceState(null,'',location.pathname+location.search+'#signup');}catch{}
- s.step=params?.get?.('step')==='2'&&s.email&&s.password?2:1;
+ // #signup?as=athlete|organizer[&t=…] ticks the role and keeps the target for the landing after the account exists (§4.5).
+ if(target){s.roles[target.as]=true;saveTarget(target);if(target.as==='athlete')loadClubs();}
+ const step=params?.get?.('step'),typed=!!(s.email&&s.password);
+ s.step=step==='athlete'&&typed&&s.roles.athlete&&fieldsError(s.f)===null?3:(step==='2'||step==='athlete')&&typed?2:1;
  await registry.use('account')?.ready;
  if(!document.querySelector('[data-acct-public]'))return;
  if(!s.begin)begin();
@@ -253,31 +337,51 @@ export function repaint(){
  if(onSignup()){renderPublic();return;}
  const el=document.querySelector('[data-acct-page]');if(el)render(el.dataset.acctPage,el);
 }
+function readRoles(form,roles){for(const k of ['athlete','organizer']){const box=form.elements['role-'+k];if(box)roles[k]=box.checked;}return roles;}
 function submitStepOne(form){
- const s=S.signup,el=form.elements;s.email=el.email.value.trim();s.password=el.password.value;s.website=el.website?.value||'';
+ const s=S.signup,el=form.elements;s.email=el.email.value.trim();s.password=el.password.value;s.website=el.website?.value||'';readRoles(form,s.roles);if(s.roles.athlete)loadClubs();
  if(!EMAIL.test(s.email)||s.email.length>254)throw new Error('Podaj poprawny adres e-mail.');
  Client.validatePassword(s.password);
  s.step=2;s.error='';flowStart();history.replaceState(null,'',location.pathname+location.search+'#signup?step=2');renderPublic(true);
 }
-async function submitSignup(form){
+/** Step 2: with the athlete role the athlete step follows (the account is created there), otherwise the account is created now. */
+async function submitStepTwo(form){
  const s=S.signup,f=s.f;readForm(form,f);const problem=fieldsError(f);if(problem)throw problem;
- try{await Client.request('signup',{method:'POST',body:{email:s.email,password:s.password,...profileBody(f),website:s.website||'',invite:s.invite||null}});}
+ if(!s.roles.athlete)return submitSignup();
+ const a=s.athlete,own=accountName(f.first,f.last);if(a.relation==='self'&&(!a.name.trim()||a.name===a.prefilled)){a.name=own;a.prefilled=own;}
+ const had=clubList().length>0;s.step=3;s.error='';loadClubs().then(list=>{if(!had&&list.length&&S.signup===s&&s.step===3&&onSignup())repaintAthlete();});
+ history.replaceState(null,'',location.pathname+location.search+'#signup?step=athlete');renderPublic(true);
+}
+/** The club list arrived after the athlete step was drawn: draw it again with what was typed (and the focus) kept. */
+function repaintAthlete(){
+ const form=document.getElementById('acct-signup-3');if(!form)return;readAthlete(form,S.signup.athlete);
+ const name=document.activeElement?.closest?.('#acct-signup-3')?document.activeElement.name:null;
+ renderPublic();if(name)document.querySelector(`#acct-signup-3 [name="${CSS.escape(name)}"]`)?.focus();
+}
+async function submitAthlete(form){
+ const s=S.signup;readAthlete(form,s.athlete);const problem=athleteError(s.athlete,warsawToday());if(problem)throw problem;
+ return submitSignup();
+}
+async function submitSignup(){
+ const s=S.signup,f=s.f,roles={organizer:!!s.roles.organizer,athlete:!!s.roles.athlete};let r;
+ try{r=await Client.request('signup',{method:'POST',body:{email:s.email,password:s.password,...profileBody(f),website:s.website||'',invite:s.invite||null,roles,...(roles.athlete?{athlete:athleteBody(s.athlete)}:{})}});}
  catch(error){if(error?.status===400){s.begin=null;begin();}throw error;}
  flowStart();try{localStorage.setItem(KNOWN_DEVICE,'1');}catch{}
+ if(r?.notice==='club-pending')try{sessionStorage.setItem(SIGNUP_NOTICE,'club-pending');}catch{}
  if(s.avatar?.blob){try{await Client.request('avatar-upload',{method:'POST',body:s.avatar.blob,contentType:s.avatar.type});}catch{try{sessionStorage.setItem(NOTICE_KEY,'avatar-failed');}catch{}}}
  S.signup=newSignup();
  // The new session needs the member workspace: reload into step 3 (the flow mark survives in sessionStorage).
  history.replaceState(null,'',location.pathname+location.search+'#signup?step=3');location.reload();
 }
 function leaveSignup(){
- flowEnd();S.signup=newSignup();
+ flowEnd();clearTarget();S.signup=newSignup();
  history.replaceState(null,'',location.pathname+location.search);ui()?.render?.();
  document.querySelector('#login-form input[name="email"]')?.focus();
 }
 
 // ---- Plan, Stripe return, subscription ----
 function planView(m,{signup=false}={}){
- const b=m.billing||{},a=m.access||{},cur=b.currency,amount=cur?b.amounts?.[cur]:null,back=signup?h`<button type="button" class="acct-link acct-later" data-acct-act="later">${T('Później · wróć do czatu')}</button>`:'';
+ const b=m.billing||{},a=m.access||{},cur=b.currency,amount=cur?b.amounts?.[cur]:null,back=signup?h`<button type="button" class="acct-link acct-later" data-acct-act="later">${landing(m,readTarget(),{later:true}).page==='chat'?T('Później · wróć do czatu'):T('Pomiń na razie')}</button>`:'';
  if(!b.enabled)return h`<section class="acct-plan panel"><p class="acct-lead">${T('Płatności są wyłączone.')} ${T('Masz pełny dostęp do społeczności MatBravo.')}</p>${back}</section>`;
  // billing-checkout answered 409 {portal:true}: Stripe still has a subscription for this account (e.g. past_due after the grace
  // days, or a stale cache). A second Checkout is refused, so the way forward is the Customer Portal (update the card, see the state).
@@ -356,7 +460,8 @@ async function openStripe(button,route,origin){
 
 // ---- Profile page ----
 function ensureDraft(m){if(!S.draft||S.draftFor!==m.user?.id){S.draft=newFields(m.profile,languages());S.draftFor=m.user?.id;}}
-const tabOf=m=>{if(m.profile?.mustChangePassword)return 'security';const t=registry.parseRoute(location.hash).params.get('tab');return ['profile','subscription','security'].includes(t)?t:'profile';};
+const TABS=m=>['profile',...(m?.user?.role==='member'?['roles']:[]),'subscription','security'];
+const tabOf=m=>{if(m.profile?.mustChangePassword)return 'security';const t=registry.parseRoute(location.hash).params.get('tab');return TABS(m).includes(t)?t:'profile';};
 function profileTab(m){
  const f=S.draft,mode=m.features?.avatars;
  return h`<form id="acct-profile-form" class="acct-form" novalidate>${m.profile&&!m.profile.complete?h`<div class="notice info-notice">${icon('info')}<p>${T('Uzupełnij imię, nazwisko, nazwę użytkownika, kraj i sport, aby pisać na czacie.')}</p></div>`:''}${mode&&mode!=='off'?photoView(avatarSrc(m.profile,256),f,{remove:true}):''}${fieldsView(f,{id:'acct-p',signup:false})}<div class="form-error" role="alert"></div><div class="acct-actions"><button type="button" class="btn secondary" data-acct-act="profile-cancel">${T('Anuluj')}</button><button type="submit" class="btn primary">${T('Zapisz zmiany')}</button></div></form>`;
@@ -372,10 +477,90 @@ ${member&&!must?h`<section class="acct-block acct-danger"><h2>${T('Usuń konto')
 }
 function profileView(m){
  const tab=tabOf(m),p=m.profile||{},f=S.draft,must=!!p.mustChangePassword,src=avatarSrc(p,64),name=[p.firstName,p.lastName].filter(Boolean).join(' ');
- const tabs=[['profile',T('Profil')],['subscription',T('Subskrypcja')],['security',T('Bezpieczeństwo')]];
- return h`<div class="acct-wrap"><section class="acct-head panel"><span class="acct-avatar">${src?h`<img src="${src}" alt="" width="56" height="56" decoding="async">`:initials(f)?h`<span>${initials(f)}</span>`:icon('user')}</span><div class="acct-head-text"><strong>${name||m.user?.email||''}</strong>${p.username?h`<span>@${p.username}</span>`:h`<span>${T('Profil nie jest jeszcze uzupełniony.')}</span>`}<span class="acct-private">${icon('lock')}<span>${m.user?.email||''} · ${T('widoczny tylko dla Ciebie i Administratora')}</span></span></div></section>
+ const names={profile:T('Profil'),roles:T('Role'),subscription:T('Subskrypcja'),security:T('Bezpieczeństwo')},tabs=TABS(m).map(k=>[k,names[k]]),role=roleName(m);
+ return h`<div class="acct-wrap"><section class="acct-head panel"><span class="acct-avatar">${src?h`<img src="${src}" alt="" width="56" height="56" decoding="async">`:initials(f)?h`<span>${initials(f)}</span>`:icon('user')}</span><div class="acct-head-text"><strong>${name||m.user?.email||''}</strong>${p.username?h`<span>@${p.username}</span>`:h`<span>${T('Profil nie jest jeszcze uzupełniony.')}</span>`}<span class="acct-private">${icon('lock')}<span>${m.user?.email||''} · ${T('widoczny tylko dla Ciebie i Administratora')}</span></span></div>${role?h`<span class="badge teal acct-role-name">${role}</span>`:''}</section>
 <div class="acct-tabs" role="tablist" aria-label="${T('Moje konto')}">${tabs.map(([k,label])=>h`<button type="button" role="tab" class="acct-tab" id="acct-tab-${k}" data-acct-act="tab" data-tab="${k}" aria-selected="${tab===k}" aria-controls="acct-panel" tabindex="${tab===k?'0':'-1'}"${must&&k!=='security'?h` disabled`:''}>${label}</button>`)}</div>
-<section class="acct-panel panel" role="tabpanel" id="acct-panel" aria-labelledby="acct-tab-${tab}">${tab==='subscription'?subscriptionView(m):tab==='security'?securityView(m):profileTab(m)}</section></div>`;
+<section class="acct-panel panel" role="tabpanel" id="acct-panel" aria-labelledby="acct-tab-${tab}">${tab==='subscription'?subscriptionView(m):tab==='security'?securityView(m):tab==='roles'?rolesView(m,S.roles):profileTab(m)}</section></div>`;
+}
+// ---- "Role" tab (§4.5, §10.2, §17) ----
+const relationName=r=>r==='self'?T('Twój profil zawodnika'):r==='guardian'?T('Dziecko lub podopieczny'):T('Profil zawodnika');
+const supportAddress=()=>{const v=publicConfig()?.support;return typeof v==='string'&&v?v:null;};
+/** The tab: the organizer role and the account's one athlete profile (st: S.roles, the open form and the loaded athlete view). */
+export function rolesView(m,st=newRoles()){
+ const r=rolesState(m),support=supportAddress(),org=r.organizer;
+ const orgBlock=h`<section class="acct-block acct-role" aria-labelledby="acct-role-org"><h2 id="acct-role-org">${T('Organizator turnieju')}</h2><p class="acct-lead">${T('Tworzysz własne turnieje, dodajesz zawodników i prowadzisz kontrolę startową. Widzisz tylko swoje turnieje.')}</p>
+${org.blocked?h`<div class="notice acct-role-blocked" role="status">${icon('lock')}<p>${T('Administrator wyłączył tę rolę.')} ${support?h`${T('Napisz na')} <a class="acct-link" href="mailto:${support}">${support}</a>.`:''}</p></div>`
+ :h`<p class="acct-role-state"><span class="badge ${org.on?'success':'neutral'}">${org.on?T('Rola włączona'):T('Rola wyłączona')}</span></p><div class="form-error" role="alert"></div><div class="acct-actions"><button type="button" class="btn ${org.on?'secondary':'primary'}" data-acct-act="organizer-toggle" data-on="${org.on?'false':'true'}">${org.on?T('Wyłącz rolę organizatora'):T('Włącz rolę organizatora')}</button></div>${org.on?'':h`<p class="acct-hint">${T('Po włączeniu strona odświeży się i pojawią się narzędzia organizatora.')}</p>`}`}</section>`;
+ let body;
+ if(st.mode==='edit'&&st.f){
+  body=h`<form id="acct-athlete-form" class="acct-form" novalidate data-acct-athlete>${athleteFieldsHtml(st.f,{id:'acct-ra',clubs:clubList()})}<div class="form-error" role="alert">${st.error}</div><div class="acct-actions"><button type="button" class="btn secondary" data-acct-act="athlete-cancel">${T('Anuluj')}</button><button type="submit" class="btn primary">${T('Zapisz dane zawodnika')}</button></div></form>`;
+ }else if(!r.athletes.length){
+  body=h`<p class="acct-lead">${T('Nie masz jeszcze profilu zawodnika. Dodaj go, aby zgłaszać siebie albo swoje dziecko do turniejów.')}</p>${st.error?h`<div class="form-error" role="alert">${st.error}</div>`:h`<div class="form-error" role="alert"></div>`}<div class="acct-actions"><button type="button" class="btn primary" data-acct-act="athlete-add">${icon('plus')} ${T('Uzupełnij dane zawodnika')}</button></div>`;
+ }else{
+  body=h`<ul class="acct-athletes">${r.athletes.map(a=>h`<li class="acct-athlete"><span class="acct-avatar">${icon('user')}</span><div class="acct-athlete-text"><strong>${a.name}</strong><span>${relationName(a.relation)}${a.archived?h` · <span class="badge neutral">${T('Zarchiwizowany')}</span>`:''}</span></div><div class="acct-athlete-actions"><button type="button" class="btn secondary" data-acct-act="athlete-edit" data-id="${a.profileId}"${st.loading?h` disabled`:''}>${T('Edytuj dane zawodnika')}</button><button type="button" class="btn secondary" data-acct-act="athlete-archive" data-id="${a.profileId}" data-archived="${a.archived?'false':'true'}">${a.archived?T('Przywróć profil zawodnika'):T('Archiwizuj profil zawodnika')}</button><button type="button" class="btn acct-danger-btn" data-acct-act="athlete-forget" data-id="${a.profileId}">${T('Usuń dane zawodnika')}</button></div></li>`)}</ul><div class="form-error" role="alert">${st.error}</div>${m.user?.caps?.athlete&&registry.page('starts')?h`<p><a class="acct-link" href="#starts" data-page="starts">${T('Zobacz moje starty')} ${icon('arrow')}</a></p>`:''}`;
+ }
+ return h`${orgBlock}<section class="acct-block acct-role" aria-labelledby="acct-role-athlete"><h2 id="acct-role-athlete">${T('Zawodnik')}</h2>${body}</section>`;
+}
+/** caps from roles/athlete-* answers: the signed-in workspace user carries them too (menu: "Moje starty", the organizer tools). */
+function applyCaps(caps){
+ if(!caps||typeof caps!=='object')return false;const user=workspace()?.user;if(!user)return false;
+ const before=!!user.caps?.organizer;user.caps={organizer:!!caps.organizer,organizerBlocked:!!caps.organizerBlocked,organizerTrusted:!!caps.organizerTrusted,athlete:!!caps.athlete};
+ return before!==user.caps.organizer;
+}
+/** Athlete routes: the server, or in the demo the local adapter of the athlete module (Client.athleteRequest) when it exists. */
+function athleteApi(route,body){
+ if(!Client.isDemo)return body===undefined?Client.request(route):Client.request(route,{method:'POST',body});
+ return typeof Client.athleteRequest==='function'?Client.athleteRequest(route,body):Promise.reject(new Error('Ta funkcja jest niedostępna w wersji demonstracyjnej.'));
+}
+const ownName=m=>accountName(m?.profile?.firstName,m?.profile?.lastName);
+async function openAthlete(id){
+ const st=S.roles;st.error='';
+ if(!id){await loadClubs();if(S.roles!==st)return;st.mode='edit';st.f=newAthlete();repaint();focusForm();return;}
+ st.loading=true;repaint();
+ try{const [view]=await Promise.all([athleteApi('athlete'),loadClubs()]);const p=(view?.profiles||[]).find(x=>x.id===id);if(!p)throw new Error('Zawodnik nie istnieje.');st.mode='edit';st.f=newAthlete(p);}
+ catch(error){
+  // The list was drawn again while loading (the button is gone): the message goes to the drawn section, the session errors to the app.
+  st.loading=false;if(error?.status===401||error?.status===402){repaint();await ui()?.handleError?.(error);return;}
+  st.error=message(error);repaint();document.querySelector(`[data-acct-act="athlete-edit"][data-id="${CSS.escape(id)}"]`)?.focus();return;
+ }
+ st.loading=false;repaint();focusForm();
+}
+function focusForm(){document.querySelector('#acct-athlete-form input[name="relation"]:checked,#acct-athlete-form input[name="relation"]')?.focus();}
+function repaintRoles(){const form=document.getElementById('acct-athlete-form');if(form&&S.roles.f)readAthlete(form,S.roles.f);repaint();}
+async function afterRoles(r,{reload=false,message=''}={}){
+ const changed=applyCaps(r?.caps);await loadMe({force:true});
+ if(reload||changed){try{sessionStorage.setItem(NOTICE_KEY,'roles-saved');}catch{}location.reload();return;}
+ S.roles=newRoles();ui()?.render?.();
+ if(message)ui()?.toast?.(message);
+}
+async function saveAthlete(form){
+ const st=S.roles;readAthlete(form,st.f);const problem=athleteError(st.f,warsawToday());if(problem)throw problem;
+ const r=await athleteApi('athlete-save',{...(st.f.id?{id:st.f.id}:{}),...athleteBody(st.f)});
+ const then=registry.parseRoute(location.hash).params.get('then');
+ if(r?.notice==='club-pending')ui()?.toast?.(clubPending());
+ await afterRoles(r,{message:r?.notice==='club-pending'?'':T('Zapisano dane zawodnika.')});
+ if(then&&TOURNAMENT_ID.test(then))ui()?.navigate?.('guest',{t:then});
+}
+async function toggleOrganizer(el){
+ el.disabled=true;
+ const r=await Client.request('roles',{method:'POST',body:{organizer:el.dataset.on==='true'}});
+ await afterRoles(r,{reload:true});
+}
+async function archiveAthlete(el){
+ el.disabled=true;
+ const r=await athleteApi('athlete-archive',{profileId:el.dataset.id,archived:el.dataset.archived!=='false'});
+ await afterRoles(r,{message:el.dataset.archived!=='false'?T('Profil zawodnika jest w archiwum.'):T('Przywrócono profil zawodnika.')});
+}
+function openForget(id){
+ S.roles.forget=id;
+ ui().modal(T('Usunąć dane zawodnika?'),h`<form id="acct-athlete-forget-form" novalidate><p class="modal-lead">${T('Usuniemy dane zawodnika z Twojego konta. Zgłoszenia do turniejów, które jeszcze się nie odbyły, zostaną wycofane, o ile losowanie kategorii nie zostało zapisane. W wynikach i drabinkach zostaną tylko inicjały. Tej operacji nie można cofnąć.')}</p><label class="field-label acct-del-pw">${T('Hasło')}<input name="password" type="password" required autocomplete="current-password"></label><div class="form-error" role="alert"></div></form>`,h`${ui().button(T('Anuluj'),'close-modal')}<button type="submit" class="btn acct-danger-btn" form="acct-athlete-forget-form">${T('Usuń dane zawodnika')}</button>`);
+}
+async function forgetAthlete(form){
+ const id=S.roles.forget,password=form.elements.password.value;if(!id)return;
+ if(!password)throw new Error('Nieprawidłowe obecne hasło.');
+ const r=await athleteApi('athlete-forget',{profileId:id,password});
+ form.elements.password.value='';ui()?.closeModal?.();
+ await afterRoles(r,{message:T('Usunięto dane zawodnika.')});
 }
 async function saveProfile(form){
  const f=S.draft;readForm(form,f);const problem=fieldsError(f);if(problem)throw problem;
@@ -433,7 +618,7 @@ function render(page,el){
  if(!m){setHtml(el,h`<section class="panel empty-state">${ui()?.emptyMascot?.()??''}<h3>${T('Funkcje konta są chwilowo niedostępne.')}</h3><p>${T('Spróbuj ponownie później.')}</p></section>`);el.removeAttribute('aria-busy');return;}
  if(page==='profile'){ensureDraft(m);setHtml(el,profileView(m));}
  else if(page==='billing')setHtml(el,h`<div class="acct-wrap acct-narrow">${S.payment&&!S.ret?h`<div class="notice">${icon('alert')}<p>${S.payment}</p></div>`:''}${S.ret?.view?returnView(S.ret):planView(m)}</div>`);
- else if(page==='signup')setHtml(el,h`<div class="acct-wrap acct-narrow">${stepsView(3,3)}<div class="notice info-notice acct-created" tabindex="-1">${icon('check')}<p>${T('Konto utworzone. Możesz czytać czaty; pisanie włączy aktywacja konta.')}</p></div>${planView(m,{signup:true})}</div>`);
+ else if(page==='signup')setHtml(el,h`<div class="acct-wrap acct-narrow">${stepsView(signupSteps(m.user?.caps,true),'plan')}<div class="notice info-notice acct-created" tabindex="-1">${icon('check')}<p>${T('Konto utworzone. Możesz czytać czaty; pisanie włączy aktywacja konta.')}</p></div>${planView(m,{signup:true})}</div>`);
  el.removeAttribute('aria-busy');
 }
 /** Signed-in pages profile, billing and signup (step 3); el is the [data-acct-page] placeholder of the shell. */
@@ -443,8 +628,18 @@ export async function mount(page,el){
  if(page==='signup'){
   let notice=null;try{notice=sessionStorage.getItem(NOTICE_KEY);if(notice==='avatar-failed')sessionStorage.removeItem(NOTICE_KEY);}catch{}
   if(notice==='avatar-failed')ui()?.toast?.(T('Nie udało się wysłać zdjęcia. Spróbuj ponownie.'));
-  if(m&&(!m.billing?.enabled||m.access?.full)){flowEnd();ui()?.toast?.(T('Konto utworzone.'));goChat();return;}
+  const club=takeNotice()==='club-pending';
+  // Where the new account goes (§10.1): the plan while payments are required without full access, otherwise landing().
+  if(m&&land(m)){flowEnd();ui()?.toast?.(club?clubPending():T('Konto utworzone.'));return;}
+  if(club)ui()?.toast?.(clubPending());
   flowStart();
+ }
+ if(page==='profile'){
+  let notice=null;try{notice=sessionStorage.getItem(NOTICE_KEY);if(notice==='roles-saved')sessionStorage.removeItem(NOTICE_KEY);}catch{}
+  if(notice==='roles-saved')ui()?.toast?.(T('Zapisano role.'));
+  // #profile?tab=roles&add=1(&then=<t>) from the athlete call to action: the form for the first athlete profile opens at once.
+  const q=registry.parseRoute(location.hash).params;
+  if(m&&q.get('tab')==='roles'&&q.get('add')==='1'&&rolesState(m).canAdd&&S.roles.mode!=='edit'){S.roles=newRoles();S.roles.mode='edit';S.roles.f=newAthlete();loadClubs().then(()=>{if(S.roles.mode==='edit')repaintRoles();});}
  }
  if(page==='billing'){const p=takePaymentMessage();if(p)S.payment=p;const ret=readReturn();if(ret&&!S.ret?.running){startReturn(ret);return;}}
  render(page,el);
@@ -518,13 +713,17 @@ async function onSubmit(event){
  const box=form.querySelector('.form-error');if(box)box.textContent='';if(submit)submit.disabled=true;if(form.id.startsWith('acct-signup-'))S.signup.error='';
  try{
   if(form.id==='acct-signup-1')submitStepOne(form);
-  else if(form.id==='acct-signup-2')await submitSignup(form);
+  else if(form.id==='acct-signup-2')await submitStepTwo(form);
+  else if(form.id==='acct-signup-3')await submitAthlete(form);
+  else if(form.id==='acct-athlete-form')await saveAthlete(form);
+  else if(form.id==='acct-athlete-forget-form')await forgetAthlete(form);
   else if(form.id==='acct-profile-form')await saveProfile(form);
   else if(form.id==='acct-password-form')await savePassword(form);
   else if(form.id==='acct-email-form')await saveEmail(form);
   else if(form.id==='acct-delete-form')await deleteAccount(form);
  }catch(error){
-  if(form.id==='acct-signup-2'||form.id==='acct-signup-1')S.signup.error=message(error);
+  if(form.id.startsWith('acct-signup-'))S.signup.error=message(error);
+  if(form.id==='acct-athlete-form')S.roles.error=message(error);
   await failed(error,document.getElementById(form.id)||form);
  }finally{
   // A disabled button drops the focus to <body>; when the form stays (an error, the deletion's second step) it goes back to the button.
@@ -536,15 +735,22 @@ function onInput(event){
  const t=event.target,form=t.closest?.('form');if(!form?.id?.startsWith('acct-'))return;
  if(t.dataset.acctMeter!==undefined)paintMeter(t);
  if(form.id==='acct-signup-1'){S.signup.email=form.elements.email.value;S.signup.password=form.elements.password.value;return;}
+ if(athleteForm(form)){syncAthlete(form,athleteModel(form),{account:athleteAccount(form),target:t});return;}
  const f=modelFor(form);if(!f)return;readForm(form,f);
  if(t.name==='username'){f.touched=true;scheduleCheck(f,form);}
  else if((t.name==='firstName'||t.name==='lastName')&&form.id==='acct-signup-2'&&!f.touched&&f.first.trim()&&f.last.trim()){
   const c=prefillUsername(f);if(c&&c!==f.username){f.username=c;form.elements.username.value=c;scheduleCheck(f,form);}
  }
 }
+const athleteForm=form=>form?.id==='acct-signup-3'||form?.id==='acct-athlete-form';
+const athleteModel=form=>form.id==='acct-signup-3'?S.signup.athlete:S.roles.f||(S.roles.f=newAthlete());
+const athleteAccount=form=>form.id==='acct-signup-3'?accountName(S.signup.f.first,S.signup.f.last):ownName(getMe());
 function onChange(event){
  const t=event.target;if(t.matches?.('[data-acct-file]')){handleFile(t);return;}
- const form=t.closest?.('form'),f=modelFor(form);if(!f)return;
+ const form=t.closest?.('form');
+ if(form?.id==='acct-signup-1'&&t.name?.startsWith('role-')){readRoles(form,S.signup.roles);if(S.signup.roles.athlete)loadClubs();const box=document.querySelector('[data-acct-steps]');if(box)setHtml(box,stepsView(signupSteps(S.signup.roles,planStep()),'account'));return;}
+ if(athleteForm(form)){syncAthlete(form,athleteModel(form),{account:athleteAccount(form),target:t});return;}
+ const f=modelFor(form);if(!f)return;
  if(t.name==='mainSport'){f.sports=[t.value,...f.sports.filter(s=>s!==t.value)];paintSports(form,f,'select[name="mainSport"]');return;}
  readForm(form,f);
 }
@@ -553,7 +759,10 @@ async function onClick(event){
  const act=el.dataset.acctAct,form=el.closest('form');
  try{
   if(act==='to-login'){event.preventDefault();leaveSignup();}
-  else if(act==='signup-back'){S.signup.step=1;S.signup.error='';history.replaceState(null,'',location.pathname+location.search+'#signup');renderPublic(true);}
+  else if(act==='signup-back'){
+   const s=S.signup;if(s.step===3){const f3=document.getElementById('acct-signup-3');if(f3)readAthlete(f3,s.athlete);}
+   s.step=Math.max(1,s.step-1);s.error='';history.replaceState(null,'',location.pathname+location.search+(s.step===2?'#signup?step=2':'#signup'));renderPublic(true);
+  }
   else if(act==='signup-retry'){S.signup.begin=null;begin();renderPublic();}
   else if(act==='sport'){const f=modelFor(form);if(!f)return;const slug=el.dataset.sport;f.sports=f.sports.includes(slug)?f.sports.filter(s=>s!==slug):f.sports.length<SPORTS_MAX?[...f.sports,slug]:f.sports;paintSports(form,f,`[data-sport="${slug}"]`);}
   else if(act==='use-name'){const f=modelFor(form);if(!f)return;f.username=el.dataset.name;f.touched=true;form.elements.username.value=f.username;scheduleCheck(f,form);form.elements.username.focus();}
@@ -561,7 +770,13 @@ async function onClick(event){
   else if(act==='tab'){if(el.disabled)return;history.replaceState(null,'',registry.routeHash('profile',{tab:el.dataset.tab}));repaint();document.getElementById('acct-tab-'+el.dataset.tab)?.focus();}
   else if(act==='checkout')await openStripe(el,'billing-checkout',CHECKOUT_ORIGIN);
   else if(act==='portal')await openStripe(el,'billing-portal',PORTAL_ORIGIN);
-  else if(act==='later'){flowEnd();goChat();}
+  else if(act==='later'){flowEnd();if(!land(getMe(),{later:true}))goChat();}
+  else if(act==='organizer-toggle')await toggleOrganizer(el);
+  else if(act==='athlete-add')await openAthlete(null);
+  else if(act==='athlete-edit')await openAthlete(el.dataset.id);
+  else if(act==='athlete-cancel'){S.roles=newRoles();repaint();document.querySelector('[data-acct-act="athlete-add"],[data-acct-act="athlete-edit"]')?.focus();}
+  else if(act==='athlete-archive')await archiveAthlete(el);
+  else if(act==='athlete-forget')openForget(el.dataset.id);
   else if(act==='to-chat'){S.ret=null;goChat();}
   else if(act==='retry-plan'){S.ret=null;repaint();}
   else if(act==='refresh-status'){const sessionId=S.ret?.sessionId||null;startReturn({kind:'success',sessionId});}
@@ -570,7 +785,7 @@ async function onClick(event){
   else if(act==='photo-remove'){el.disabled=true;await removePhoto(form);}
   else if(act==='install'){await registry.use('pwa')?.install?.();repaint();}
   else if(act==='delete-open')openDelete();
- }catch(error){if(el.isConnected)el.disabled=false;await failed(error,form||el.closest('section'));}
+ }catch(error){if(el.isConnected)el.disabled=false;if(act==='athlete-archive')S.roles.error=message(error);await failed(error,form||el.closest('section'));}
 }
 function onKey(event){
  const tab=event.target.closest?.('.acct-tab');if(!tab||event.altKey||event.ctrlKey||event.metaKey||!['ArrowLeft','ArrowRight','Home','End'].includes(event.key))return;
@@ -589,9 +804,9 @@ function wire(){
   // Shared devices (plan §8.3 point 8): the typed e-mail, password and profile of a sign-up that was left (Back, logo, another hash)
   // are forgotten, and so is an unsaved profile draft once another page is shown (a language re-render keeps the same page).
   if(!(view==='public'&&page==='signup'))S.signup=newSignup();
-  if(!(view==='app'&&page==='profile')){S.draft=null;S.draftFor=null;}
+  if(!(view==='app'&&page==='profile')){S.draft=null;S.draftFor=null;S.roles=newRoles();}
  });
- registry.on('logout',()=>{S.signup=newSignup();S.draft=null;S.draftFor=null;S.ret=null;S.del=null;S.payment='';S.portal='';});
+ registry.on('logout',()=>{S.signup=newSignup();S.draft=null;S.draftFor=null;S.ret=null;S.del=null;S.payment='';S.portal='';S.roles=newRoles();S.clubs=null;});
  // Back/forward cache: a page left for another site keeps its DOM and no 'painted' follows its return, so the typed sign-up
  // and the passwords are dropped before it is stored, and a sign-up shown again starts over (§8.3 point 8).
  addEventListener('pagehide',forget);
@@ -599,5 +814,5 @@ function wire(){
 }
 function forget(){
  S.signup=newSignup();if(S.del)S.del.password='';
- for(const el of document.querySelectorAll('[data-acct-public] input:not([type=hidden]):not([type=checkbox]):not([type=radio]),[data-acct-public] textarea,[data-acct-page] input[type=password],#acct-delete-form input[type=password]'))el.value='';
+ for(const el of document.querySelectorAll('[data-acct-public] input:not([type=hidden]):not([type=checkbox]):not([type=radio]),[data-acct-public] textarea,[data-acct-page] input[type=password],#acct-delete-form input[type=password],#acct-athlete-forget-form input[type=password]'))el.value='';
 }

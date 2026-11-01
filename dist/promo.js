@@ -45,7 +45,12 @@ export const ACCESS={
   free:{eyebrow:'Konto MatBravo',title:'Dołącz do rozmowy o turnieju',
    text:'Załóż konto, aby pisać na czacie turnieju i widzieć, kto rozmawia. Konta klubów nadal zakłada Administrator turnieju.',
    benefits:['Pisanie we wszystkich czatach','Pełne profile uczestników','Czaty turniejów'],cta:'Załóż konto',note:'Rejestracja zajmuje około minuty.'}
- }
+ },
+ // A tournament that is open and takes self-entries (PLAN-REJESTRACJA-ROLE §10.1, UX-9): with a sign-up ('paid' or 'free'),
+ // accessFor() gives these texts and the CTA leads to #signup?as=athlete&t=<id>; the note stays the one of the kind (price).
+ athlete:{eyebrow:'Zapisy otwarte',title:'Zgłoś się do tego turnieju',
+  text:'Załóż konto zawodnika i zgłoś siebie albo swoje dziecko. Status zgłoszenia, kategorię i drabinkę zobaczysz w „Moich startach”.',
+  benefits:['Zgłoszenie bez pośredników','Status zgłoszenia i drabinka w jednym miejscu','Czat turnieju'],cta:'Załóż konto zawodnika i zgłoś się'}
 };
 const FIELDS=['eyebrow','title','text','benefits','cta','note'],INITIAL=Object.fromEntries(FIELDS.map(k=>[k,ACCESS[k]]));
 /** Switches the access card to kind 'login' | 'paid' | 'free' (unknown kinds give 'login'). options.price() returns the formatted
@@ -60,4 +65,12 @@ export function setAccessKind(kind,{price,translate}={}){
  delete ACCESS.note;
  Object.defineProperty(ACCESS,'note',label?{configurable:true,enumerable:true,get:()=>{const p=label();return p?fill(variant.note,p):ACCESS.variants.free.note;}}:{configurable:true,enumerable:true,writable:true,value:variant.note});
  return ACCESS.kind;
+}
+/** Texts of the access card for tournament t of the guest preview: the athlete offer (ACCESS.athlete, with the sign-up target
+ * {as:'athlete', t}) when sign-up is open (kind 'paid' or 'free') and t is open with self-entries (selfEntry true, a sparse field
+ * of the guest view); otherwise the current kind's texts without a target. The note is always the kind's (price, sign-up time). */
+export function accessFor(t){
+ const self=ACCESS.kind!=='login'&&!!t&&t.status==='open'&&t.selfEntry===true&&typeof t.id==='string'&&t.id!=='';
+ const base={kind:ACCESS.kind,eyebrow:ACCESS.eyebrow,title:ACCESS.title,text:ACCESS.text,benefits:ACCESS.benefits,cta:ACCESS.cta,note:ACCESS.note,target:null};
+ return self?{...base,...ACCESS.athlete,kind:'athlete',target:{as:'athlete',t:t.id}}:base;
 }

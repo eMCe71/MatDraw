@@ -59,7 +59,7 @@
 .acct-card .notice{margin:0}
 .acct-form{display:grid;gap:16px;min-width:0}
 .acct-card .field-label,.acct-form .field-label,.acct-field .field-label{font-size:12px;color:#4b6079;font-weight:600}
-.acct-card input:not([type=checkbox]):not([type=file]),.acct-card select,.acct-form input:not([type=checkbox]):not([type=file]),.acct-form select{width:100%;min-height:44px;font-size:14px;border-color:var(--chat-field-border,#8296b0)}
+.acct-card input:not([type=checkbox]):not([type=radio]):not([type=file]),.acct-card select,.acct-form input:not([type=checkbox]):not([type=radio]):not([type=file]),.acct-form select{width:100%;min-height:44px;font-size:14px;border-color:var(--chat-field-border,#8296b0)}
 .acct-card input::placeholder,.acct-form input::placeholder{color:#627690}
 .acct-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}
 .acct-field{display:grid;gap:7px;min-width:0}
@@ -189,6 +189,40 @@ section.acct-block{display:grid;gap:12px}
 .acct-sub-state{font-size:12px;padding:6px 10px;border-radius:999px;white-space:normal}
 .acct-sub .acct-actions{justify-content:flex-start}
 
+/* Roles (PLAN-REJESTRACJA-ROLE §4.5, §10.1-§10.2): "Kim jesteś?" in step 1, "Kogo zgłaszasz?" and the athlete step, the "Role" tab. */
+.acct-column>[data-acct-steps]:empty{display:none}
+.acct-roles-pick,.acct-relation{border:0;margin:0;padding:0;min-width:0;display:grid;gap:8px}
+.acct-roles-pick legend,.acct-relation legend{font-size:12px;color:#4b6079;font-weight:600;margin-bottom:6px;padding:0}
+.acct-req{font-weight:500;color:var(--chat-meta,#5b6f89)}
+.acct-options{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.acct-option{display:flex;align-items:flex-start;gap:10px;padding:12px 14px;border:1px solid #d3e0ee;border-radius:10px;background:#fff;cursor:pointer;min-width:0}
+.acct-option:hover{border-color:#0072bc;background:#f7fbff}
+.acct-option:has(input:checked){border-color:#0072bc;background:#eef7fd;box-shadow:inset 0 0 0 1px #0072bc}
+.acct-option:has(input:focus-visible){outline:3px solid #0072bc;outline-offset:2px}
+.acct-option input{width:18px;height:18px;min-height:0;margin:2px 0 0;flex-shrink:0;accent-color:#0072bc}
+.acct-option span{display:grid;gap:3px;min-width:0}
+.acct-option strong{font-size:13.5px;color:#102447}
+.acct-option small{font-size:11.5px;line-height:1.55;color:#4b6079}
+.acct-minor{margin:-4px 0 0;padding:10px 12px;border:1px solid #f0c9cb;border-radius:8px;background:#fdf3f3;color:#7d3a3f;font-size:12.5px;line-height:1.6;font-weight:600}
+.acct-minor:empty{display:none}
+.acct-locked{padding:9px 12px;border-radius:8px;background:#fff6e5;color:#7d5a26!important}
+.acct-club{min-width:0}
+.acct-club .club-picker{border:0;padding:0;margin:0}
+.acct-club .club-picker legend{font-size:12px;color:#4b6079;font-weight:600;padding:0}
+.acct-head .acct-role-name{margin-left:auto;align-self:flex-start;white-space:nowrap}
+.acct-role .acct-actions{justify-content:flex-start}
+.acct-role-state{display:flex;align-items:center;gap:8px}
+.acct-role-blocked{align-items:flex-start}
+.acct-role-blocked p{font-size:12.5px;line-height:1.6}
+.acct-athletes{list-style:none;margin:0;padding:0;display:grid;gap:10px}
+.acct-athlete{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:14px 16px;border:1px solid var(--line);border-radius:10px;background:#fbfdff}
+.acct-athlete .acct-avatar{width:44px;height:44px}
+.acct-athlete-text{display:grid;gap:3px;min-width:0;flex:1 1 180px}
+.acct-athlete-text strong{font-size:15px;color:#102447;overflow-wrap:anywhere}
+.acct-athlete-text>span{font-size:12px;color:#4b6079}
+.acct-athlete-actions{display:flex;flex-wrap:wrap;gap:8px}
+.acct-athlete-actions .btn{min-height:40px;font-size:12.5px;padding:8px 13px}
+
 /* Photo crop dialog (§7.5): 280 px canvas, keyboard and button alternatives to dragging (WCAG 2.5.7). */
 .acct-crop{display:grid;gap:14px;justify-items:center}
 .acct-crop .modal-lead{font-size:12px;text-align:center;margin:0}
@@ -222,6 +256,11 @@ section.acct-block{display:grid;gap:12px}
  .acct-plan-head{flex-direction:column}
  .acct-plan .acct-price{text-align:left}
  .acct-photo{gap:14px}
+ .acct-options{grid-template-columns:1fr}
+ .acct-head{flex-wrap:wrap}
+ .acct-athlete-actions{width:100%}
+ .acct-head .acct-role-name{margin-left:0}
+ .acct-athlete-actions .btn{flex:1 1 auto}
  .acct-banner{flex-wrap:wrap}
  .acct-banner p{flex-basis:calc(100% - 40px)}
 }
