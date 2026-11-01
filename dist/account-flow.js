@@ -23,7 +23,7 @@ import {t as T,getLanguage,translateMessage} from './i18n.js';
 import {COUNTRIES,SPORTS,SPORTS_MAX,CLUB_MAX,validateUsername,normalizeUsername,validateName,suggestUsernames,slugName,cleanText} from './profile-data.js';
 import {openCrop} from './avatar-crop.js';
 import {flowStart,flowEnd,readReturn,clearReturn,formatPrice,formatDate,publicConfig,takePaymentMessage,avatarSrc,KNOWN_DEVICE,NOTICE_KEY,SIGNUP_NOTICE,TOURNAMENT_ID,parseTarget,saveTarget,readTarget,clearTarget} from './account-boot.js';
-import {newAthlete,athleteBody,athleteError,athleteFieldsHtml,readAthlete,syncAthlete,accountName} from './athlete-form.js';
+import {newAthlete,athleteBody,athleteProblems,markAthleteProblems,athleteFieldsHtml,readAthlete,syncAthlete,accountName} from './athlete-form.js';
 import {warsawToday} from './guest-view.js';
 import {ATHLETES_PER_ACCOUNT} from './workspace.js';
 
@@ -372,7 +372,7 @@ function repaintAthlete(){
  renderPublic();if(name)document.querySelector(`#acct-signup-3 [name="${CSS.escape(name)}"]`)?.focus();
 }
 async function submitAthlete(form){
- const s=S.signup;readAthlete(form,s.athlete);const problem=athleteError(s.athlete,warsawToday());if(problem)throw problem;
+ const s=S.signup;readAthlete(form,s.athlete);const problems=athleteProblems(s.athlete,warsawToday());if(problems.length)throw new Error(markAthleteProblems(form,problems));
  return submitSignup();
 }
 async function submitSignup(){
@@ -551,7 +551,7 @@ async function afterRoles(r,{reload=false,message=''}={}){
  if(message)ui()?.toast?.(message);
 }
 async function saveAthlete(form){
- const st=S.roles;readAthlete(form,st.f);const problem=athleteError(st.f,warsawToday());if(problem)throw problem;
+ const st=S.roles;readAthlete(form,st.f);const problems=athleteProblems(st.f,warsawToday());if(problems.length)throw new Error(markAthleteProblems(form,problems));
  const r=await athleteApi('athlete-save',{...(st.f.id?{id:st.f.id}:{}),...athleteBody(st.f)});
  const then=registry.parseRoute(location.hash).params.get('then');
  if(r?.notice==='club-pending')ui()?.toast?.(clubPending());

@@ -448,6 +448,19 @@ test('"Role" tab states: organizer on, off and blocked (with the support address
  assert.match(src,/athleteApi\('athlete-save',\{\.\.\.\(st\.f\.id\?\{id:st\.f\.id\}:\{\}\),\.\.\.athleteBody\(st\.f\)\}\)/);
  for(const lang of ['pl','en'])inLanguage(lang,()=>{for(const me of [memberMe(),memberMe({organizer:true,athlete:true},[ZOSIA]),memberMe({organizerBlocked:true},[{...ZOSIA,archived:true}])])assert.doesNotMatch(view(me),lang==='en'?/[ąćęłńśźż]/:/\[object|undefined/,lang);});
 });
+test('final review F4: every problem of the athlete form at once, in the order of the form, with a summary of the field names',()=>{
+ const empty={...athlete.newAthlete(),relation:'guardian'};
+ assert.deepEqual(athlete.athleteProblems(empty,'2026-11-01').map(p=>p.field),['name','birthDate','sex','weight','height','grade','club']);
+ assert.equal(athlete.problemsSummary(athlete.athleteProblems(empty,'2026-11-01')),'Sprawdź pola (7): imię i nazwisko, data urodzenia, płeć, waga, wzrost, stopień, klub.');
+ assert.deepEqual(athlete.athleteProblems(athlete.newAthlete(),'2026-11-01')[0].field,'relation','"who is entered" first');
+ const full={...empty,name:'Ola Zielona',birthDate:'2015-03-01',sex:'F',weight:'30',height:'130',grade:'8',club:{none:true}};
+ assert.deepEqual(athlete.athleteProblems(full,'2026-11-01'),[]);
+ // A problem of the whole form: a child under 16 entering themself is tied to the birth date, with the server's text alone.
+ const minor=athlete.athleteProblems({...full,relation:'self'},'2026-11-01');
+ assert.deepEqual(minor.map(p=>p.field),['birthDate']);assert.equal(athlete.problemsSummary(minor),'Osoby poniżej 16 lat rejestruje rodzic lub opiekun. Poproś go o założenie konta.');
+ assert.deepEqual(athlete.athleteProblems({...full,gradeType:'dan',grade:'10'},'2026-11-01').map(p=>p.field),['grade'],'a dan grade out of range is the grade');
+ inLanguage('en',()=>assert.equal(athlete.problemsSummary(athlete.athleteProblems({...full,name:'',weight:''},'2026-11-01')),'Check these fields (2): full name, weight.'));
+});
 test('final review F2: the account deletion warns about the kept athlete name and offers the initials (ticked) only with an athlete profile',()=>{
  assert.equal(String(flow.deleteAthleteView([])),'','no athlete profile: nothing');
  const html=String(flow.deleteAthleteView([ZOSIA]));
@@ -852,6 +865,18 @@ test('demo in a browser: the "Role" tab of the parent and of the organizer, PL a
    await page2.selectOption('#acct-athlete-form [name="gradeType"]','dan');
    assert.deepEqual(await page2.$$eval('#acct-athlete-form [name="grade"] option',o=>o.map(x=>x.value)),['','1','2','3','4','5','6','7','8','9'],'dan grades 1-9');
    await noOverflow(page2,'demo roles organizer form '+w+' '+lang);await shot(page2,`demo-roles-organizer-form-${lang}-${w}`);
+   // Final review F4 (the birth date above is filled): one submit names every empty field, marks each (aria-invalid, its own message) and focuses the first one.
+   await page2.click('#acct-athlete-form button[type="submit"]');
+   await page2.waitForFunction(()=>/\S/.test(document.querySelector('#acct-athlete-form .form-error')?.textContent||''));
+   assert.match(await page2.textContent('#acct-athlete-form .form-error'),lang==='pl'?/^Sprawdź pola \(\d\): imię i nazwisko, płeć, waga, wzrost, stopień, klub\.$/:/^Check these fields \(\d\): full name, sex, weight, height, grade, club\.$/);
+   assert.equal(await page2.evaluate(()=>document.activeElement?.name),'athleteName','the focus is on the first wrong field');
+   assert.deepEqual(await page2.$$eval('#acct-athlete-form [aria-invalid="true"]',els=>[...new Set(els.map(e=>e.name.startsWith('athleteClub')?'club':e.name))]),['athleteName','sex','weight','height','grade','club']);
+   const described=await page2.getAttribute('#acct-athlete-form [name="weight"]','aria-describedby');
+   assert.ok(described&&(await page2.textContent('#'+described.split(' ').at(-1))).length>0,'the field names its own message');
+   await page2.fill('#acct-athlete-form [name="athleteName"]','Ola Zielona');
+   assert.equal(await page2.getAttribute('#acct-athlete-form [name="athleteName"]','aria-invalid'),null,'a changed field loses its mark');
+   assert.equal(await page2.getAttribute('#acct-athlete-form [name="weight"]','aria-invalid'),'true','the others keep theirs');
+   await noOverflow(page2,'demo roles form errors '+w+' '+lang);await shot(page2,`demo-roles-form-errors-${lang}-${w}`);
    await page2.click('[data-acct-act="athlete-cancel"]');await page2.waitForSelector('[data-acct-act="athlete-add"]');
    // #profile?tab=roles&add=1 (the athlete call to action) opens the form once: add=1 leaves the address, so "Anuluj" followed by
    // a re-render of the page (language switch) does not open it again; then= stays for the way back until "Anuluj".

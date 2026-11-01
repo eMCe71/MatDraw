@@ -270,3 +270,6 @@ section.acct-block{display:grid;gap:12px}
 }
 @media (prefers-reduced-motion:reduce){.acct-spin{animation:none;border-top-color:#c9dcef;border-right-color:#0072bc}}
 @media print{.acct-join,.acct-banner,.acct-help-panel{display:none!important}}
+/* A problem of one field of the athlete form (final review F4): next to the field, tied by aria-describedby */
+.acct-field-error{display:block;margin-top:5px;font-size:12px;line-height:1.5;color:#b35a51;font-weight:500;letter-spacing:0;text-transform:none}
+[data-acct-athlete] .field-label input[aria-invalid="true"],[data-acct-athlete] .field-label select[aria-invalid="true"]{border-color:#b35a51}

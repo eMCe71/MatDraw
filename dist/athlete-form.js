@@ -8,7 +8,7 @@
  * Validation is workspace.js athleteFields (the mirror of Domain::athleteFields), so the messages are the server's.
  * Templates: h`…` only (the values are the person's own data and the club names from public-clubs). */
 import {h} from './registry.js';
-import {t as T,gradeLabel} from './i18n.js';
+import {t as T,gradeLabel,translateMessage} from './i18n.js';
 import {athleteFields,ageAt,MINOR_SELF_AGE,UNAFFILIATED} from './workspace.js';
 import {pickerHtml,readPicker} from './club-picker.js';
 import {warsawToday} from './guest-view.js';
@@ -60,6 +60,54 @@ export function athleteBody(f){
 export function athleteError(f,today=warsawToday()){
  try{athleteFields(athleteBody(f),today);return null;}catch(error){return new Error(String(error?.message||error));}
 }
+// Every field is checked on its own (final review F4): the field under test with valid stand-ins for the others, so one submit names
+// every problem. A problem of the whole (a person under 16 entering themself) comes last, tied to the birth date.
+const STAND_IN={relation:'guardian',name:'Ala Test',birthDate:'2000-01-01',sex:'F',weight:40,height:150,gradeType:'cup',grade:1,club:{none:true}};
+const FIELD_NAMES={relation:()=>T('kogo zgłaszasz'),name:()=>T('imię i nazwisko'),birthDate:()=>T('data urodzenia'),sex:()=>T('płeć'),weight:()=>T('waga'),height:()=>T('wzrost'),gradeType:()=>T('rodzaj stopnia'),grade:()=>T('stopień'),club:()=>T('klub')};
+/** All problems of the fields: [{field, message}] in the order of the form (message: the server's text, translated when shown). */
+export function athleteProblems(f,today=warsawToday()){
+ const body=athleteBody(f),out=[];
+ for(const field of Object.keys(STAND_IN)){
+  const probe={...STAND_IN,[field]:body[field]};
+  if(field==='grade'&&['cup','dan'].includes(body.gradeType))probe.gradeType=body.gradeType;
+  try{athleteFields(probe,today);}catch(error){out.push({field,message:String(error?.message||error)});}
+ }
+ if(!out.length){const whole=athleteError(f,today);if(whole)out.push({field:'birthDate',message:whole.message});}
+ return out;
+}
+/** One line for the form's alert: the single message, or the names of the fields to check. */
+export function problemsSummary(problems){
+ if(!problems?.length)return '';
+ if(problems.length===1)return translateMessage(problems[0].message);
+ return T('Sprawdź pola ({n}): {fields}.',{n:problems.length,fields:problems.map(p=>FIELD_NAMES[p.field]?.()||p.field).join(', ')});
+}
+const CONTROL={relation:'input[name="relation"]',name:'[name="athleteName"]',birthDate:'[name="birthDate"]',sex:'[name="sex"]',weight:'[name="weight"]',height:'[name="height"]',gradeType:'[name="gradeType"]',grade:'[name="grade"]',club:'[data-club-picker] input,[data-club-picker] select'};
+const fieldOf=target=>{const n=target?.name;if(!n)return null;if(n==='athleteName')return 'name';if(target.closest?.('[data-club-picker]'))return 'club';return Object.hasOwn(CONTROL,n)?n:null;};
+/** Removes the marks of markAthleteProblems (of one field, or all). */
+export function clearAthleteProblems(form,field=null){
+ if(!form?.querySelectorAll)return;
+ for(const el of form.querySelectorAll('.acct-field-error'))if(!field||el.dataset.field===field)el.remove();
+ for(const el of form.querySelectorAll('[aria-invalid]')){
+  if(field&&el.dataset.problem!==field)continue;
+  el.removeAttribute('aria-invalid');delete el.dataset.problem;
+  const ids=(el.getAttribute('aria-describedby')||'').split(' ').filter(x=>x&&!x.includes('-err-'));if(ids.length)el.setAttribute('aria-describedby',ids.join(' '));else el.removeAttribute('aria-describedby');
+ }
+}
+/** Marks every problem at its field (aria-invalid, aria-describedby to a message next to it), focuses the first one and returns
+ * the summary for the form's alert. */
+export function markAthleteProblems(form,problems){
+ clearAthleteProblems(form);let first=null;
+ for(const p of problems){
+  const controls=[...form.querySelectorAll(CONTROL[p.field]||'[data-none]')];if(!controls.length)continue;
+  const id=(form.id||'acct-a')+'-err-'+p.field,note=document.createElement('span');
+  note.className='acct-field-error';note.id=id;note.dataset.field=p.field;note.textContent=translateMessage(p.message);
+  const host=controls[0].closest('label.field-label')||controls[0].closest('fieldset')||controls[0].parentElement;host.append(note);
+  for(const c of controls){c.setAttribute('aria-invalid','true');c.dataset.problem=p.field;c.setAttribute('aria-describedby',[...(c.getAttribute('aria-describedby')||'').split(' ').filter(Boolean),id].join(' '));}
+  first??=controls.find(c=>!c.disabled)||null;
+ }
+ try{first?.focus();}catch{}
+ return problemsSummary(problems);
+}
 
 // ---- Template ----
 const option=(value,label,current)=>h`<option value="${value}"${String(current)===String(value)?h` selected`:''}>${label}</option>`;
@@ -94,6 +142,8 @@ export function readAthlete(form,f){
 /** After an input in the form: the name prefill of "Siebie", the grade list of the grade type and the under-16 message. */
 export function syncAthlete(form,f,{account='',today=warsawToday(),target=null}={}){
  if(!form)return f;
+ // A change of a field takes its problem mark away (final review F4); the other marks stay until the next submit.
+ const changed=fieldOf(target);if(changed){clearAthleteProblems(form,changed);if(changed==='gradeType')clearAthleteProblems(form,'grade');}
  if(target?.name==='relation'){const next=relationChange(f,target.value,account);if(next.name!==f.name&&form.elements.athleteName)form.elements.athleteName.value=next.name;Object.assign(f,next);}
  else{readAthlete(form,f);if(target?.name==='athleteName'&&f.name!==f.prefilled)f.prefilled=null;}
  if(target?.name==='gradeType'){const grade=form.querySelector('[data-acct-grade]');if(grade){const keep=GRADES[f.gradeType==='dan'?'dan':'cup'].includes(Number(f.grade))?f.grade:'';f.grade=keep;grade.replaceChildren(...optionNodes(f.gradeType,keep));}}
