@@ -40,11 +40,20 @@ const signIn=async(email,password=PASSWORD)=>{const c=await fresh();const r=awai
 const sid=c=>c.cookie.split('=')[1];
 const KEYS={user:['id','clubId','email','role','active'],profile:['publicId','username','firstName','lastName','country','sports','clubText','showClub','nameDisplay','avatar','complete','usernameChangeAt','mustChangePassword'],
  access:['full','state','until','canPost','block','mutedUntil'],billing:['enabled','enforce','mode','currency','amounts','exempt','hasCustomer','pending'],features:['signup','avatars','chat']};
+// me adds the role contract (PLAN-REJESTRACJA-ROLE §4.4, §8.1, §8.2): user.caps always, athletes always (a list),
+// features.signupMode and features.selfEntry, and features.pendingOrganizers for the Administrator only.
+const ME_KEYS={...KEYS,user:[...KEYS.user,'caps'],features:[...KEYS.features,'signupMode','selfEntry']},CAPS=['organizer','organizerBlocked','organizerTrusted','athlete'];
+const NO_CAPS={organizer:false,organizerBlocked:false,organizerTrusted:false,athlete:false};
 async function me(c){
  const r=await raw('me',{cookie:c.cookie});assert.equal(r.status,200,JSON.stringify(r.data));
  assert.equal(r.headers.get('set-cookie'),null);assert.equal(r.headers.get('cache-control'),'private, no-store');
- assert.deepEqual(Object.keys(r.data),['user','profile','access','billing','features']);
- for(const [k,keys] of Object.entries(KEYS))assert.deepEqual(Object.keys(r.data[k]),keys,k);
+ assert.deepEqual(Object.keys(r.data),['user','profile','access','billing','features','athletes']);
+ const admin=r.data.user.role==='admin';
+ for(const [k,keys] of Object.entries(ME_KEYS))assert.deepEqual(Object.keys(r.data[k]),k==='features'&&admin?[...keys,'pendingOrganizers']:keys,k);
+ assert.deepEqual(Object.keys(r.data.user.caps),CAPS);assert.ok(Object.values(r.data.user.caps).every(v=>typeof v==='boolean'));
+ assert.ok(['off','free','paid'].includes(r.data.features.signupMode));assert.equal(r.data.features.signupMode==='off',!r.data.features.signup);
+ assert.equal(r.data.features.selfEntry,true);if(admin)assert.ok(Number.isInteger(r.data.features.pendingOrganizers)&&r.data.features.pendingOrganizers>=0);
+ assert.ok(Array.isArray(r.data.athletes));
  // The composer block follows the documented order; with the chat not installed or off, only 'off' remains.
  const {access:a,features:f}=r.data;assert.equal(a.canPost,a.block===null);
  if(!f.chat)assert.notEqual(a.block,null);
@@ -119,11 +128,12 @@ test('a member signs in with a 30-day cookie, gets an empty workspace and can ru
 test('me returns the §4.3 shape for admin, staff and members; public-config for guests',{skip},async()=>{
  const t=now(),admin=new Client();await admin.login(...ADMIN);
  const a=await me(admin);
- assert.deepEqual(a.user,{...admin.data.user});assert.match(a.profile.publicId,/^[0-9A-Za-z]{12}$/);
+ assert.deepEqual(a.user,{...admin.data.user,caps:NO_CAPS},'staff get no member roles (§4.2)');assert.deepEqual(a.athletes,[]);assert.match(a.profile.publicId,/^[0-9A-Za-z]{12}$/);
  assert.deepEqual({...a.profile,publicId:0},{publicId:0,username:null,firstName:null,lastName:null,country:null,sports:[],clubText:null,showClub:false,nameDisplay:'initial',avatar:null,complete:false,usernameChangeAt:null,mustChangePassword:false});
  assert.deepEqual(a.access,{full:true,state:'staff',until:null,canPost:false,block:'profile',mutedUntil:null});
  assert.deepEqual(a.billing,{enabled:true,enforce:true,mode:'test',currency:null,amounts:{pln:899,usd:299},exempt:true,hasCustomer:false,pending:false});
- assert.equal(a.features.signup,true);assert.ok(['gd-webp','gd-jpeg','off'].includes(a.features.avatars));assert.equal(typeof a.features.chat,'boolean');
+ assert.equal(a.features.signup,true);assert.equal(a.features.signupMode,'paid','Settings::effective: sign-up on, payments enforced');
+ if(!fixture('roles-flags').trustRequired)assert.equal(a.features.pendingOrganizers,0,'trustRequired=false (§17): nobody awaits the confirmation');assert.ok(['gd-webp','gd-jpeg','off'].includes(a.features.avatars));assert.equal(typeof a.features.chat,'boolean');
  assert.equal((await me(admin)).profile.publicId,a.profile.publicId,'the profile row is created once');
  // Staff account created by the Admin (no billing row): free by default.
  await admin.cmd('account.save',{email:'klub.me@test.example',password:PASSWORD,clubName:'Klub Me',role:'club'});
@@ -133,7 +143,8 @@ test('me returns the §4.3 shape for admin, staff and members; public-config for
  const avatar='9f2c41ab07de0123456789abcdef0123.webp';
  const free=fixture('member',{email:'wolny.me@test.example',password:PASSWORD,profile:{firstName:'Marta',lastName:'Kowalska',username:'marta.me',sports:['taekwondo','karate'],clubText:'KS Tygrys',showClub:true,avatar,usernameChangedAt:t-10*86400},exempt:true});
  const f=await me(await signIn('wolny.me@test.example'));
- assert.deepEqual(f.user,{id:free.id,clubId:null,email:'wolny.me@test.example',role:'member',active:true});
+ assert.deepEqual(f.user,{id:free.id,clubId:null,email:'wolny.me@test.example',role:'member',active:true,caps:NO_CAPS});assert.deepEqual(f.athletes,[]);
+ assert.ok(!('pendingOrganizers' in f.features),'members never see the count');
  assert.deepEqual(f.profile,{publicId:free.publicId,username:'marta.me',firstName:'Marta',lastName:'Kowalska',country:'PL',sports:['taekwondo','karate'],clubText:'KS Tygrys',showClub:true,
   nameDisplay:'initial',avatar:'9f2c41ab07de',complete:true,usernameChangeAt:t-10*86400+30*86400,mustChangePassword:false});
  assert.deepEqual(f.access,{full:true,state:'free',until:null,canPost:blockOr(f,null)===null,block:blockOr(f,null),mutedUntil:null});
@@ -167,7 +178,7 @@ test('me returns the §4.3 shape for admin, staff and members; public-config for
  for(const cookie of [undefined,admin.cookie]){
   const pc=await raw('public-config',{cookie});assert.equal(pc.status,200);assert.equal(pc.headers.get('set-cookie'),null);
   assert.equal(pc.headers.get('cache-control'),'public, max-age=60');assert.doesNotMatch(pc.headers.get('vary')||'',/cookie/i);
-  assert.deepEqual(pc.data,{signup:true,billing:true,amounts:{pln:899,usd:299},avatars:pc.data.avatars,support:'pomoc@example.test'});assert.equal(typeof pc.data.avatars,'boolean');
+  assert.deepEqual(pc.data,{signup:true,signupMode:'paid',billing:true,amounts:{pln:899,usd:299},avatars:pc.data.avatars,support:'pomoc@example.test',roles:true});assert.equal(typeof pc.data.avatars,'boolean');
  }
  const pcPost=await raw('public-config',{method:'POST',body:{}});assert.equal(pcPost.status,405);assert.equal(pcPost.headers.get('allow'),'GET');
 });
