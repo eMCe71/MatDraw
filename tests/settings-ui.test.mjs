@@ -273,6 +273,30 @@ test('R1.2: "Sprawdź Stripe" shows the result and then loads the server view ag
   assert.equal(button.disabled,false);
  }finally{Object.assign(S.io,io);delete globalThis.document;S.state.view=null;}
 });
+test('R2.1: a 503 from "Sprawdź Stripe" (failed check saved, then stripe_unavailable) loads the server view again; a 429 does not',async()=>{
+ const log=[],sent=[];
+ const before=VIEW({version:3,signup:'on',payments:'paid',mode:'paid',effective:{mode:'paid',degraded:null},stripeCheck:{ok:true,stale:false,checkedAt:'2023-11-14T22:13:20+00:00',mode:'test'}});
+ const after=VIEW({version:4,signup:'on',payments:'paid',mode:'paid',effective:{mode:'off',degraded:'stripe-check'},stripeCheck:{ok:false,stale:false,checkedAt:'2023-11-15T22:13:20+00:00',mode:'test'}});
+ const fail=(status,code)=>Object.assign(new Error(code),{status,data:{code}});
+ let replies=[];
+ registry.provide('ui',{toast:m=>log.push('toast:'+m)});
+ globalThis.document={querySelector:()=>null};
+ const io={...S.io};S.io.request=async route=>{sent.push(route);const r=replies.shift();if(r instanceof Error)throw r;return r;};
+ try{
+  S.state.view=before;assert.deepEqual(S.stripeState(S.state.view),{stale:false,paused:false});
+  replies=[fail(503,'stripe_unavailable'),after];
+  const button={disabled:false,isConnected:true};await S.checkStripe(button);
+  assert.deepEqual(sent,['admin-stripe-check','admin-settings'],'the server view is loaded again after a 503');
+  assert.equal(log.length,1,'one toast with the error');
+  assert.equal(S.state.view,after,'the server view replaces the old one');
+  assert.deepEqual(S.stripeState(S.state.view),{stale:false,paused:true},'paid sign-up shows as paused');
+  assert.equal(button.disabled,false);
+  sent.length=0;log.length=0;S.state.view=before;replies=[fail(429,'rate_limited')];
+  await S.checkStripe(button);
+  assert.deepEqual(sent,['admin-stripe-check'],'a refusal that saved nothing keeps the view');
+  assert.equal(S.state.view,before);assert.equal(log.length,1);
+ }finally{Object.assign(S.io,io);delete globalThis.document;S.state.view=null;}
+});
 test('confirm organizer on a tournament card: a blocked organizer is reported, not confirmed',()=>{
  assert.deepEqual(C.trustOutcome({id:'m',caps:{organizer:true,organizerTrusted:true}}),{ok:true,message:'Organizator potwierdzony.'});
  const blocked=C.trustOutcome({id:'m',caps:{organizer:false,organizerBlocked:true,organizerTrusted:true}});

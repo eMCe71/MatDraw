@@ -284,7 +284,12 @@ const ACTS={
 export const checkStripe=el=>busy(el,async()=>{
   let check=null;
   try{check=(await io.request('admin-stripe-check',{method:'POST',body:{}}))?.stripeCheck||null;}
-  catch(error){check=error?.data?.stripeCheck||null;if(!check){toast(translateMessage(error.message));return;}}
+  catch(error){
+   check=error?.data?.stripeCheck||null;
+   // A server error (503 stripe_unavailable) comes after the failed check was saved, so the server view changed (paused, degraded): load it again (R2.1).
+   // A refusal that saved nothing (429, 409 without stripeCheck, 401/403) keeps the view.
+   if(!check){toast(translateMessage(error.message));if(Number(error?.status)>=500)await load();return;}
+  }
   // The result at once; then the server's view again, so stale, effective and degraded match what applies now (R1.2).
   if(st.view)st.view={...st.view,stripe:{...st.view.stripe,check}};
   paint();toast(check?.ok?T('Stripe działa.'):checkError(check?.error)||T('Stripe zwrócił błąd.'));
