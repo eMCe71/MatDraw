@@ -1,5 +1,5 @@
 import {CONFIG} from './runtime-config.js';
-import {initialWorkspace,execute,publicWorkspace,DomainError} from './workspace.js';
+import {initialWorkspace,execute,publicWorkspace,organizer,DomainError,UNAFFILIATED} from './workspace.js';
 import {guestUpcoming,guestTournament,warsawToday} from './guest-view.js';
 import {emit} from './registry.js';
 const KEY='matdraw.workspace.v2',SESSION='matdraw.session.v2';
@@ -39,17 +39,67 @@ export async function request(route,{method='GET',body,contentType,signal}={}){
  if(isDemo)throw new Error('Ta funkcja jest niedostępna w wersji demonstracyjnej.');
  return call(typeof route==='string'?{route}:route,{method,body,contentType,signal});
 }
+/** Demo accounts of the community roles (PLAN-REJESTRACJA-ROLE §10.7): an organizer and a parent with one child's athlete profile
+ * (one athlete profile per account, §17). Their passwords are set by init() like those of every new demo account. */
+const DEMO_MEMBERS=[{id:'demo-organizer',clubId:null,email:'organizer@matdraw.example',role:'member',active:true,authVersion:1,organizer:true,organizerBlockedAt:null,organizerTrustedAt:null},
+ {id:'demo-athlete',clubId:null,email:'athlete@matdraw.example',role:'member',active:true,authVersion:1,organizer:false,organizerBlockedAt:null,organizerTrustedAt:null}];
+/** Brings a demo stored by an earlier release up to this one (§10.4, DR-14), in place; idempotent: a second run changes nothing.
+ * Adds the "Niezrzeszony" club, verified:true to clubs, selfEntry:false and rev:0 to tournaments, staffRev, the flags of the demo
+ * (organizers 'on' and trustRequired false: full automation, §17) and the two community demo accounts with the parent's profile.
+ * Returns whether anything changed. */
+export function upgradeDemo(data){
+ if(!data||typeof data!=='object'||!Array.isArray(data.users)||!Array.isArray(data.clubs)||!Array.isArray(data.tournaments)||!Array.isArray(data.profiles))return false;
+ let changed=false;const set=(o,k,v)=>{if(o[k]===undefined){o[k]=v;changed=true;}};
+ for(const c of data.clubs)set(c,'verified',true);
+ if(!data.clubs.some(c=>c.id===UNAFFILIATED)){data.clubs.push({id:UNAFFILIATED,name:data.clubs.some(c=>c.name==='Niezrzeszony')?'Niezrzeszony (bez klubu)':'Niezrzeszony',verified:true});changed=true;}
+ for(const t of data.tournaments){set(t,'selfEntry',false);set(t,'rev',0);}
+ set(data,'staffRev',Number(data.revision)||0);
+ if(!data.flags||typeof data.flags!=='object'){data.flags={organizers:'on',trustRequired:false};changed=true;}
+ for(const m of DEMO_MEMBERS)if(!data.users.some(u=>u.id===m.id||String(u.email).toLowerCase()===m.email)){data.users.push({...m});changed=true;
+  if(m.id==='demo-athlete'&&!data.profiles.some(a=>a.ownerId===m.id)){const club=data.clubs.filter(c=>c.id!==UNAFFILIATED&&!c.mergedInto)[1]||data.clubs.find(c=>c.id!==UNAFFILIATED)||data.clubs[0];
+   data.profiles.push({id:'demo-athlete-child',name:'Zuzanna Demo',clubId:club.id,sex:'F',birthDate:'2012-03-08',weight:42,height:152,gradeType:'cup',grade:7,events:['forms'],champion:false,createdBy:m.id,createdAt:1793484000,archived:false,ownerId:m.id,relation:'guardian',guardianDeclaredAt:1793484000,rev:0});}}
+ return changed;
+}
+/** The demo's actor fields of a member (mirror of Actors::of): caps and the athlete profiles of the account. */
+export function demoActor(userId){
+ read();const u=db?.users.find(x=>x.id===userId);if(!u)return null;
+ const athletes=db.profiles.filter(a=>a.ownerId===u.id).map(a=>({profileId:a.id,name:a.name,relation:a.relation??null,archived:!!a.archived}));
+ return {caps:{organizer:organizer(u),organizerBlocked:u.organizerBlockedAt!=null,organizerTrusted:u.organizerTrustedAt!=null,athlete:athletes.some(a=>!a.archived)},athletes};
+}
+/** The workspace view of the demo with user.caps, as the server's bootstrap gives it (§4.4). */
+function view(u){const out=publicWorkspace(db,u);if(u.role==='member')out.user.caps=demoActor(u.id).caps;return out;}
+async function setPasswords(){for(const u of db.users)if(!u.passwordHash)await credentials(u,'MatDrawDemo2026!');}
 export async function init(){
  if(!isDemo){const s=await api('session');return s.user?await bootstrap():null;}
- read();if(!db){let old;try{old=JSON.parse(localStorage.getItem('matdraw.demo.v1')||'null');}catch{}db=initialWorkspace(old);for(const u of db.users)await credentials(u,'MatDrawDemo2026!');save();}
- try{const saved=JSON.parse(sessionStorage.getItem(SESSION)||'null');session=saved?.id;authVersion=saved?.version;return me()?publicWorkspace(db,me()):null;}catch{return null;}
+ read();if(!db){let old;try{old=JSON.parse(localStorage.getItem('matdraw.demo.v1')||'null');}catch{}db=initialWorkspace(old);upgradeDemo(db);await setPasswords();save();}
+ else if(upgradeDemo(db)){await setPasswords();save();}
+ try{const saved=JSON.parse(sessionStorage.getItem(SESSION)||'null');session=saved?.id;authVersion=saved?.version;return me()?view(me()):null;}catch{return null;}
 }
-export async function bootstrap(){if(!isDemo)return api('bootstrap');read();return publicWorkspace(db,me());}
+/** The workspace. With {t,rev} (the hall screen's polling, §8.1) the answer is {unchanged:true} while that tournament's rev is rev. */
+export async function bootstrap({t,rev}={}){
+ const ask=typeof t==='string'&&t!==''&&Number.isInteger(rev);
+ if(!isDemo)return call(ask?{route:'bootstrap',t,rev}:{route:'bootstrap'});
+ read();const out=view(me());
+ if(ask){const x=out.tournaments.find(x=>x.id===t);if(x&&(Number(x.rev)||0)===rev)return {unchanged:true};}
+ return out;
+}
+/** Step-up for the organizer's tools (§4.6): a request answered 401 {code:'reauth'} asks unlock(error) for the password and, when
+ * it resolves true (organizer-unlock succeeded), runs again exactly once; a cancelled prompt or a second refusal throws. */
+export async function withReauth(fn,unlock){
+ try{return await fn();}
+ catch(error){if(error?.status!==401||error?.code!=='reauth'||typeof unlock!=='function'||!await unlock(error))throw error;}
+ return fn();
+}
+/** organizer-unlock {password}: confirms the password for the organizer's tools (new CSRF token in the answer). */
+export async function unlock(password){
+ if(!isDemo)return api('organizer-unlock','POST',{password});
+ read();const u=me();if(await hash(String(password??''),u.passwordSalt)!==u.passwordHash)throw new DomainError('Nieprawidłowe obecne hasło.',422);return {ok:true};
+}
 export async function login(email,password){
  if(!isDemo){await api('login','POST',{email,password});return bootstrap();}
  read();const u=db.users.find(u=>u.email.toLowerCase()===email.trim().toLowerCase()&&u.active);
  if(!u||await hash(password,u.passwordSalt)!==u.passwordHash)throw new Error('Nieprawidłowy e-mail lub hasło.');
- session=u.id;authVersion=u.authVersion;sessionStorage.setItem(SESSION,JSON.stringify({id:session,version:authVersion}));return publicWorkspace(db,u);
+ session=u.id;authVersion=u.authVersion;sessionStorage.setItem(SESSION,JSON.stringify({id:session,version:authVersion}));return view(u);
 }
 export async function logout(){if(!isDemo)await api('logout','POST',{});session=null;authVersion=null;sessionStorage.removeItem(SESSION);}
 export async function command(type,payload,expectedRevision){
@@ -68,7 +118,7 @@ export async function command(type,payload,expectedRevision){
   }
   db=next;save();const updated=db.users.find(u=>u.id===actor.id);
   if(result.id===actor.id&&updated.active){authVersion=updated.authVersion;sessionStorage.setItem(SESSION,JSON.stringify({id:session,version:authVersion}));}
-  return {workspace:publicWorkspace(db,me()),result};
+  return {workspace:view(me()),result};
  });
 }
 export const dataKey=KEY;

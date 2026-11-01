@@ -559,6 +559,9 @@ function queueAvatar(img,src){
  avatarIo??=new IntersectionObserver(entries=>{for(const e of entries)if(e.isIntersecting){avatarIo.unobserve(e.target);const s=e.target.dataset.src;delete e.target.dataset.src;if(s)avatars.add(e.target,s);}},{rootMargin:'200px'});
  img.dataset.src=src;queueMicrotask(()=>{if(img.isConnected)avatarIo.observe(img);});
 }
+/** Badge of the tournament's creator in its channel (flag o): 1 staff or a confirmed organizer, 2 a community organizer not yet
+ * confirmed by MatBravo (PLAN-REJESTRACJA-ROLE §5.6, PS-12); null without the flag. */
+export const orgLabel=o=>o===2?T('Organizator (społeczność)'):o?T('Organizator'):null;
 function messageItem(v,c,{m,group}){
  const own=!!m.a&&m.a===myPid()||!!m.pending,p=m.a?S.people.get(m.a):null,ghost=m.g!=null&&!m.a,gone=!m.a&&!ghost&&!m.pending;
  const art=el('article','chat-msg'+(group?' cont':'')+(own?' own':'')+(m.x?' tomb':'')+(m.hidden?' is-hidden':''));
@@ -577,7 +580,7 @@ function messageItem(v,c,{m,group}){
   if(who?.cc){const cc=el('span','chat-cc',who.cc);cc.title=regionName(who.cc);cc.setAttribute('aria-hidden','true');meta.append(cc,el('span','sr-only',regionName(who.cc)));}
   if(who?.sp?.[0]){const s=who.sp[0];meta.appendChild(el('span','chat-sport'+(s==='karate'?' karate':s==='taekwondo'?'':' other'),sportName(s)));}
   if(who?.mod)meta.appendChild(el('span','chat-mod',T('Moderator')));
-  if(m.o)meta.appendChild(el('span','chat-org',T('Organizator')));
+  if(m.o)meta.appendChild(el('span','chat-org',orgLabel(m.o)));
   if(own)meta.appendChild(el('span','chat-you',T('Ty')));
  }else{
   const bar=el('span','ghost-name w'+((m.g??0)%3+1));bar.setAttribute('aria-hidden','true');meta.append(bar,el('span','sr-only',T('Uczestnik ukryty dla gości')));

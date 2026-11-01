@@ -127,3 +127,43 @@ test('app.js: after a 401 the view follows the hash (public page, guest flow or 
  assert.ok(!/renderLogin\(/.test(branch),'no login page drawn under a hash that names a public page');
  assert.match(app,/function renderPublic\(message=''\)\{/);assert.match(app,/if\(!id\)\{guest=null;promo=null;renderLogin\(message\);return;\}/);
 });
+
+test('event-chat (chat-boot.js) is a tournament page for an organizer: a member sees it only with a tournament in the workspace',async()=>{
+ // A fresh process: this file registers its own 'chat' page above, chat-boot.js registers the real ones.
+ const {execFileSync}=await import('node:child_process');
+ const code=`import {registry} from './dist/registry.js';import {setLanguage} from './dist/i18n.js';setLanguage('pl',{persist:false});await import('./dist/chat-boot.js');
+  const org={role:'member',caps:{organizer:true}},plain={role:'member',caps:{organizer:false}},ids=(u,t)=>registry.navItems(u,{tournament:t}).map(x=>x.id);
+  console.log(JSON.stringify({orgWith:ids(org,{id:'t-1'}),orgWithout:ids(org,null),plainWith:ids(plain,{id:'t-1'}),roles:registry.page('event-chat').roles,staff:ids({role:'club'},{id:'t-1'})}));`;
+ const out=JSON.parse(execFileSync(process.execPath,['--input-type=module','-e',code],{cwd:new URL('..',import.meta.url),encoding:'utf8'}).trim().split('\n').at(-1));
+ assert.deepEqual(out.roles,['admin','editor','club','member']);
+ assert.ok(out.orgWith.includes('event-chat'),'an organizer with an active tournament gets the tournament chat');
+ assert.ok(!out.orgWithout.includes('event-chat'),'no tournament, no event page');
+ assert.ok(out.plainWith.includes('event-chat'),'registry rule: event pages need a tournament; app.js gives a member without the organizer role none (communityOnly)');
+ assert.ok(out.staff.includes('event-chat'));
+});
+
+test('roles in the registry (PLAN-REJESTRACJA-ROLE §10.4): communityOnly, organizerUser, visible(user), defaultPage(role,user)',()=>{
+ const org={role:'member',caps:{organizer:true}},plain={role:'member',caps:{organizer:false,athlete:true}},bare={role:'member'};
+ assert.deepEqual([registry.communityOnly(org),registry.communityOnly(plain),registry.communityOnly(bare),registry.communityOnly({role:'editor'}),registry.communityOnly(null)],[false,true,true,false,false]);
+ assert.deepEqual([registry.organizerUser(org),registry.organizerUser(plain),registry.organizerUser({role:'admin',caps:{organizer:true}})],[true,false,false]);
+ assert.equal(defaultPage('member',org),'tournaments','an organizer lands on the tournaments page');
+ assert.equal(defaultPage('member',plain),'chat');assert.equal(defaultPage('editor',org),'tournaments');
+ registerPage({id:'qa-athlete',label:'Starts',nav:'global',roles:['member'],order:15,visible:u=>!!u?.caps?.athlete,render:()=>h``});
+ assert.ok(allows(page('qa-athlete'),'member',plain));assert.ok(!allows(page('qa-athlete'),'member',org),'visible(user) hides the page');
+ assert.ok(!allows(page('qa-athlete'),'member'),'without a user a page with visible() is not shown');
+ assert.ok(navItems(plain).some(x=>x.id==='qa-athlete'));assert.ok(!navItems(org).some(x=>x.id==='qa-athlete'));
+ registerPage({id:'qa-throws',label:'X',nav:'global',roles:['member'],visible:()=>{throw new Error('broken');},render:()=>h``});
+ assert.ok(!allows(page('qa-throws'),'member',plain),'a failing visible() hides the page instead of breaking the menu');
+ // Without user, the signed-in user of that role (ui.getWorkspace) decides: app.js templates call defaultPage(role).
+ provide('ui',{getWorkspace:()=>({user:org})});assert.equal(defaultPage('member'),'tournaments');
+ provide('ui',{getWorkspace:()=>({user:{role:'admin'}})});assert.equal(defaultPage('member'),'chat','another role signed in: not used');
+ provide('ui',{getWorkspace:()=>{throw new Error('x');}});assert.equal(defaultPage('member'),'chat');provide('ui',undefined);
+});
+
+test('copyText: true when the clipboard takes the text, false for a refusal or no clipboard (the caller shows the field)',async()=>{
+ const seen=[];
+ assert.equal(await registry.copyText('https://matbravo.com/#guest?t=x',{writeText:async v=>{seen.push(v);}}),true);assert.deepEqual(seen,['https://matbravo.com/#guest?t=x']);
+ assert.equal(await registry.copyText('x',{writeText:async()=>{throw new DOMException('denied','NotAllowedError');}}),false);
+ assert.equal(await registry.copyText('x',{writeText:()=>{throw new Error('sync');}}),false);
+ assert.equal(await registry.copyText('x',null),false);assert.equal(await registry.copyText('x',{}),false);
+});

@@ -142,3 +142,59 @@ test('guestTournaments: community flags and the current club of every entry, as 
  assert.deepEqual(t.entries.slice(0,4).map(e=>e.currentClub),[{id:'c-new',name:null},{id:'club-2',name:'KS Tiger Kraków'},{id:'unaffiliated',name:''},{id:t.entries[3].clubId,name:db.clubs.find(c=>c.id===t.entries[3].clubId).name}]);
  assert.equal(db.tournaments[0].entries[0].currentClub,undefined,'the workspace is not changed');
 });
+
+// ---- Wave 2 (organizer-frontend, §10.4, §10.7, DR-14): a demo stored by an earlier release is upgraded in place ----
+class MemoryStorage{#m=new Map();get length(){return this.#m.size;}key(i){return [...this.#m.keys()][i]??null;}getItem(k){return this.#m.has(k)?this.#m.get(k):null;}setItem(k,v){this.#m.set(k,String(v));}removeItem(k){this.#m.delete(k);}clear(){this.#m.clear();}}
+/** The demo as the release before PLAN-REJESTRACJA-ROLE stored it: no "Niezrzeszony", no verified/selfEntry/rev/staffRev, no members. */
+function preRelease(db){
+ const old=structuredClone(db);delete old.staffRev;delete old.flags;
+ old.clubs=old.clubs.filter(c=>c.id!=='unaffiliated').map(({verified,...c})=>c);
+ old.tournaments=old.tournaments.map(({selfEntry,rev,...t})=>t);
+ old.users=old.users.filter(u=>u.role!=='member').map(({organizer,organizerBlockedAt,organizerTrustedAt,...u})=>u);
+ old.profiles=old.profiles.filter(p=>!p.ownerId);return old;
+}
+test('upgradeDemo: a pre-release stored demo gets the new fields, the flags of full automation and the community accounts; a second run changes nothing',async()=>{
+ globalThis.localStorage??=new MemoryStorage();globalThis.sessionStorage??=new MemoryStorage();
+ const {upgradeDemo}=await import('../dist/client.js');
+ const old=preRelease(seed());
+ assert.equal(upgradeDemo(old),true);
+ assert.ok(old.clubs.some(c=>c.id==='unaffiliated'&&c.verified===true),'the "Niezrzeszony" club');assert.ok(old.clubs.every(c=>c.verified===true));
+ assert.ok(old.tournaments.every(t=>t.selfEntry===false&&t.rev===0),'existing tournaments: no self-entries (R11), rev 0');
+ assert.equal(old.staffRev,old.revision);assert.deepEqual(old.flags,{organizers:'on',trustRequired:false},'§17: organizers trusted without confirmation in the demo');
+ const org=old.users.find(u=>u.id==='demo-organizer'),athlete=old.users.find(u=>u.id==='demo-athlete');
+ assert.deepEqual([org.role,org.organizer,org.email,athlete.role,athlete.organizer],['member',true,'organizer@matdraw.example','member',false]);
+ const own=old.profiles.filter(p=>p.ownerId==='demo-athlete');assert.equal(own.length,1,'one athlete profile per account (§17)');assert.equal(own[0].relation,'guardian');
+ const once=structuredClone(old);assert.equal(upgradeDemo(old),false,'idempotent');assert.deepEqual(old,once);
+ // A current demo (initialWorkspace) only gains the flags; data the person changed is kept.
+ const fresh=seed();fresh.tournaments[1].selfEntry=true;fresh.clubs[0].verified=false;assert.equal(upgradeDemo(fresh),true);
+ assert.deepEqual([fresh.tournaments[1].selfEntry,fresh.clubs[0].verified,fresh.users.length],[true,false,5]);assert.equal(upgradeDemo(fresh),false);
+ // An account with the e-mail of a demo member already there (someone made it) is not duplicated.
+ const taken=preRelease(seed());taken.users.push({id:'x1',email:'organizer@matdraw.example',role:'editor',clubId:'club-1',active:true,authVersion:1});upgradeDemo(taken);
+ assert.equal(taken.users.filter(u=>u.email==='organizer@matdraw.example').length,1);
+ for(const bad of [null,{},{users:[]},'x'])assert.equal(upgradeDemo(bad),false);
+});
+test('init() upgrades a stored pre-release demo once, keeps the staff passwords and enables the organizer and athlete demo logins',async()=>{
+ globalThis.localStorage??=new MemoryStorage();globalThis.sessionStorage??=new MemoryStorage();
+ const Client=await import('../dist/client.js');localStorage.clear();sessionStorage.clear();
+ assert.equal(await Client.init(),null,'a new demo, nobody signed in');
+ const stored=JSON.parse(localStorage.getItem(Client.dataKey)),old=preRelease(stored);
+ old.tournaments[0].name='Turniej zmieniony przez osobę';localStorage.setItem(Client.dataKey,JSON.stringify(old));
+ await Client.init();const upgraded=localStorage.getItem(Client.dataKey),db=JSON.parse(upgraded);
+ assert.equal(db.tournaments[0].name,'Turniej zmieniony przez osobę','the person\'s data stays');
+ assert.equal(db.users.find(u=>u.id==='demo-admin').passwordHash,stored.users.find(u=>u.id==='demo-admin').passwordHash,'staff passwords unchanged');
+ assert.ok(db.users.filter(u=>u.role==='member').every(u=>u.passwordHash&&u.passwordSalt),'the new demo accounts have passwords');
+ await Client.init();assert.equal(localStorage.getItem(Client.dataKey),upgraded,'a second start writes nothing');
+ const o=await Client.login('organizer@matdraw.example','MatDrawDemo2026!');
+ assert.deepEqual([o.user.role,o.user.caps.organizer,o.user.caps.athlete],['member',true,false]);
+ assert.deepEqual(o.tournaments,[],'upgraded tournaments have no self-entries (R11), so an organizer sees none of the staff tournaments');
+ assert.ok(!JSON.stringify(o).includes('Zuzanna'),'no other account\'s athlete');
+ const created=await Client.command('tournament.save',{name:'Puchar Organizatora',city:'Opole',date:'2027-03-14',status:'open',mat:'Mata 1'},o.revision);
+ const mine=created.workspace.tournaments.find(t=>t.id===created.result.id);assert.deepEqual([mine.selfEntry,mine.community,mine.trusted],[true,true,true],'trustRequired=false: trusted at once');
+ const a=await Client.login('athlete@matdraw.example','MatDrawDemo2026!');
+ assert.deepEqual([a.user.role,a.user.caps.organizer,a.user.caps.athlete,a.tournaments.length,a.profiles.length],['member',false,true,0,0],'an athlete has no workspace');
+ assert.deepEqual(Client.demoActor('demo-athlete').athletes.map(x=>[x.name,x.relation,x.archived]),[['Zuzanna Demo','guardian',false]]);
+ // The hall screen's polling: {unchanged:true} while the tournament's rev is the same.
+ await Client.login('editor@matdraw.example','MatDrawDemo2026!');const ws=await Client.bootstrap(),t=ws.tournaments.find(x=>x.id==='t-winter-2027');
+ assert.deepEqual(await Client.bootstrap({t:t.id,rev:t.rev}),{unchanged:true});assert.ok((await Client.bootstrap({t:t.id,rev:t.rev+1})).tournaments,'another rev: the workspace');
+ assert.ok((await Client.bootstrap({t:'missing',rev:0})).tournaments);
+});
