@@ -15,6 +15,8 @@ class AppError extends \RuntimeException{public function __construct(string $mes
  * 404 for a missing and an unseen tournament ('Turniej nie jest dostępny.') or profile ('Zawodnik nie istnieje.').
  * Revisions (§5.8): stale() rejects a command only when the objects it touches changed after the client's revision;
  * execute() stamps every changed tournament and profile (rev) and staff accounts or existing clubs (staffRev).
+ * Log lines naming an athlete carry its profileId (audit()), so forgetting a profile rewrites only lines about it and
+ * never another tenant's tournament for a namesake; publicData() shows text and time only.
  */
 final class Domain {
  public const ORGANIZER_DAY=3,ORGANIZER_ACTIVE=10,COMMUNITY_DAY_GLOBAL=50,ORGANIZER_PROFILES_DAY=300,CLUBS_DAY_PER_USER=3,CLUBS_DAY_GLOBAL=30,MINOR_SELF_AGE=16,ADULT_AGE=18,ATHLETES_PER_ACCOUNT=5,RETENTION_MONTHS=24;
@@ -23,7 +25,7 @@ final class Domain {
  /** Web addresses, e-mails and numbers of 9+ digits in texts of members (§5.4); the same pattern is CONTACT in dist/workspace.js. */
  public const CONTACT='~(?:https?://|www\.|@|(?<![\p{L}\p{N}_])[\p{L}\p{N}-]+\.(?:pl|com|eu|net|org|info|io|me|app|link|ly|gg|online|site|shop|xyz)(?![\p{L}\p{N}_])|\p{Nd}(?:[\s./-]?\p{Nd}){8,})~iu';
  public const DELETED='Dane usunięte';
- /** Tournament log lines that end with an athlete's name (entries, self-entries, check-in, withdrawals); retain() turns the name into initials. */
+ /** Tournament log lines that end with an athlete's name (entries, self-entries, check-in, withdrawals); audit() marks each with the athlete's profileId, retain() and forgetProfile() turn the name into initials. */
  private const NAMED='/^((?:Zgłoszono|Zmieniono zgłoszenie|Zgłoszenie własne|Zmieniono zgłoszenie własne|Zmieniono klub w zgłoszeniu|Kontrola startowa|Wycofano zgłoszenie): )(.+)$/su';
  private const TOURNAMENT_SCOPE=['entry.remove','checkin.save','draw.create','result.save','result.clear','tournament.hide'];
  public static function id():string{return bin2hex(random_bytes(16));}
@@ -87,7 +89,7 @@ final class Domain {
    if(!self::sees($db,$u,$t,$profiles))continue;
    $manager=$admin||self::manages($u,$t);$community=self::community($db,$t);$hidden=($t['hiddenBy']??null)!==null;$entries=[];
    foreach($t['entries'] as $e){if($manager?$hidden&&!$admin&&!empty($e['self']):!self::entryVisible($db,$u,$t,$e,$profiles))continue;$entries[]=$e;$used[$e['clubId']??'']=true;}
-   $full=$manager||$role==='editor'&&!$community;$draws=$full?$t['draws']:[];$activity=$full?$t['activity']:[];
+   $full=$manager||$role==='editor'&&!$community;$draws=$full?$t['draws']:[];$activity=$full?array_map(static fn($x)=>array_intersect_key($x,['text'=>1,'time'=>1]),$t['activity']):[];
    // A tournament hidden by the Administrator: its manager loses the self-entries (PS-16), the draws holding them and the log naming them.
    if($manager&&$hidden&&!$admin){$ids=array_column($entries,'id');$draws=array_filter($draws,fn($d)=>!array_diff(array_filter($d['slots']),$ids));$activity=[];}
    $v=$t;$v['entries']=$entries;$v['draws']=(object)array_map(static function($d){$d['results']=(object)$d['results'];return $d;},$draws);$v['activity']=$activity;
@@ -145,7 +147,8 @@ final class Domain {
   if($staffChanged)$db['staffRev']=$R;$changed=$changed||$staffChanged||count($clubs)!==count($db['clubs'])||($db['withdrawals']??[])!==($before['withdrawals']??[]);
   if($changed||$always)$db['revision']=$R;return $changed;
  }
- private static function audit(array &$t,string $message):void{array_unshift($t['activity'],['text'=>$message,'time'=>gmdate('c')]);$t['activity']=array_slice($t['activity'],0,40);}
+ /** A log line; $profileId marks a line naming an athlete (NAMED), so forgetProfile() finds it by the profile and never by the name text. publicData() shows text and time only. */
+ private static function audit(array &$t,string $message,?string $profileId=null):void{array_unshift($t['activity'],['text'=>$message,'time'=>gmdate('c')]+($profileId===null?[]:['profileId'=>$profileId]));$t['activity']=array_slice($t['activity'],0,40);}
  private static function reconcile(array &$t,array $entries):void{$cats=Rules::categories($entries);foreach($t['draws'] as $key=>$d){$c=$cats[$key]??null;if(!$c||count($c['athletes'])<3||Rules::signature($c['athletes'])!==$d['signature']){if(count($d['results']))throw new AppError('Ta zmiana narusza kategorię z wynikami. Najpierw wycofaj zależne wyniki.',409);unset($t['draws'][$key]);}}$t['entries']=array_values($entries);}
  public static function password(string $password):string{if(strlen($password)<12||strlen($password)>72)throw new AppError('Hasło musi mieć od 12 do 72 bajtów.');return password_hash($password,defined('PASSWORD_ARGON2ID')?PASSWORD_ARGON2ID:PASSWORD_DEFAULT);}
  public static function execute(array &$db,string $actorId,string $type,array $p,int $revision):array {
@@ -217,33 +220,39 @@ final class Domain {
   $status=($t['hiddenBy']??null)!==null?($t['hiddenFrom']??$t['status']):$t['status'];if($status==='finished')return false;
   if($status==='closed')foreach(Rules::categories($t['entries']) as $key=>$c)if(isset($t['draws'][$key])&&in_array($entryId,array_column($c['athletes'],'id'),true))return false;
   $next=$t;try{self::reconcile($next,array_filter($t['entries'],fn($x)=>$x['id']!==$entryId));}catch(AppError){return false;}
-  $t=$next;self::audit($t,'Wycofano zgłoszenie: '.GuestView::initials((string)$e['name']));return true;
+  $t=$next;self::audit($t,'Wycofano zgłoszenie: '.GuestView::initials((string)$e['name']),$e['profileId']);return true;
  }
  /**
   * Forgets profile $id: every entry is detached; without remaining entries the profile leaves $db (persist() deletes the
-  * row), otherwise it is anonymized. Tournament logs never keep its name: every line ending with a name the profile had
-  * (the current one and those of its snapshots, also of entries withdrawn earlier) gets initials in every tournament,
-  * unless an entry of another profile there carries the same name. $initials (profile.forget, athlete.forget) also turns
-  * the name in the remaining snapshots into initials; otherwise they keep it as results history (O7). Returns 'deleted',
-  * 'anonymized' or 'missing'.
+  * row), otherwise it is anonymized. Tournament logs never keep its name: every line marked with its id gets initials in
+  * every tournament, whatever name it carries (also one from before a rename or of an entry withdrawn earlier). Lines
+  * without a mark (written before 0007) are matched by a name the profile has (the current one and those of its
+  * snapshots) only in tournaments where it has an entry or that the actor $u manages (the Administrator: all), never in
+  * other tenants' tournaments, and not when an entry of another profile there carries that name. $initials
+  * (profile.forget, athlete.forget) also turns the name in the remaining snapshots into initials; otherwise they keep it
+  * as results history (O7). Returns 'deleted', 'anonymized' or 'missing'.
   */
- public static function forgetProfile(array &$db,string $id,bool $initials=false):string {
+ public static function forgetProfile(array &$db,string $id,bool $initials=false,?array $u=null):string {
   $i=null;foreach($db['profiles'] as $k=>$a)if($a['id']===$id)$i=$k;if($i===null)return 'missing';
   $names=[(string)($db['profiles'][$i]['name']??'')];foreach($db['tournaments'] as $t)foreach($t['entries'] as $e)if($e['profileId']===$id)$names[]=(string)$e['name'];
   $names=array_values(array_diff(array_unique($names),['',self::DELETED]));$left=false;
   foreach($db['tournaments'] as $k=>$t){
-   if(in_array($id,array_column($t['entries'],'profileId'),true)&&!self::detach($t,$id))$left=true;
+   $has=in_array($id,array_column($t['entries'],'profileId'),true);if($has&&!self::detach($t,$id))$left=true;
    if($initials)foreach($t['entries'] as $j=>$e)if($e['profileId']===$id)$t['entries'][$j]['name']=GuestView::initials((string)$e['name']);
-   self::unname($t,$id,$names);$db['tournaments'][$k]=$t;
+   self::unname($t,$id,$names,$has||$u!==null&&self::manages($u,$t));$db['tournaments'][$k]=$t;
   }
   if(!$left){array_splice($db['profiles'],$i,1);return 'deleted';}
   $db['profiles'][$i]=array_replace($db['profiles'][$i],['name'=>self::DELETED,'birthDate'=>null,'ownerId'=>null,'relation'=>null,'guardianDeclaredAt'=>null,'guardianConsentAt'=>null,'consentBy'=>null,'pendingClubName'=>null,'archived'=>true]);
   return 'anonymized';
  }
- /** Log lines of $t ending with ': '.<one of $names> get initials, unless an entry of a profile other than $id still carries that name (a namesake). */
- private static function unname(array &$t,string $id,array $names):void {
-  if(!$names)return;$kept=[];foreach($t['entries'] as $e)if($e['profileId']!==$id)$kept[(string)$e['name']]=true;
-  foreach($t['activity'] as $j=>$x){$s=(string)$x['text'];foreach($names as $n)if(!isset($kept[$n])&&str_ends_with($s,': '.$n)){$t['activity'][$j]['text']=substr($s,0,-strlen($n)).GuestView::initials($n);break;}}
+ /** Log lines of $t marked with $id get initials; unmarked ones ($legacy) when they end with ': '.<one of $names> and no entry of another profile carries that name (a namesake). */
+ private static function unname(array &$t,string $id,array $names,bool $legacy):void {
+  $kept=[];foreach($t['entries'] as $e)if($e['profileId']!==$id)$kept[(string)$e['name']]=true;
+  foreach($t['activity'] as $j=>$x){
+   $s=(string)$x['text'];$mark=$x['profileId']??null;
+   if($mark===$id){if(preg_match(self::NAMED,$s,$m))$t['activity'][$j]['text']=$m[1].GuestView::initials($m[2]);continue;}
+   if($mark===null&&$legacy)foreach($names as $n)if(!isset($kept[$n])&&str_ends_with($s,': '.$n)){$t['activity'][$j]['text']=substr($s,0,-strlen($n)).GuestView::initials($n);break;}
+  }
  }
  /** Account deletion (§6.6, PHP only, idempotent): owned profiles forgotten; as organizer, upcoming tournaments hidden by 'system' (self-entries of others detached, tombstone 'system') and created profiles forgotten. */
  public static function forgetMember(array &$db,string $userId):array {
@@ -341,7 +350,7 @@ final class Domain {
     if(!self::managesProfile($u,$a,$db)||($a['ownerId']??null)!==null||($a['createdBy']??null)!==$u['id'])throw new AppError('Brak uprawnień.',403);
     foreach($db['tournaments'] as $t)if($t['status']==='finished'&&in_array($a['id'],array_column($t['entries'],'profileId'),true))throw new AppError('Zawodnik ma zgłoszenia w zakończonych turniejach. Usunięcie danych może zlecić Administrator.',409);
    }
-   return ['id'=>$a['id'],'state'=>self::forgetProfile($db,$a['id'],true)];
+   return ['id'=>$a['id'],'state'=>self::forgetProfile($db,$a['id'],true,$u)];
   }
   // Own athlete profiles of a member (§6.1, §4.5, §6.6).
   if(in_array($type,['athlete.save','athlete.archive','athlete.forget','entry.self'],true)&&!$member)throw new AppError('Brak uprawnień.',403);
@@ -367,7 +376,7 @@ final class Domain {
    if($archived&&self::pending($db,$old['id']))throw new AppError('Najpierw wycofaj zgłoszenia do turniejów, które jeszcze się nie odbyły.',409);
    $a=&self::entity($db['profiles'],$old['id'],'Zawodnik');$a['archived']=$archived;return ['id'=>$a['id']];
   }
-  if($type==='athlete.forget'){$old=$owned($p['profileId']??null);if(!$old)throw new AppError('Zawodnik nie istnieje.',404);return ['id'=>$old['id'],'state'=>self::forgetProfile($db,$old['id'],true)];}
+  if($type==='athlete.forget'){$old=$owned($p['profileId']??null);if(!$old)throw new AppError('Zawodnik nie istnieje.',404);return ['id'=>$old['id'],'state'=>self::forgetProfile($db,$old['id'],true,$u)];}
   if($type==='entry.self')return self::selfEntry($db,$u,$p,$owned);
   // Clubs (§5.5): the Administrator only.
   if(str_starts_with($type,'club.')){
@@ -425,14 +434,14 @@ final class Domain {
    }else $entry=self::snapshot($db,$a,$t,$p,$old);
    Rules::validate($entry);
    $list=$old?array_map(fn($e)=>$e['id']===$entry['id']?$entry:$e,$t['entries']):[...$t['entries'],$entry];self::reconcile($t,$list);
-   self::audit($t,$clubChanged?'Zmieniono klub w zgłoszeniu: '.$entry['name']:($old?'Zmieniono zgłoszenie: ':'Zgłoszono: ').$entry['name']);
+   self::audit($t,$clubChanged?'Zmieniono klub w zgłoszeniu: '.$entry['name']:($old?'Zmieniono zgłoszenie: ':'Zgłoszono: ').$entry['name'],$entry['profileId']);
    if(!$old)self::unWithdraw($db,$entry['profileId'],$t['id']);return ['id'=>$entry['id']];
   }
   if(!self::manages($u,$t))throw new AppError('Brak uprawnień do zarządzania tym turniejem.',403);if($t['status']==='finished')throw new AppError('Zakończony turniej jest tylko do odczytu.',409);
   if($type==='checkin.save'){
    $a=self::entity($t['entries'],$p['id']??null,'Zgłoszenie');$presence=$p['presence']??'';if(!in_array($presence,['present','pending','absent'],true))throw new AppError('Niepoprawny status.');$weight=$presence==='present'?self::number($p['actualWeight']??null,10,250):$a['actualWeight'];
    foreach($t['draws'] as $d)if(in_array($a['id'],$d['slots'],true)&&count($d['results'])&&($a['presence']!==$presence||$a['actualWeight']!=$weight))throw new AppError('Zawodnik ma zapisane wyniki.',409);
-   self::reconcile($t,array_map(fn($e)=>$e['id']===$a['id']?array_replace($a,['presence'=>$presence,'actualWeight'=>$weight]):$e,$t['entries']));self::audit($t,'Kontrola startowa: '.$a['name']);return ['id'=>$a['id']];
+   self::reconcile($t,array_map(fn($e)=>$e['id']===$a['id']?array_replace($a,['presence'=>$presence,'actualWeight'=>$weight]):$e,$t['entries']));self::audit($t,'Kontrola startowa: '.$a['name'],$a['profileId']);return ['id'=>$a['id']];
   }
   if($type==='draw.create'){$cats=Rules::categories($t['entries']);$key=(string)($p['categoryId']??'');$c=$cats[$key]??null;if(!$c||$c['type']!=='bracket')throw new AppError('Nie ma takiej kategorii.');$old=$t['draws'][$key]??null;if($old&&count($old['results']))throw new AppError('Nie można losować po zapisaniu wyników.',409);$d=Rules::makeDraw($c['athletes']);$d['revision']=($old['revision']??0)+1;$t['draws'][$key]=$d;self::audit($t,'Zapisano losowanie: '.$c['title'].' · '.$c['subtitle']);return ['id'=>$key];}
   if(in_array($type,['result.save','result.clear'],true)){if($type==='result.save')self::txt($p['winnerId']??null,'zwycięzca');$key=(string)($p['categoryId']??'');if(!isset($t['draws'][$key]))throw new AppError('Najpierw zapisz losowanie.');Rules::result($t['draws'][$key],(string)($p['matchId']??''),$type==='result.save'?(string)($p['winnerId']??''):null);self::audit($t,'Zaktualizowano wynik walki.');return ['id'=>$p['matchId']];}
@@ -445,7 +454,7 @@ final class Domain {
   if($e&&$profile&&($profile['ownerId']??null)!==null&&$profile['ownerId']===$u['id']){
    if($t['status']!=='open')throw new AppError('Zapisy są zamknięte. Jeśli nie przyjedziesz, organizator oznaczy nieobecność przy kontroli startowej.',403);
    if(self::inDraw($t,$e['id']))throw new AppError('Losowanie Twojej kategorii już się odbyło. Wycofanie może zrobić organizator.',409);
-   self::reconcile($t,array_filter($t['entries'],fn($x)=>$x['id']!==$e['id']));self::audit($t,'Wycofano zgłoszenie: '.$e['name']);return ['id'=>$e['id']];
+   self::reconcile($t,array_filter($t['entries'],fn($x)=>$x['id']!==$e['id']));self::audit($t,'Wycofano zgłoszenie: '.$e['name'],$e['profileId']);return ['id'=>$e['id']];
   }
   if($u['role']==='member'&&!self::sees($db,$u,$t))throw new AppError('Turniej nie jest dostępny.',404);
   if(!self::canEnter($u,$t,$db))throw new AppError('Zapisy są zamknięte.',403);
@@ -453,7 +462,7 @@ final class Domain {
   if(!$manager&&!($u['role']==='club'?$a['clubId']===$u['clubId']&&self::staffProfile($db,$profile):($profile['ownerId']??null)===null&&$profile['createdBy']===$u['id'])){
    if($u['role']==='member')throw new AppError('Zgłoszenie nie istnieje.',404);throw new AppError('Nie możesz wycofać tego zgłoszenia.',403);
   }
-  self::reconcile($t,array_filter($t['entries'],fn($x)=>$x['id']!==$a['id']));self::audit($t,'Wycofano zgłoszenie: '.$a['name']);
+  self::reconcile($t,array_filter($t['entries'],fn($x)=>$x['id']!==$a['id']));self::audit($t,'Wycofano zgłoszenie: '.$a['name'],$a['profileId']);
   if(!empty($a['self']))self::withdrawn($db,$a,$t['id'],$u['role']==='admin'?'admin':'organizer');return ['id'=>$a['id']];
  }
  /** entry.self (§7.1–§7.2): an athlete enters an own profile; never into a category with a saved draw; minors only in trusted tournaments. */
@@ -475,7 +484,7 @@ final class Domain {
   $entry=self::snapshot($db,$a,$t,$measures+['events'=>$p['events']??null],$old,true);Rules::validate($entry);
   $list=$old?array_map(fn($e)=>$e['id']===$entry['id']?$entry:$e,$t['entries']):[...$t['entries'],$entry];
   foreach(Rules::categories($list) as $key=>$c)if(isset($t['draws'][$key])&&in_array($entry['id'],array_column($c['athletes'],'id'),true))throw new AppError('Losowanie tej kategorii już się odbyło. Zgłoszenie może dodać organizator.',409);
-  $target=&self::entity($db['tournaments'],$t['id'],'Turniej');self::reconcile($target,$list);self::audit($target,($old?'Zmieniono zgłoszenie własne: ':'Zgłoszenie własne: ').$entry['name']);unset($target);
+  $target=&self::entity($db['tournaments'],$t['id'],'Turniej');self::reconcile($target,$list);self::audit($target,($old?'Zmieniono zgłoszenie własne: ':'Zgłoszenie własne: ').$entry['name'],$entry['profileId']);unset($target);
   self::unWithdraw($db,$a['id'],$t['id']);return ['id'=>$entry['id'],'tournamentId'=>$t['id']];
  }
 }

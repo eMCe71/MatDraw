@@ -23,6 +23,8 @@ export const contact=s=>CONTACT.test(s);
 export const UNAFFILIATED='unaffiliated',DELETED='Dane usunięte';
 const NONE_KEYS=['niezrzeszony','niezrzeszona','brak','bezklubu','none'];
 const TOURNAMENT_SCOPE=['entry.remove','checkin.save','draw.create','result.save','result.clear','tournament.hide'];
+/** Log lines that end with an athlete's name, as Domain::NAMED; audit() marks each with the athlete's profileId. */
+const NAMED=/^((?:Zgłoszono|Zmieniono zgłoszenie|Zgłoszenie własne|Zmieniono zgłoszenie własne|Zmieniono klub w zgłoszeniu|Kontrola startowa|Wycofano zgłoszenie): )(.+)$/su;
 const nowSeconds=()=>Math.floor(Date.now()/1000);
 const isObj=v=>!!v&&typeof v==='object'&&!Array.isArray(v);
 const has=(o,k)=>isObj(o)&&Object.hasOwn(o,k);
@@ -98,7 +100,7 @@ export function publicWorkspace(db,user){
   if(!sees(db,user,t,profiles))continue;
   const manager=admin||manages(user,t),isCommunity=community(db,t),hidden=isset(t.hiddenBy);
   const entries=t.entries.filter(e=>manager?!(hidden&&!admin&&e.self):entryVisible(db,user,t,e,profiles));for(const e of entries)used.add(e.clubId??'');
-  const full=manager||role==='editor'&&!isCommunity;let draws=full?t.draws:{},activity=full?t.activity:[];
+  const full=manager||role==='editor'&&!isCommunity;let draws=full?t.draws:{},activity=full?t.activity.map(({text,time})=>({text,time})):[];
   if(manager&&hidden&&!admin){const ids=new Set(entries.map(e=>e.id));draws=Object.fromEntries(Object.entries(draws).filter(([,d])=>d.slots.filter(Boolean).every(x=>ids.has(x))));activity=[];}
   const v={...t,entries,draws,activity,community:isCommunity,trusted:trusted(db,t),selfEntry:t.selfEntry===true,rev:Number(t.rev)||0};
   if(manager){v.hidden=hidden;v.hideReason=t.hideReason??null;}else{delete v.hideReason;delete v.createdAt;}
@@ -209,7 +211,8 @@ function reconcile(t,nextEntries){
  }
  t.entries=nextEntries;
 }
-function audit(t,message){t.activity.unshift({text:message,time:new Date().toISOString()});t.activity=t.activity.slice(0,40);}
+/** A log line; profileId marks a line naming an athlete (NAMED), as Domain::audit; publicWorkspace shows text and time only. */
+function audit(t,message,profileId=null){t.activity.unshift({text:message,time:new Date().toISOString(),...(isset(profileId)?{profileId}:{})});t.activity=t.activity.slice(0,40);}
 function requireManager(user,t){if(!manages(user,t))fail('Brak uprawnień do zarządzania tym turniejem.',403);if(t.status==='finished')fail('Zakończony turniej jest tylko do odczytu.',409);}
 // Lookups for members: a missing and an unseen object give the same 404 (PS-15).
 function tour(db,u,key,seen=true){if(u.role!=='member')return find(db.tournaments,key,'Turniej');return db.tournaments.find(t=>t.id===key&&(!seen||sees(db,u,t)))||fail('Turniej nie jest dostępny.',404);}
@@ -260,23 +263,29 @@ export function detach(t,entryId){
  const status=isset(t.hiddenBy)?t.hiddenFrom??t.status:t.status;if(status==='finished')return false;
  if(status==='closed'&&categories(t.entries).items.some(c=>Object.hasOwn(t.draws,c.id)&&c.athletes.some(a=>a.id===entryId)))return false;
  const next=structuredClone(t);try{reconcile(next,t.entries.filter(x=>x.id!==entryId));}catch(err){if(err instanceof DomainError)return false;throw err;}
- t.entries=next.entries;t.draws=next.draws;audit(t,'Wycofano zgłoszenie: '+initials(String(e.name)));return true;
+ t.entries=next.entries;t.draws=next.draws;audit(t,'Wycofano zgłoszenie: '+initials(String(e.name)),e.profileId);return true;
 }
-// Logs never keep a forgotten name (every name of the profile, every tournament, namesakes with entries excepted); snapshots only with useInitials.
-export function forgetProfile(db,profileId,useInitials=false){
+// Logs never keep a forgotten name: lines marked with the profile in every tournament; unmarked (older) lines by name only where the
+// profile has an entry or the actor manages the tournament, namesakes with entries excepted. Snapshots only with useInitials.
+export function forgetProfile(db,profileId,useInitials=false,actor=null){
  const i=db.profiles.findIndex(a=>a.id===profileId);if(i<0)return 'missing';
  const names=[...new Set([db.profiles[i].name,...db.tournaments.flatMap(t=>t.entries.filter(e=>e.profileId===profileId).map(e=>e.name))].map(n=>String(n??'')))].filter(n=>n!==''&&n!==DELETED);let left=false;
  for(const t of db.tournaments){
-  if(t.entries.some(e=>e.profileId===profileId)&&!detach(t,profileId))left=true;
+  const entered=t.entries.some(e=>e.profileId===profileId);if(entered&&!detach(t,profileId))left=true;
   if(useInitials)for(const e of t.entries)if(e.profileId===profileId)e.name=initials(String(e.name));
-  unname(t,profileId,names);
+  unname(t,profileId,names,entered||!!actor&&manages(actor,t));
  }
  if(!left){db.profiles.splice(i,1);return 'deleted';}
  Object.assign(db.profiles[i],{name:DELETED,birthDate:null,ownerId:null,relation:null,guardianDeclaredAt:null,guardianConsentAt:null,consentBy:null,pendingClubName:null,archived:true});return 'anonymized';
 }
-function unname(t,profileId,names){
- if(!names.length)return;const kept=new Set(t.entries.filter(e=>e.profileId!==profileId).map(e=>String(e.name)));
- for(const x of t.activity){const s=String(x.text),n=names.find(n=>!kept.has(n)&&s.endsWith(': '+n));if(n!==undefined)x.text=s.slice(0,s.length-n.length)+initials(n);}
+function unname(t,profileId,names,legacy){
+ const kept=new Set(t.entries.filter(e=>e.profileId!==profileId).map(e=>String(e.name)));
+ for(const x of t.activity){
+  const s=String(x.text),mark=x.profileId??null;
+  if(mark===profileId){const m=NAMED.exec(s);if(m)x.text=m[1]+initials(m[2]);continue;}
+  if(mark!==null||!legacy)continue;
+  const n=names.find(n=>!kept.has(n)&&s.endsWith(': '+n));if(n!==undefined)x.text=s.slice(0,s.length-n.length)+initials(n);
+ }
 }
 function apply(db,user,type,p){
  const now=nowSeconds(),today=warsawToday(),member=user.role==='member',admin=user.role==='admin';
@@ -341,7 +350,7 @@ function apply(db,user,type,p){
    if(!managesProfile(user,a,db)||isset(a.ownerId)||a.createdBy!==user.id)fail('Brak uprawnień.',403);
    if(db.tournaments.some(t=>t.status==='finished'&&t.entries.some(e=>e.profileId===a.id)))fail('Zawodnik ma zgłoszenia w zakończonych turniejach. Usunięcie danych może zlecić Administrator.',409);
   }
-  return {id:a.id,state:forgetProfile(db,a.id,true)};
+  return {id:a.id,state:forgetProfile(db,a.id,true,user)};
  }
  // Own athlete profiles of a member (§6.1, §4.5, §6.6).
  if(['athlete.save','athlete.archive','athlete.forget','entry.self'].includes(type)&&!member)fail('Brak uprawnień.',403);
@@ -367,7 +376,7 @@ function apply(db,user,type,p){
   if(archived&&pending(db,a.id))fail('Najpierw wycofaj zgłoszenia do turniejów, które jeszcze się nie odbyły.',409);
   a.archived=archived;return {id:a.id};
  }
- if(type==='athlete.forget'){const a=owned(p.profileId);if(!a)fail('Zawodnik nie istnieje.',404);return {id:a.id,state:forgetProfile(db,a.id,true)};}
+ if(type==='athlete.forget'){const a=owned(p.profileId);if(!a)fail('Zawodnik nie istnieje.',404);return {id:a.id,state:forgetProfile(db,a.id,true,user)};}
  if(type==='entry.self')return selfEntry(db,user,p,owned);
  // Clubs (§5.5): the Administrator only.
  if(type.startsWith('club.')){
@@ -423,7 +432,7 @@ function apply(db,user,type,p){
    if(isset(p.clubId)&&p.clubId!==existing.clubId){const c=db.clubs.find(x=>x.id===p.clubId&&!isset(x.mergedInto));if(!c)fail('Klub nie istnieje.',404);entry.clubId=c.id;entry.club=c.name;clubChanged=true;}
   }else entry=snapshot(db,a,t,p,existing);
   validateAthlete(entry);reconcile(t,existing?t.entries.map(x=>x.id===entry.id?entry:x):[...t.entries,entry]);
-  audit(t,clubChanged?'Zmieniono klub w zgłoszeniu: '+entry.name:(existing?'Zmieniono zgłoszenie: ':'Zgłoszono: ')+entry.name);
+  audit(t,clubChanged?'Zmieniono klub w zgłoszeniu: '+entry.name:(existing?'Zmieniono zgłoszenie: ':'Zgłoszono: ')+entry.name,entry.profileId);
   if(!existing)unWithdraw(db,entry.profileId,t.id);return {id:entry.id};
  }
  requireManager(user,t);
@@ -432,7 +441,7 @@ function apply(db,user,type,p){
   const w=p.presence==='absent'||p.presence==='pending'?a.actualWeight:Number(p.actualWeight);
   if(p.presence==='present'&&(!Number.isFinite(w)||w<10||w>250))fail('Podaj wagę od 10 do 250 kg.');
   if(Object.values(t.draws).some(d=>d.slots.includes(a.id)&&Object.keys(d.results).length)&&(a.actualWeight!==w||a.presence!==p.presence))fail('Zawodnik ma zapisane wyniki. Najpierw wycofaj wyniki.',409);
-  reconcile(t,t.entries.map(x=>x.id===a.id?{...a,actualWeight:w,presence:p.presence}:x));audit(t,'Kontrola startowa: '+a.name);return {id:a.id};
+  reconcile(t,t.entries.map(x=>x.id===a.id?{...a,actualWeight:w,presence:p.presence}:x));audit(t,'Kontrola startowa: '+a.name,a.profileId);return {id:a.id};
  }
  if(type==='draw.create'){
   const c=categories(t.entries).items.find(c=>c.id===p.categoryId);if(!c||c.type!=='bracket')fail('Nie ma takiej kategorii drabinkowej.');
@@ -452,13 +461,13 @@ function removeEntry(db,user,p){
  if(e&&profile&&isset(profile.ownerId)&&profile.ownerId===user.id){
   if(t.status!=='open')fail('Zapisy są zamknięte. Jeśli nie przyjedziesz, organizator oznaczy nieobecność przy kontroli startowej.',403);
   if(inDraw(t,e.id))fail('Losowanie Twojej kategorii już się odbyło. Wycofanie może zrobić organizator.',409);
-  reconcile(t,t.entries.filter(x=>x.id!==e.id));audit(t,'Wycofano zgłoszenie: '+e.name);return {id:e.id};
+  reconcile(t,t.entries.filter(x=>x.id!==e.id));audit(t,'Wycofano zgłoszenie: '+e.name,e.profileId);return {id:e.id};
  }
  if(user.role==='member'&&!sees(db,user,t))fail('Turniej nie jest dostępny.',404);
  if(!canEnter(user,t,db))fail('Zapisy są zamknięte.',403);
  const a=find(t.entries,p.id,'Zgłoszenie'),owner=find(db.profiles,a.profileId,'Zawodnik');
  if(!manages(user,t)&&!(user.role==='club'?a.clubId===user.clubId&&staffProfile(db,owner):!isset(owner.ownerId)&&owner.createdBy===user.id)){if(user.role==='member')fail('Zgłoszenie nie istnieje.',404);fail('Nie możesz wycofać tego zgłoszenia.',403);}
- reconcile(t,t.entries.filter(x=>x.id!==a.id));audit(t,'Wycofano zgłoszenie: '+a.name);
+ reconcile(t,t.entries.filter(x=>x.id!==a.id));audit(t,'Wycofano zgłoszenie: '+a.name,a.profileId);
  if(a.self)withdrawn(db,a,t.id,user.role==='admin'?'admin':'organizer');return {id:a.id};
 }
 /** entry.self (§7.1–§7.2): an athlete enters an own profile; never into a category with a saved draw; minors only in trusted tournaments. */
@@ -479,7 +488,7 @@ function selfEntry(db,user,p,owned){
  const entry=snapshot(db,a,t,{...measures,events:p.events??null},old,true);rulesValidate(entry);
  const list=old?t.entries.map(e=>e.id===entry.id?entry:e):[...t.entries,entry];
  if(categories(list).items.some(c=>Object.hasOwn(t.draws,c.id)&&c.athletes.some(x=>x.id===entry.id)))fail('Losowanie tej kategorii już się odbyło. Zgłoszenie może dodać organizator.',409);
- reconcile(t,list);audit(t,(old?'Zmieniono zgłoszenie własne: ':'Zgłoszenie własne: ')+entry.name);
+ reconcile(t,list);audit(t,(old?'Zmieniono zgłoszenie własne: ':'Zgłoszenie własne: ')+entry.name,entry.profileId);
  unWithdraw(db,a.id,t.id);return {id:entry.id,tournamentId:t.id};
 }
 export function execute(db,actorId,type,p={},expectedRevision=db.revision){

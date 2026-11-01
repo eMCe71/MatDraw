@@ -1,7 +1,8 @@
 // Roles, organizers, athlete profiles and self-entries in the workspace rules (PLAN-REJESTRACJA-ROLE §5–§7, §12), on dist/workspace.js;
 // tests/roles-parity.test.mjs checks that backend/src/Domain.php gives the same answers. Covers the §5.2 matrix, the outsideEntry
 // truth table, limits and their semantics, CONTACT, entry.self gates, the owner's withdrawal, athlete.save, club choice, the
-// self-entry correction by the manager, tournament.hide with tombstones, forgetting profiles in brackets with results and stale().
+// self-entry correction by the manager, tournament.hide with tombstones, forgetting profiles in brackets with results, log lines
+// found by the profile (namesakes, renames) and stale().
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {initialWorkspace,execute,publicWorkspace,outsideEntry,canEnter,manages,managesProfile,staffProfile,community,trusted,organizer,canCreateTournament,stale,contact,pickClub,UNAFFILIATED,DELETED,
@@ -335,6 +336,37 @@ test('profile.forget: the logs of every tournament lose every name of the profil
  assert.ok(text().includes('Wycofano zgłoszenie: Ala Stara')&&text().includes('Kontrola startowa: Ala Stara'),'the snapshot of t2 keeps the old name, t1 has no entry left');
  db=run(db,'org2','profile.forget',{id:a}).db;
  assert.ok(!/Ala (Stara|Nowa)/.test(text()),text());assert.ok(db.tournaments.find(t=>t.id===t1).activity.some(x=>x.text==='Wycofano zgłoszenie: A. S.'));
+});
+
+test('forgetting finds log lines by the profile: a namesake forgotten elsewhere changes no tournament of others, a rename is forgotten too, views show no profileId (§6.6)',()=>{
+ let db=world();const real=db.tournaments.find(t=>t.id==='t-autumn-2026').entries[0],name=real.name;
+ db=run(db,'demo-admin','entry.remove',{tournamentId:'t-autumn-2026',id:real.id}).db;
+ // A line written before 0007 carries no profile (here in a staff tournament where the athlete has no entry).
+ db.tournaments.find(t=>t.id==='t-gp-gdansk-2026').activity.unshift({text:'Wycofano zgłoszenie: '+name,time:'2026-10-01T10:00:00.000Z'});
+ assert.deepEqual(db.tournaments.find(t=>t.id==='t-autumn-2026').activity[0],{text:'Wycofano zgłoszenie: '+name,time:db.tournaments.find(t=>t.id==='t-autumn-2026').activity[0].time,profileId:real.profileId});
+ for(const id of ['demo-admin','demo-editor'])for(const t of view(db,id).tournaments)for(const x of t.activity)assert.deepEqual(Object.keys(x).sort(),['text','time'],id+' '+t.id);
+ const staff=d=>JSON.stringify(d.tournaments.filter(t=>['demo-admin','demo-editor'].includes(t.createdBy))),r0=db.revision;
+ // An organizer and an athlete (registration is free) create a namesake and forget it: staff logs and revisions stay as they were.
+ let o=run(db,'org1','profile.save',{...A,name,club:{none:true}}).db;o=run(o,'org1','profile.forget',{id:o.profiles.at(-1).id}).db;
+ assert.equal(staff(o),staff(db),'organizer: no write to staff tournaments');
+ assert.equal(code(()=>run(o,'demo-admin','checkin.save',{tournamentId:'t-autumn-2026',id:'a2',presence:'present',actualWeight:65},r0)),200,'the hall table at its older revision is not refused');
+ let a=run(db,'ath','athlete.save',{...A,relation:'self',name,club:{none:true}}).db;a=run(a,'ath','athlete.forget',{profileId:a.profiles.at(-1).id}).db;
+ assert.equal(staff(a),staff(db),'athlete: no write to staff tournaments');
+ // The Administrator forgets the real athlete: the marked line, and the unmarked one in a tournament he manages.
+ const z=run(db,'demo-admin','profile.forget',{id:real.profileId}).db;
+ assert.deepEqual(['t-autumn-2026','t-gp-gdansk-2026'].map(id=>z.tournaments.find(t=>t.id===id).activity[0].text),['Wycofano zgłoszenie: A. N.','Wycofano zgłoszenie: A. N.']);
+ // A rename after a withdrawal: the old name is in no snapshot any more, the marked lines still lose it.
+ let r=run(db,'ath','athlete.save',{...A,relation:'self',name:'Ola Pierwsza',club:{none:true}}).db;const ola=r.profiles.at(-1).id;
+ r=seq(r,[['ath','entry.self',{tournamentId:'t-winter-2027',profileId:ola,events:['forms']}],['ath','entry.remove',{tournamentId:'t-winter-2027',id:ola}],['ath','athlete.save',{...A,id:ola,relation:'self',name:'Ola Druga',club:{none:true}}]]).db;
+ assert.ok(JSON.stringify(r.tournaments).includes('Ola Pierwsza')&&!r.tournaments.some(t=>t.entries.some(e=>e.name==='Ola Pierwsza')));
+ r=run(r,'ath','athlete.forget',{profileId:ola}).db;assert.ok(!/Ola (Pierwsza|Druga)/.test(JSON.stringify(r.tournaments)),'no name left');
+ assert.deepEqual(r.tournaments.find(t=>t.id==='t-winter-2027').activity.slice(0,2).map(x=>x.text),['Wycofano zgłoszenie: O. P.','Zgłoszenie własne: O. P.']);
+ // An organizer's rename: a check-in line with the old name in his own tournament.
+ let g=run(world(),'org2','tournament.save',{...T,name:'Zmiana Imienia',date:day(20),status:'open'}).db;const tg=g.tournaments.at(-1).id;
+ g=run(g,'org2','profile.save',{...A,name:'Igor Dawny',club:{none:true}}).db;const igor=g.profiles.at(-1).id;
+ g=seq(g,[['org2','entry.save',{...E,tournamentId:tg,profileId:igor}],['org2','checkin.save',{tournamentId:tg,id:igor,presence:'present',actualWeight:70}],['org2','profile.save',{...A,id:igor,name:'Igor Obecny',club:{id:UNAFFILIATED}}],['org2','entry.save',{...E,tournamentId:tg,profileId:igor,update:true}]]).db;
+ assert.ok(!g.tournaments.some(t=>t.entries.some(e=>e.name==='Igor Dawny')));g=run(g,'org2','profile.forget',{id:igor}).db;
+ assert.ok(!/Igor (Dawny|Obecny)/.test(JSON.stringify(g.tournaments)),JSON.stringify(g.tournaments.find(t=>t.id===tg).activity));
 });
 
 test('profile.save: a member without the organizer role or with a blocked one creates nothing; club.merge into unaffiliated only without staff accounts',()=>{

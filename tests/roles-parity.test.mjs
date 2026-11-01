@@ -345,11 +345,48 @@ test('forgetting athletes leaves no full name in tournament logs: earlier names,
  // A namesake with an entry in the same tournament keeps his line.
  const twin=structuredClone(db),t3=twin.tournaments.find(t=>t.id==='t-org2');t3.entries.find(e=>e.profileId==='p-club2').name='Zawodnik KID Testowy';t3.activity.unshift({text:'Zgłoszono: Zawodnik KID Testowy',time:'2026-01-01T00:00:00.000Z'});
  assert.equal(bridge({job:'forgetMember',db:twin,users:['u-ath']}).db.tournaments.find(t=>t.id==='t-org2').activity.find(x=>x.text.startsWith('Zgłoszono: ')).text,'Zgłoszono: Zawodnik KID Testowy');
+ // A line marked with the namesake's profile keeps his name in every tournament, also where no entry carries it.
+ const marked=structuredClone(db);for(const id of ['t-org2','t-autumn-2026'])marked.tournaments.find(t=>t.id===id).activity.unshift({text:'Wycofano zgłoszenie: Zawodnik KID Testowy',time:'2026-01-01T00:00:00.000Z',profileId:'p-club2'});
+ const kept=bridge({job:'forgetMember',db:marked,users:['u-ath']}).db;
+ for(const id of ['t-org2','t-autumn-2026'])assert.ok(kept.tournaments.find(t=>t.id===id).activity.some(x=>x.profileId==='p-club2'&&x.text==='Wycofano zgłoszenie: Zawodnik KID Testowy'),id);
  // athlete.forget: the same rule in PHP and JS, snapshots as initials too.
  const more=[...list,{actor:'u-ath',type:'athlete.forget',payload:{profileId:'p-kid'}},{actor:'u-ath',type:'athlete.forget',payload:{profileId:'p-self'}}];
  const js=runJs(rich(),more),ph=bridge({job:'execute',db:rich(),commands:more});compare(js,ph,more);
  assert.deepEqual(STATUS(js.results).slice(-2),[200,200]);
  const json=JSON.stringify(js.db.tournaments);assert.ok(NAMES.every(n=>!json.includes(n)),'neither logs nor snapshots name them');
+});
+test('forgetting a namesake (organizer, athlete, account deletion) writes nothing to tournaments of others; a rename before forgetMember leaves no old name (§6.6)',{skip},()=>{
+ const db=rich(),A={sex:'M',birthDate:'1995-04-04',weight:70,height:175,gradeType:'cup',grade:5,events:['forms']};
+ // An unmarked line written before 0007, in a staff tournament where the real athlete has no entry.
+ db.tournaments.find(t=>t.id==='t-gp-gdansk-2026').activity.unshift({text:'Wycofano zgłoszenie: Adam Nowak',time:'2026-10-01T10:00:00.000Z'});
+ const kid={...A,relation:'guardian',name:'Adam Nowak',birthDate:'2015-03-03',weight:33,height:135,grade:9,club:{none:true}};
+ const list=[
+  {actor:'demo-admin',type:'entry.remove',payload:{tournamentId:'t-autumn-2026',id:'a1'}},                     // 0 the real Adam Nowak, marked a1
+  {actor:'u-org1',type:'profile.save',payload:{...A,name:'Adam Nowak',club:{none:true}}},                      // 1 namesakes
+  {actor:'u-org1',type:'profile.forget',payload:{id:'@1'}},
+  {actor:'u-ath',type:'athlete.save',payload:kid},
+  {actor:'u-ath',type:'athlete.forget',payload:{profileId:'@3'}},
+  {actor:'u-ath',type:'athlete.save',payload:kid},                                                              // 5 kept for the account deletion
+ ];
+ const js=runJs(db,list),ph=bridge({job:'execute',db,commands:list});compare(js,ph,list);assert.deepEqual(STATUS(js.results),list.map(()=>200));
+ const t=(d,id)=>d.tournaments.find(x=>x.id===id),staff=d=>['t-autumn-2026','t-gp-gdansk-2026'].map(id=>[t(d,id).rev??0,t(d,id).activity.map(x=>x.text)]);
+ assert.deepEqual(staff(ph.db),[[11,['Wycofano zgłoszenie: Adam Nowak']],[0,['Wycofano zgłoszenie: Adam Nowak']]],'only command 0 touched them');
+ const {db:out}=bridge({job:'forgetMember',db:ph.db,users:['u-ath']});
+ for(const id of ['t-autumn-2026','t-gp-gdansk-2026'])assert.deepEqual(t(out,id),t(ph.db,id),id+': unchanged by the account deletion');
+ // A rename and a corrected self-entry: the old name is in no snapshot, its marked lines still lose it.
+ const k=db.profiles.find(p=>p.id==='p-kid'),renamed={relation:'guardian',name:'Inna Córka',birthDate:k.birthDate,sex:k.sex,weight:k.weight,height:k.height,gradeType:k.gradeType,grade:k.grade,club:{id:UNAFFILIATED}};
+ const steps=[
+  {actor:'u-ath',type:'entry.self',payload:{tournamentId:'t-staff-self',profileId:'p-kid',events:['forms']}},
+  {actor:'u-ath',type:'entry.remove',payload:{tournamentId:'t-staff-self',id:'p-kid'}},
+  {actor:'u-ath',type:'athlete.save',payload:{...renamed,id:'p-kid'}},
+  {actor:'u-ath',type:'entry.self',payload:{tournamentId:'t-org2',profileId:'p-kid',events:['forms'],update:true}},
+ ];
+ const a=runJs(rich(),steps),b=bridge({job:'execute',db:rich(),commands:steps});compare(a,b,steps);assert.deepEqual(STATUS(a.results),steps.map(()=>200));
+ const old='Zawodnik KID Testowy',all=d=>d.tournaments.flatMap(x=>x.activity.map(y=>y.text));
+ assert.ok(all(b.db).some(x=>x.endsWith(': '+old))&&!b.db.tournaments.some(x=>x.entries.some(e=>e.name===old)),'the old name only in logs');
+ assert.deepEqual(all(bridge({job:'forgetMember',db:b.db,users:['u-ath']}).db).filter(x=>x.includes(old)||x.includes('Inna Córka')),[],'no old or new name in any log');
+ const more=[...steps,{actor:'u-ath',type:'athlete.forget',payload:{profileId:'p-kid'}}],c=runJs(rich(),more),d=bridge({job:'execute',db:rich(),commands:more});compare(c,d,more);
+ assert.ok(!/Zawodnik KID Testowy|Inna Córka/.test(JSON.stringify(c.db.tournaments)),'athlete.forget: neither logs nor snapshots');
 });
 test('Domain::retain turns the names in logs of old community tournaments into initials, also of entries withdrawn long ago (§6.7)',{skip},()=>{
  const {db}=logged(),{db:out,out:counts}=bridge({job:'retain',db,cutoff:day(400),limit:0});
