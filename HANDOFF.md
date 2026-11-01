@@ -1,8 +1,78 @@
 # MatBravo (MatDraw) — przekazanie właścicielowi i kolejnej sesji
 
-Dokument jest pisany dla właściciela, który nie jest programistą, i dla każdego, kto przejmie projekt. Mówi, **co jest zrobione, co musisz zrobić Ty, w jakiej kolejności i jakimi poleceniami**, na które pytania trzeba odpowiedzieć przed startem płatności, oraz jak awaryjnie wyłączyć czat albo zwolnić jego tempo bez wdrożenia. Szczegóły techniczne są w `README.md` (po angielsku), instalacja w `INSTALL-PL.md`, wdrożenie i kopie w `DEPLOY-PL.md`, wyniki testów w `VALIDATION.md`. Pełny plan z uzasadnieniem decyzji: `docs/plan/PLAN-CZAT-PLATNOSCI-PWA.md`.
+Dokument jest pisany dla właściciela, który nie jest programistą, i dla każdego, kto przejmie projekt. Mówi, **co jest zrobione, co musisz zrobić Ty, w jakiej kolejności i jakimi poleceniami**, na które pytania trzeba odpowiedzieć przed startem płatności, oraz jak awaryjnie wyłączyć czat albo zwolnić jego tempo bez wdrożenia. Szczegóły techniczne są w `README.md` (po angielsku), instalacja w `INSTALL-PL.md`, wdrożenie i kopie w `DEPLOY-PL.md`, wyniki testów w `VALIDATION.md`. Pełny plan z uzasadnieniem decyzji: `docs/plan/PLAN-CZAT-PLATNOSCI-PWA.md` (czat, płatności, aplikacja na telefon) i `docs/plan/PLAN-REJESTRACJA-ROLE.md` (otwarta rejestracja, role, samodzielne zgłoszenia). **Najnowsze wydanie opisuje sekcja 0.**
 
 Rozmawiaj po polsku. Repozytorium: `eMCe71/MatDraw`. Domena: `matbravo.com`.
+
+## 0. Wydanie z rolami „Organizator” i „Zawodnik” — zacznij tutaj
+
+To wydanie dodaje otwartą rejestrację z dwiema rolami i samodzielne zgłoszenia do turniejów. **Po wdrożeniu nic się nie zmienia dla nikogo**, dopóki Ty, jako Administrator, nie otworzysz rejestracji w panelu, z jednym wyjątkiem: **od wdrożenia panel „Nie pamiętasz hasła?” na ekranie logowania pokazuje adres `hello@matbravo.com`** (patrz sekcja 0.7, więc skrzynka musi istnieć przed scaleniem). Do `config.php` nie musisz niczego dopisywać.
+
+### 0.1 Co jest nowe
+
+- **Rejestracja w panelu.** Administrator → **Ustawienia → „Rejestracja nowych kont”**: trzy tryby, **„Wyłączona”**, **„Otwarta, bezpłatna”** i **„Otwarta, płatna”**. Zmiana działa od razu, bez wdrożenia i bez SSH. Na starcie jest „Wyłączona”.
+- **Organizator turnieju.** Przy zakładaniu konta (albo później w **Moje konto → Role**) każdy może zaznaczyć „Organizator turnieju”. Taka osoba tworzy **własne** turnieje, dodaje **własnych** zawodników, prowadzi kontrolę startową, losowania i wyniki. Widzi **tylko swoje** turnieje i swoich zawodników. Nie widzi bazy zawodników, cudzych turniejów ani cudzych zgłoszeń. Jej turniej od razu ma własny adres do wysłania zawodnikom (przycisk „Kopiuj link do zapisów”) i plakietkę „Turniej społeczności”.
+- **Zawodnik.** Zaznaczenie „Zawodnik” dodaje krótki formularz: kogo zgłaszasz (siebie albo swoje dziecko lub podopiecznego), data urodzenia, waga, wzrost, stopień, klub (z listy, nowy albo „Niezrzeszony”). **Jedno konto ma jeden profil zawodnika.** Osoba poniżej 16 lat nie założy profilu „Siebie”; zrobi to rodzic lub opiekun na swoim koncie. Na stronie **„Moje starty”** zawodnik widzi swoje zgłoszenia, status (przyjęte, czeka na kontrolę, obecność, losowanie, wynik), miejsce w drabince, wycofania oraz **„Otwarte turnieje”**, do których może się zgłosić. Zgłosić się można tylko do turnieju, w którym włączono **„Zawodnicy mogą zgłaszać się sami”**.
+- **Kluby.** Administrator ma nową stronę **Kluby**: weryfikacja klubów dodanych przez użytkowników, zmiana nazwy, scalanie dubli, nazwy oczekujące. Niezweryfikowany klub nie jest publiczny.
+- **Członkowie.** Znaczniki (organizator, potwierdzony, zablokowany, zawodnik, konto z okresu bezpłatnego), filtry, potwierdzanie i odbieranie roli organizatora, blokada zbiorcza.
+- Drobne zmiany: kanał **Taekwondo Polska jest pierwszy** na liście czatu, kanały światowe mają ikonę globu, strona główna jest wyśrodkowana na bardzo szerokich ekranach.
+
+### 0.2 Jak otworzyć rejestrację (po kolei)
+
+1. **Załóż skrzynkę `hello@matbravo.com`** w panelu AfterMarket (może to być przekierowanie na Twój adres) i wyślij na nią próbną wiadomość. To adres, który aplikacja pokazuje każdemu, kto zapomni hasła (**od samego wdrożenia**, nie dopiero po otwarciu rejestracji, patrz sekcja 0.7); prośby o reset hasła trafiają właśnie tam, a odpowiadasz na nie według procedury z sekcji 4. Jeśli skrzynka już istnieje (krok 1 z sekcji 0.7), tu tylko ją sprawdź.
+2. **Zrób sesję prawną przed otwarciem** (zalecenie, decyzja należy do Ciebie): rejestracja otwiera serwis dla dzieci i rodziców, więc potrzebne są polityka prywatności, regulamin, zgoda opiekuna i okres przechowywania danych (w kodzie 24 miesiące od ostatniego turnieju). Aplikacja ma przygotowane puste miejsca na zgody; tekstów jeszcze nie ma. Szczegóły w sekcji 3, ostatni akapit.
+3. Zaloguj się jako Administrator → **Ustawienia**. Sprawdź **„Adres pomocy”** (ma być `hello@matbravo.com`).
+4. W **„Rejestracja nowych kont”** wybierz **„Otwarta, bezpłatna”** i kliknij **„Zapisz tryb rejestracji”**. Pojawi się „Zapisano ustawienia.”, a w „Historii zmian” nowy wpis. Gdyby napis „Obowiązuje teraz: …” pokazywał inny tryb niż wybrany, coś ogranicza ustawienie (na przykład `signup_force_off` albo brak konfiguracji Stripe); wtedy przeczytaj czerwony baner na tej stronie.
+5. Wyloguj się i sprawdź jako gość: karta **„Załóż konto”** na stronie logowania, rejestracja z polem „Zawodnik” na telefonie, wejście na „Moje starty”.
+6. **W każdym turnieju, do którego mają się zgłaszać sami zawodnicy**, otwórz **Ustawienia turnieju** i zaznacz **„Zawodnicy mogą zgłaszać się sami”**. Po aktualizacji to pole jest wyłączone we wszystkich dotychczasowych turniejach. Nowe turnieje organizatorów mają je włączone od razu, nowe turnieje personelu wyłączone.
+7. Później (dopiero po konfiguracji Stripe, kroki 6–9 sekcji 2): **Ustawienia → „Sprawdź Stripe”**, potem **„Otwarta, płatna”**. Uwaga na kolejność: **od pierwszego zapisu w panelu (krok 4) wartości `billing_enforce` i `signup_enabled` z `config.php` przestają działać**, więc okno testów płatności z kroku 8 sekcji 2 (token zaproszeń w pliku) trzeba wtedy przeprowadzić przez panel, jak opisano w tym kroku 8. Aplikacja zapyta, co zrobić z kontami założonymi w okresie bezpłatnym (zostawić im darmowy dostęp albo wymagać płatności od wybranej daty, co najmniej 14 dni w przód; potem baner i 7 dni karencji), ale **tylko w chwili, gdy płatności przechodzą z „bezpłatnych” na „płatne”**. Wtedy też sprawdza Stripe. Jeśli płatności są już „płatne” (bo `billing_enforce=true` jest w pliku albo zapisał je wcześniej wariant B z kroku 8 sekcji 2), wybór „Otwarta, płatna” nie pyta o nic i niczego nie sprawdza: po przejściu na klucze live kliknij **„Sprawdź Stripe”** ręcznie. Przełączenie z płatnej na bezpłatną jest zawsze możliwe, ale osoby z aktywną subskrypcją dalej płacą, dopóki ich subskrypcji nie zatrzymasz.
+
+### 0.3 Jak z tego korzystają organizatorzy i zawodnicy
+
+**Organizator:** zakłada konto z zaznaczonym „Organizator turnieju” (albo włącza rolę w Moje konto → Role) → w menu pojawiają się jego **Turnieje** → „Nowy turniej” (domyślnie „Zapisy otwarte”, samodzielne zgłoszenia włączone) → „Kopiuj link do zapisów” i wysyła zawodnikom → dodaje własnych zawodników (dla osoby poniżej 16 lat zaznacza zgodę rodzica lub opiekuna) → w dniu zawodów robi kontrolę startową (przy zgłoszeniach własnych widzi znaczniki „Zgłoszenie własne”, „Klub niezweryfikowany”, „Niezrzeszony” i może poprawić klub), losowanie, wyniki i ekran hali. Narzędzia **proszą o hasło po 30 minutach bezczynności** i najpóźniej co 12 godzin; to normalne. Roli nie da się wyłączyć, dopóki ma turnieje z otwartymi lub zamkniętymi zapisami. Limity: 3 nowe turnieje na dobę, 10 opublikowanych nadchodzących. Status „Zakończony” można ustawić dopiero w dniu turnieju. W nazwach nie wolno podawać adresów stron, e-maili ani długich numerów.
+
+**Zawodnik lub rodzic:** zakłada konto z „Zawodnik” → **Moje starty** → „Zgłoś się” przy otwartym turnieju (można też wejść z linku od organizatora albo z podglądu turnieju) → wybiera konkurencje i potwierdza. Zgłoszenie można poprawić i wycofać, dopóki zapisy są otwarte, a kategoria nie ma zapisanego losowania. Po zamknięciu zapisów nieobecność oznacza organizator przy kontroli. W trybie płatnym nowe zgłoszenie wymaga aktywnego konta, ale **wycofanie, poprawka własnego zgłoszenia i usunięcie własnych danych działają zawsze**. Maile nie są wysyłane: o wszystkim informuje strona „Moje starty” (łącznie z komunikatem „Zgłoszenie wycofane przez organizatora/Administratora”).
+
+### 0.4 Dwa przełączniki, o które możesz zapytać
+
+- **„Zawodnicy mogą zgłaszać się sami”** (przy każdym turnieju, w Ustawieniach turnieju) — decyduje, czy w tym turnieju w ogóle można się zgłosić samemu. Wyłączony przełącznik = zgłoszenia tylko przez klub, edytora, organizatora albo Administratora jak dotąd.
+- **„Wymagaj potwierdzenia organizatorów”** (Ustawienia → Organizatorzy). **Domyślnie wyłączone — to Twoja decyzja z założenia „pełnej automatyki”**: każdy niezablokowany organizator działa od razu tak samo jak potwierdzony (jego turnieje są na stronie głównej i w czacie, przyjmują zgłoszenia osób niepełnoletnich). Po włączeniu: turnieje **niepotwierdzonych** organizatorów są dostępne tylko pod własnym adresem (nie ma ich na stronie głównej ani w lobby czatu), a osoby poniżej 18 lat nie zgłoszą się do nich same, dopóki nie klikniesz **„Potwierdź organizatora”** (Członkowie → filtr „Organizatorzy do potwierdzenia”, licznik przy menu, albo na karcie turnieju). Włącz ten przełącznik, gdy zauważysz nadużycia albo chcesz zacząć ostrożniej. Obok jest **„Publikowanie turniejów przez nowych organizatorów: Włączone / Wstrzymane”**; wstrzymanie działa tylko na niepotwierdzonych, więc ma sens razem z włączonym potwierdzaniem.
+
+### 0.5 Kluby i Członkowie — codzienna kontrola
+
+- **Kluby** (menu Administratora): „Niezweryfikowane” — klub dodany przez użytkownika; kliknij **„Zweryfikuj”**, zmień nazwę albo **„Scal z…”** (gdy to dubel istniejącego klubu; scalenia nie można cofnąć). **„Oczekujące nazwy klubów”** — zawodnicy, którzy przy wyczerpanym dziennym limicie zostali zapisani jako „Niezrzeszeni”; „Utwórz klub i przypisz” robi z nich klub. W publicznych drabinkach niezweryfikowany klub nie ma nazwy.
+- **Członkowie**: filtr „Organizatorzy do potwierdzenia”, „Potwierdź organizatora” / „Cofnij potwierdzenie”, **„Odbierz rolę organizatora”** (z opcją ukrycia jego nadchodzących turniejów), „Zablokuj konto”, a dla wielu naraz zaznaczenie wierszy i **„Zablokuj i ukryj turnieje”**.
+- **Karta turnieju** (Administrator): „Pokaż organizatora”, **„Ukryj turniej”** z powodem (organizator go widzi) i „Przywróć”.
+- **Ustawienia → Historia zmian**: ostatnie 50 zdarzeń (ustawienia, organizatorzy, kluby, ukrycia turniejów, usunięcia danych).
+
+### 0.6 Wyłączniki awaryjne (od najlżejszego)
+
+1. **Ukryj turniej** albo **odbierz rolę** pojedynczemu organizatorowi (sekcja 0.5).
+2. **Włącz „Wymagaj potwierdzenia organizatorów”** i/lub **wstrzymaj publikowanie** (sekcja 0.4) — przy fali fałszywych turniejów.
+3. **Zamknij rejestrację:** Ustawienia → **„Wyłączona”**. Zalogowani dalej korzystają z serwisu; nikt nowy się nie zarejestruje.
+4. **Panel nie działa:** przez SSH dopisz w `~/matdraw/shared/config.php` linię `'signup_force_off' => true,` (działa od razu, bez wdrożenia; panel pokaże czerwony baner). Cofasz usunięciem tej linii.
+5. Czat: `touch ~/matdraw/shared/chat-off`; przerwa techniczna: `touch ~/matdraw/shared/maintenance` (sekcja 6). **Powrót do starej wersji kodu po pojawieniu się danych społeczności jest blokowany** (strażnik „floor”, `DEPLOY-PL.md`): błąd poprawia się nowym wdrożeniem.
+
+### 0.7 Wdrożenie tego wydania
+
+Scal gałąź do `main` w **dzień bez zawodów**. Pipeline sam zrobi kopię bazy, uruchomi migracje 0007–0009 (tylko dodają kolumny i tabele; schemat v6 → v9), przełączy wydanie i sprawdzi stronę. Bez zmian w `config.php` (poza opcjonalnym `support_email`). **Przed scaleniem:**
+
+1. **Załóż skrzynkę `hello@matbravo.com`** (może być przekierowanie na Twój adres) albo wpisz w `config.php` klucz `'support_email'` z istniejącą skrzynką. Gdy w pliku nie ma `support_email`, obowiązuje `hello@matbravo.com` **od chwili wdrożenia**, jeszcze przed jakimkolwiek zapisem w panelu: publiczna konfiguracja zwraca go, a istniejący panel „Nie pamiętasz hasła?” na ekranie logowania pokazuje ten adres (do tej pory pokazywał tylko „Skontaktuj się z Administratorem turnieju.”). Ludzie zaczną tam pisać, więc skrzynka musi działać już po pierwszym wdrożeniu.
+
+Po wdrożeniu aplikacja na telefonie pokaże pasek „Dostępna jest nowa wersja”. Jeśli kiedykolwiek wgrywałeś na produkcję przykładowych zawodników (`seed-athletes`), uruchom ten skrypt raz po aktualizacji (`INSTALL-PL.md`, „Przykładowi zawodnicy”), bo kluby demo zostają wtedy zweryfikowane. Sprawdź po wdrożeniu: logowanie klubu i Administratora jak dotąd, czat (Taekwondo Polska pierwszy), strona „Ustawienia” (tryb „Wyłączona”), strona „Kluby”.
+
+### 0.8 Znane ograniczenia tego wydania
+
+- **Jeden profil zawodnika na konto.** Rodzic z dwójką dzieci musi mieć dwa konta (dwa adresy e-mail). Kod potrafi więcej profili, ale limit 1 to Twoja decyzja; zmiana wymaga zmiany stałej w kodzie.
+- **Teksty prawne i zgody są puste.** Są przygotowane miejsca w formularzach; do czasu sesji prawnej nie ma regulaminu, polityki prywatności ani treści zgody opiekuna. Organizator tylko oświadcza, że ma zgodę rodzica (pole wyboru).
+- **Brak e-maili.** Nikt nie dostaje powiadomień ani potwierdzeń; adresów nie weryfikujemy. Rejestracja na zajęty adres pokazuje inny komunikat niż sukces, więc da się sprawdzić, czy adres ma konto (ograniczamy to limitami na sieć). Pełne rozwiązanie wymaga wysyłki e-maili.
+- **Zawodnik nie wycofa się po zamknięciu zapisów** ani po losowaniu swojej kategorii; robi to organizator (oznacza nieobecność lub wycofuje zgłoszenie).
+- **Profil dodany przez organizatora nie może zostać przejęty** przez zawodnika, który później założy własne konto (powstanie osobny profil).
+- Lista „Otwarte turnieje” zawodnika pokazuje do 50 najbliższych; turniej z linku jest pokazywany zawsze, o ile jest otwarty.
+- Przechowywanie danych społeczności: profile dodane przez organizatorów są anonimizowane po 24 miesiącach od ostatniego turnieju (wartość do potwierdzenia w sesji prawnej). Profil konta zawodnika zostaje, dopóki istnieje konto; właściciel może go usunąć („Usuń dane zawodnika”, z hasłem).
+- Zgłoszenia w turniejach zakończonych albo z zapisanym losowaniem nie znikają przy usunięciu danych (zostają jako wynik). **Usunięcie konta samo w sobie nie usuwa nazwiska z takich zgłoszeń:** profil zawodnika zmienia się w „Dane usunięte”, ale pełne imię i nazwisko zostaje w zachowanym wyniku (widzą je personel i organizator turnieju; gość widzi tylko inicjały). Żeby nazwisko zniknęło, są dwie drogi. (1) Najprościej: właściciel konta użyje **„Usuń dane zawodnika”** (Moje konto, z hasłem) przed usunięciem konta; w zachowanych zgłoszeniach zostają wtedy inicjały. (2) Gdy konto już usunięto albo rodzic prosi o to Administratora: w kartotece profilu, który należy do konta zawodnika, **przycisku „Usuń dane zawodnika” nie ma** (pokazuje się tylko przy profilach bez konta). Usuń więc konto w Członkowie, a potem, jako Administrator, wejdź w **Baza zawodników → „Pokaż archiwum”**, otwórz („Edytuj”) zanonimizowaną kartotekę „Dane usunięte” i użyj tam **„Usuń dane zawodnika”**: profil nie ma już właściciela, więc przycisk jest, a zachowane zgłoszenia zamieniają się w inicjały (sprawdzone na modelu danych, `profile.forget` po `forgetMember`). Takich kartotek „Dane usunięte” może być kilka, a nazwiska już w nich nie ma: rozpoznasz właściwą po klubie i liczbie turniejów (zapisz je przed usunięciem konta). Obiecując rodzicowi usunięcie nazwiska dziecka, zrób to w jednej z tych kolejności.
+- Każde polecenie turniejowe nadal ładuje cały zbiór danych pod jedną blokadą (wcześniejsze ograniczenie); dlatego zgłoszenia samodzielne mają wspólny limit 120 operacji na minutę dla wszystkich członków razem. Przy bardzo dużym ruchu zawodnik może zobaczyć „Serwer jest teraz mocno obciążony. Spróbuj ponownie za chwilę.”.
+- To, co da się sprawdzić tylko na prawdziwym serwerze i telefonie (rejestracja z telefonu, lądowanie po płatności w Stripe, wydajność przy wielu zgłoszeniach naraz), jest wypisane w `VALIDATION.md`.
 
 ## 1. Stan na dziś
 
@@ -13,13 +83,14 @@ Rozmawiaj po polsku. Repozytorium: `eMCe71/MatDraw`. Domena: `matbravo.com`.
 - płatne konta przez Stripe (8,99 zł / mies. w Polsce, 2,99 USD / mies. gdzie indziej), konta darmowe z decyzji Administratora, panel „Członkowie”, moderacja czatu;
 - aplikacja na telefon (PWA): instalacja, praca bez internetu (strona „Brak połączenia”), pasek aktualizacji;
 - wdrożenie przez GitHub Actions z kopią bazy przed migracją, ochroną przed złym powrotem do starej wersji i weryfikacją po wdrożeniu;
+- **role „Organizator turnieju” i „Zawodnik”, samodzielne zgłoszenia, panel „Ustawienia” (tryby rejestracji), strona „Kluby”** (sekcja 0);
 - wszystkie dotychczasowe funkcje turniejowe bez zmian (zapisy, kontrola startowa, drabinki, wyniki, wydruki, ekran hali, PL | EN).
 
-**Wszystko, co nowe, jest domyślnie wyłączone.** Po wdrożeniu bez zmian w `config.php`: nie ma rejestracji ani płatności, kluby logują się jak dotąd, czat jest do czytania, a pisać mogą tylko osoby z kont personelu. Nic się nie włączy samo.
+**Wszystko, co nowe, jest domyślnie wyłączone.** Po wdrożeniu bez zmian w `config.php` (i dopóki Administrator nie zapisze „Ustawień”): nie ma rejestracji ani płatności, kluby logują się jak dotąd, czat jest do czytania, a pisać mogą tylko osoby z kont personelu. Nic się nie włączy samo, poza adresem `hello@matbravo.com` w panelu „Nie pamiętasz hasła?” na ekranie logowania (sekcja 0.7).
 
-**Do `main` (a więc na produkcję) trafia jedno scalenie po końcowym przeglądzie.** Do tego czasu `matbravo.com` działa na poprzedniej wersji. Decyzję o scaleniu i wypchnięciu podejmuje właściciel. Każde scalenie do `main` wdraża stronę, więc rób to w dzień bez zawodów.
+**Produkcja.** `matbravo.com` działa na `main` w wersji `a67ad42` (wdrożenie z 2026-10-31: czat, konta członków i płatności są na serwerze, ale wyłączone). **Wydanie z rolami (sekcja 0) trafia na produkcję jednym scaleniem do `main`**; decyzję o scaleniu podejmuje właściciel. Każde scalenie do `main` wdraża stronę, więc rób to w dzień bez zawodów.
 
-**Czego nie sprawdzono, bo da się to sprawdzić tylko na prawdziwym serwerze albo koncie Stripe** (lista z wynikami: `VALIDATION.md`, sekcja „Tylko na prawdziwym serwerze”): GD z WebP na web9, wychodzące HTTPS do `api.stripe.com`, odpowiedź 403 dla webhooków, dostępność crona, limity żądań hostingu przy wielu telefonach naraz, instalacja aplikacji na polskim iPhonie, ustawienia konta Stripe.
+**Czego nie sprawdzono, bo da się to sprawdzić tylko na prawdziwym serwerze albo koncie Stripe** (lista z wynikami: `VALIDATION.md`, sekcja „Tylko na prawdziwym serwerze”): odpowiedź 403 dla webhooków, to samo HTTPS do `api.stripe.com` i GD z WebP, ale z poziomu PHP działającego na stronie (z SSH już potwierdzone w uruchomieniu #71: PHP 8.3, GD z WebP, crontab, dostęp do `api.stripe.com`, prawa bazy), wpisy crona, limity żądań hostingu przy wielu telefonach naraz, instalacja aplikacji na polskim iPhonie, ustawienia konta Stripe.
 
 ## 2. Co musisz zrobić — po kolei
 
@@ -27,9 +98,9 @@ Każdy krok ma polecenia do skopiowania. Polecenia z `/usr/local/php83/bin/php` 
 
 1. **Repozytorium.** Rozstrzygnięte: środowisko `production` z sekretami `SSH_*` ma `eMCe71/MatDraw` (kroki 1–2 w `DEPLOY-PL.md`). Starsze dokumenty z `Meducase/MatDraw` i `matdraw.mdcse.com` są nieaktualne.
 
-2. **Odpowiedz na pytania z sekcji 3**, zwłaszcza na cztery **bramki startu** (P2, P3, P8/P21, P19). Wdrożenie na nie nie czeka, ale **włączenie rejestracji i wymuszania płatności tak**.
+2. **Odpowiedz na pytania z sekcji 3**, zwłaszcza na cztery **bramki startu** (P2, P3, P8/P21, P19). Wdrożenie na nie nie czeka, ale **włączenie rejestracji i wymuszania płatności tak**. Dla rejestracji **bezpłatnej** liczą się przede wszystkim P8, P21 i sesja prawna z sekcji 0.2; P2 i P19 dotyczą płatności.
 
-3. **Wdrożenie w dzień bez zawodów.** Scal gałąź do `main` (albo uruchom workflow na `main`). Pierwsze wdrożenie wyloguje wszystkich jeden raz (sesje przenoszą się do nowego katalogu). Potem w GitHub: **Actions → Test, build i deploy → Run workflow**, zaznacz **„Tylko sprawdź połączenie SSH i serwer”** i uruchom. W wyniku sprawdź:
+3. **Wdrożenie w dzień bez zawodów.** Przed scaleniem załóż skrzynkę `hello@matbravo.com` (sekcja 0.7). Scal gałąź do `main` (albo uruchom workflow na `main`). Sesje członków przeniesiono już do nowego katalogu przy wdrożeniu z 2026-10-31 (przebieg #69), więc to wydanie nikogo nie wyloguje. Pierwsze sprawdzenie serwera po SSH jest zrobione (przebieg #71, 2026-10-31, wyniki w `VALIDATION.md`); po tym wdrożeniu powtórz je jednym uruchomieniem (**Actions → Test, build i deploy → Run workflow**, zaznacz **„Tylko sprawdź połączenie SSH i serwer”**) i porównaj wynik:
    - PHP 8.3 i rozszerzenia (`gd` z WebP, `curl`, `openssl`, `intl`, `exif`);
    - `mysqldump` (albo `mariadb-dump`) i `crontab`;
    - linie „Prawo bazy …: tak” (ALTER, CREATE, INDEX, REFERENCES);
@@ -62,7 +133,7 @@ Każdy krok ma polecenia do skopiowania. Polecenia z `/usr/local/php83/bin/php` 
 
 7. **Ustawienia w panelu Stripe** (osobno dla trybu testowego i na żywo): nazwa „MatBravo”, opis na wyciągu `MATBRAVO`, logo i kolory; karty, Apple Pay i Google Pay włączone, Link wyłączony; Smart Retries, a po ostatniej nieudanej próbie anulowanie subskrypcji; e-maile o nieudanej płatności i o 3DS oraz paragony; „Limit customers to one subscription” włączone; Adaptive Pricing wyłączone; Tax wyłączony do czasu konsultacji prawnej.
 
-8. **Okno testów** (tylko Ty możesz się zarejestrować). W `~/matdraw/shared/config.php` dopisz:
+8. **Okno testów** (tylko Ty możesz się zarejestrować). **Zanim zaczniesz, ustal, czy zapisałeś już cokolwiek w panelu „Ustawienia”.** Od pierwszego zapisu w panelu o płatnościach i rejestracji decyduje panel, a `billing_enforce` i `signup_enabled` z `config.php` są ignorowane; wtedy sam wpis w pliku nie włączy płatności i Checkout odpowie „Płatności nie są teraz wymagane.” (409). W `~/matdraw/shared/config.php` dopisz (tak w obu wariantach):
 
    ```php
    'billing_enabled' => true,
@@ -70,15 +141,21 @@ Każdy krok ma polecenia do skopiowania. Polecenia z `/usr/local/php83/bin/php` 
    'billing_enforce' => true,
    'signup_enabled' => false,
    'signup_invite_token' => 'LOSOWE_32_ZNAKI',
-   'support_email' => 'pomoc@matbravo.com',
+   'support_email' => 'hello@matbravo.com',
    ```
+
+   (Aplikacja wymaga `support_email` w pliku, gdy ustawiony jest token zaproszeń; to ten sam adres, który i tak obowiązuje domyślnie.)
+
+   **Wariant A (najprostszy): nic jeszcze nie zapisano w panelu.** Okno testów działa wtedy wprost z pliku, więc zrób je przed krokiem 4 z sekcji 0.2 (przed otwarciem rejestracji w panelu).
+
+   **Wariant B: panel był już zapisany (np. „Otwarta, bezpłatna”).** Poza plikiem ustaw w panelu: **Ustawienia → „Wyłączona”**, zaznacz **„Płatności istniejących kont”** (przełącznik jest aktywny dopiero po udanym „Sprawdź Stripe”), kliknij **„Zapisz tryb rejestracji”** i potwierdź **„Potwierdzam tryb testowy”**. Jeśli istnieją konta z okresu bezpłatnego, aplikacja zapyta, co z nimi zrobić: wybierz tu od razu decyzję docelową (np. **„Zostaw im bezpłatny dostęp”** albo płatność od daty co najmniej 14 dni w przód): **ta decyzja jest ostateczna**, bo przy kolejnym zapisie z „płatnościami” już włączonymi aplikacja nie zapyta o nic i nie sprawdzi Stripe, a „Zostaw im…” daje grupie B dostęp bez daty końca. Jeśli wolisz zdecydować dopiero po testach, po testach wróć w panelu do **„Otwarta, bezpłatna”** (odznacz „Płatności istniejących kont”) i dopiero w kroku 9 wybierz „Otwarta, płatna”: wtedy pytanie i kontrola Stripe pojawią się ponownie.
 
    Blok z kroku 6 (`stripe_secret_key` z kluczem `rk_test_…`, ceny, portal) musi już być w pliku, inaczej aplikacja odpowie błędem 500. Token wygenerujesz poleceniem `/usr/local/php83/bin/php -r 'echo bin2hex(random_bytes(16)), PHP_EOL;'`. Po zapisaniu pliku odśwież stronę: jeśli widzisz błąd 500, kombinacja ustawień jest niedozwolona (usuń dopisane linie). Potem:
    - zalogowany jako Administrator, otwórz w przeglądarce `https://matbravo.com/api/index.php?route=diagnostics&probe=stripe`; w odpowiedzi `"stripe":{"reachable":true,…}` oznacza, że serwer widzi Stripe (limit: 6 sprawdzeń na godzinę). Panelu graficznego dla tej diagnostyki nie ma;
    - zarejestruj konto z linku `https://matbravo.com/#signup?invite=TOKEN`, zapłać kartą testową `4242 4242 4242 4242` (każda data w przyszłości, dowolny CVC), sprawdź płatność z 3DS, portal klienta (anulowanie na koniec okresu), usunięcie konta;
    - nowe konta personelu zakładane w tym oknie oznaczaj jako darmowe („Darmowe konto”).
 
-9. **Start (tryb na żywo).** Powtórz krok 6 z `--mode=live` (klucze `sk_live_…` i `rk_live_…`, potem Roll key), w `config.php` zmień `billing_mode` na `'live'` i klucz na `rk_live_…`. Zrób jedną własną płatność i zwróć ją w panelu Stripe. Usuń konta testowe w panelu **Członkowie**. Dopiero wtedy: `'signup_enabled' => true`, usuń linię `signup_invite_token`. To jest start. (Odpowiedzi na bramki z sekcji 3 muszą być gotowe.)
+9. **Start (tryb na żywo).** Powtórz krok 6 z `--mode=live` (klucze `sk_live_…` i `rk_live_…`, potem Roll key), w `config.php` zmień `billing_mode` na `'live'` i klucz na `rk_live_…`. Zrób jedną własną płatność i zwróć ją w panelu Stripe. Usuń konta testowe w panelu **Członkowie**. Dopiero wtedy usuń linię `signup_invite_token` z `config.php` i w panelu kliknij **Ustawienia → „Sprawdź Stripe”** (z kluczami live), a potem wybierz **„Otwarta, płatna”**. Aplikacja sama sprawdzi Stripe i zapyta o konta z okresu bezpłatnego tylko wtedy, gdy płatności są jeszcze „bezpłatne” (po wariancie A w pliku z `billing_enforce=true`, albo po wariancie B bez powrotu do „Otwarta, bezpłatna”, zapisany stan jest już „płatne” i nie pyta o nic). To jest start. `'signup_enabled' => true` w pliku nie jest już potrzebne. (Odpowiedzi na bramki z sekcji 3 muszą być gotowe.)
 
 10. **(Opcjonalnie) webhooki Stripe.** Hosting odpowiada 403 na adresy centrów danych, więc Stripe zwykle nie dostarczy powiadomień; płatności działają poprawnie także bez nich. Treść zgłoszenia do AfterMarket jest w `DEPLOY-PL.md` (Stripe, punkt 6). Dopiero po potwierdzeniu: `stripe-setup.php --mode=… --webhook` i „Send test event” w panelu Stripe.
 
@@ -113,7 +190,7 @@ Każdy krok ma polecenia do skopiowania. Polecenia z `/usr/local/php83/bin/php` 
 | Start (krok 9) | `true` | usunięty | `true`, `billing_mode='live'` | `true` | „Załóż konto · 8,99 zł / mies.” |
 | Darmowa beta (tylko świadomie) | `true` + `signup_free_beta=true` | brak | `false` | `false` | „Załóż konto” bez ceny |
 
-Inne kombinacje aplikacja odrzuca błędem 500 (opis w `INSTALL-PL.md`, Załącznik A).
+Inne kombinacje **w pliku** aplikacja odrzuca błędem 500 (opis w `INSTALL-PL.md`, Załącznik A). Tabela dotyczy wartości początkowych z pliku: od pierwszego zapisu w panelu „Ustawienia” rejestracją i wymuszaniem płatności steruje panel (sekcja 0), a w pliku zostają `billing_enabled`, `billing_mode` i klucze Stripe. Rejestracja **bezpłatna** (bez Stripe) jest teraz zwykłym trybem panelu „Otwarta, bezpłatna”; plik z `signup_free_beta` nie jest do tego potrzebny.
 
 ## 3. Pytania do właściciela i przyjęte odpowiedzi
 
@@ -136,13 +213,28 @@ Inne kombinacje aplikacja odrzuca błędem 500 (opis w `INSTALL-PL.md`, Załącz
 | P13 | Stripe Link i BLIK cykliczny? | Link wyłączony; o BLIK cykliczny prosimy Stripe po starcie |
 | P14 | Karencja po nieudanym odnowieniu i po końcu darmowego okresu? | 7 dni w obu przypadkach; Smart Retries, po ostatniej próbie anulowanie |
 | P15 | Długość sesji członka? | 14 dni bezczynności, 30 dni maksymalnie; personel bez zmian (30 min / 12 h) |
-| P16 | Czy rejestracja może ruszyć przed wymuszeniem płatności (darmowa beta)? | Nie: rejestracja razem z wymuszaniem płatności po testach na żywo; Twoje testy idą przez token zaproszeń |
+| P16 | Czy rejestracja może ruszyć przed wymuszeniem płatności (darmowa beta)? | **Zmienione decyzją właściciela (2026-11-01):** tak. Rejestracja może być otwarta i bezpłatna do czasu Stripe („Otwarta, bezpłatna” w panelu); przejście na płatną robi się w panelu, z decyzją o kontach z okresu bezpłatnego. Testy płatności z tokenem zaproszeń nadal są możliwe |
 | P17 | Czy niepłacący zalogowani czytają archiwa turniejów (z ukrytymi autorami)? | Tak |
 | P18 | Kolejne kanały globalne (np. Judo)? | Tylko cztery kanały; nowe dodaje migracja |
 | **P19** | **BRAMKA STARTU.** Prezentacja ceny: brutto, VAT, OSS, KSeF? | Pokazujemy „8,99 zł / mies.” i „$2.99 / month” jako cenę końcową; podatki i dokumenty ustali sesja prawna **przed** włączeniem `billing_enforce` |
 | P20 | Czy waluta wynika z kraju w profilu, bez wyboru przez użytkownika? | Tak (Polska → 8,99 zł, inne kraje → 2,99 USD); Administrator może zmienić walutę konta bez trwającej subskrypcji |
-| **P21** | **BRAMKA STARTU.** Jaki adres pomocy pokazujemy przy „Nie pamiętasz hasła?” i kto go obsługuje? | Adres w domenie MatBravo (np. `pomoc@matbravo.com`) obsługiwany przez Administratora; bez `support_email` rejestracja się nie włączy |
+| **P21** | **BRAMKA STARTU.** Jaki adres pomocy pokazujemy przy „Nie pamiętasz hasła?” i kto go obsługuje? | **`hello@matbravo.com`** (domyślny adres w panelu „Ustawienia”, można go tam zmienić), obsługiwany przez Administratora; **skrzynka musi istnieć przed scaleniem wydania z rolami**, bo adres pokazuje się na ekranie logowania od wdrożenia (sekcja 0.7) |
 | P22 | Usunięcie konta przy trwającej subskrypcji? | Kończy subskrypcję od razu, bez zwrotu za bieżący okres, po wyraźnym potwierdzeniu; zasady zwrotów ustali sesja prawna |
+
+### Pytania z planu ról i przyjęte odpowiedzi
+
+| # | Pytanie | Przyjęto |
+|---|---|---|
+| O3 | Od jakiego wieku zawodnik zakłada profil „Siebie”? | 16 lat; młodszych zgłasza rodzic lub opiekun na swoim koncie |
+| O4 | Czy turnieje organizatorów od razu są na stronie głównej? | **Tak (Twoja decyzja o pełnej automatyce).** Przełącznik „Wymagaj potwierdzenia organizatorów” (domyślnie wyłączony) zawęża to do potwierdzonych |
+| O6 | Czy w trybie płatnym zawodnik płaci za zgłoszenie? | Tak za nowe zgłoszenie; wycofanie, poprawka własnego zgłoszenia i usunięcie danych zawsze bezpłatnie |
+| O7, O8 | Co z danymi po usunięciu konta zawodnika lub organizatora? | Profil usuwany albo anonimizowany („Dane usunięte”); wynik w zakończonym turnieju zostaje, a **nazwisko w nim zostaje po samym usunięciu konta** (gość widzi inicjały) i zamienia się w inicjały dopiero po „Usuń dane zawodnika” (właściciel przed usunięciem konta, albo Administrator na zanonimizowanej kartotece „Dane usunięte” po usunięciu konta, w „Baza zawodników → Pokaż archiwum”); turnieje organizatora są ukrywane |
+| O9 | Samodzielne zgłoszenia w istniejących turniejach | Wyłączone po aktualizacji; włączasz je w Ustawieniach każdego turnieju |
+| O14 | Teksty prawne przed otwarciem rejestracji | Zalecane przed „Otwarta, bezpłatna”; Twoja decyzja |
+| O17 | Kilku zawodników na jednym koncie | **Jeden profil na konto** (Twoja decyzja z 2026-11-01) |
+| O18 | Czy osoby poniżej 18 lat zgłaszają się same do turniejów niepotwierdzonych organizatorów? | Nie (dotyczy tylko włączonego potwierdzania) |
+| O20 | Jak długo przechowujemy dane społeczności? | 24 miesiące od ostatniego turnieju; do potwierdzenia w sesji prawnej |
+| O21 | Jak często organizator podaje hasło? | Po 30 minutach bezczynności i co 12 godzin, jak personel |
 
 **Dokumenty prawne są poza tym zakresem** (wymaganie 8): regulamin, polityka prywatności, prawo odstąpienia od umowy, zasady zwrotów, ochrona małoletnich i podatki (P19, P22) trzeba przygotować w osobnej sesji prawnej **przed** `billing_enforce=true`. W formularzu rejestracji zarezerwowano miejsce na zgody; tekstów jeszcze nie ma.
 
@@ -180,7 +272,7 @@ Gość i osoba niezalogowana albo bez pełnego dostępu widzi wiadomość bez im
 - **Na co dzień, w panelu Administratora:** **Moderacja → Ustawienia czatu**. Wyłącznik czatu, **tempo odświeżania** (presety „Normalne” — co 2,5 s przy aktywnym oglądaniu, „Oszczędne” — co 5 s, „Awaryjne” — co 15 s; bezczynne karty zwalniają same do 60 s i więcej) oraz komunikat dla wszystkich. Zmiany docierają do każdej otwartej karty przy najbliższym odświeżeniu. Preset nie zmienia się sam; po zawodach wróć do „Normalnego”.
 - **Co patrzeć:** w tym samym miejscu jest „Odpowiedzi hostingu w ostatniej godzinie” (zgłaszają je przeglądarki, bo hosting odrzuca żądania, zanim dotrą do aplikacji; jedno zgłoszenie na minutę i rodzaj odpowiedzi z jednego adresu gościa lub konta, w nim najwyżej 10 odpowiedzi; przed zgłoszeniem do AfterMarket potwierdź problem w DirectAdmin → Resource Usage). Gdy jest ponad 50 odpowiedzi 429 w godzinie (albo kilka 503/508), przełącz na „Oszczędne”; gdy to nie pomaga, na „Awaryjne”.
 - **Limity rejestracji i logowania w dniu zawodów** (wiele telefonów ma jeden adres IP): jeśli ludzie widzą „Zbyt wiele prób…”, dopisz w `config.php` np. `'signup_limit_ip_hour' => 100,` i `'login_limit_ip' => 300,`; po zawodach usuń te linie (`DEPLOY-PL.md`, „Limity w dniu zawodów”).
-- **Wyłączenie wszystkiego, co nowe, jednym ruchem:** usuń dopisane linie z `config.php` (wracają ustawienia domyślne: bez rejestracji i płatności). Przerwa techniczna na czas przywracania bazy: `touch ~/matdraw/shared/maintenance` (i `rm` po zakończeniu — `DEPLOY-PL.md`).
+- **Wyłączenie rejestracji:** Ustawienia → „Wyłączona” (sekcja 0.6); gdy panel nie działa, `'signup_force_off' => true,` w `config.php`. **Wyłączenie wszystkiego, co nowe, z pliku:** usuń dopisane linie z `config.php` (wracają ustawienia początkowe: bez rejestracji i płatności) — dotyczy to jednak tylko wartości, których panel jeszcze nie zapisał. Przerwa techniczna na czas przywracania bazy: `touch ~/matdraw/shared/maintenance` (i `rm` po zakończeniu — `DEPLOY-PL.md`).
 
 ## 7. Etapy 2 i 3 — zaprojektowane, nie zbudowane
 
@@ -202,6 +294,7 @@ Nie ma wskaźników „ktoś pisze” ani licznika obecnych osób; wiadomości p
 
 ## 9. Znane ograniczenia
 
+- **Role, rejestracja, samodzielne zgłoszenia:** osobna lista w sekcji 0.8 (jeden profil na konto, puste teksty zgód, brak e-maili, wyliczanie istnienia konta po adresie e-mail).
 - Diagnostyka serwera dla Administratora (`route=diagnostics`) jest dostępna tylko jako adres API (krok 8); nie ma dla niej ekranu w panelu.
 - Testy przeglądarkowe (Playwright) w CI są osobnym zadaniem informacyjnym: nie blokują wdrożenia.
 - Bez e-maili: weryfikacji adresów przy rejestracji nie ma (stąd procedura konfliktu adresów), reset hasła robi Administrator.
