@@ -393,3 +393,74 @@ test('glue: the currency select is locked while a subscription runs and never se
 test('sign-out leaves no billing detail behind: forget() is safe to call while a dialog request is pending',async()=>{
  await withServer(billingRoutes(detail()),async()=>{members.forget();members.forget();});
 });
+
+// ---- Roles (PLAN-REJESTRACJA-ROLE §5.5, §10.5): badges, filters, organizer actions, the bulk action and the pending badge ----
+test('role filters and the ownerOf filter of a tournament card reach admin-members; the route asks for them once',()=>{
+ for(const key of ['organizers','organizers-pending','athletes','free-signup']){assert.ok(FILTERS.some(([k])=>k===key),key);assert.equal(listBody({filter:key}).filter,key);}
+ assert.deepEqual(listBody({ownerOf:'t-autumn-2026'}),{q:'',filter:'all',page:1,ownerOf:'t-autumn-2026'});
+ assert.deepEqual(listBody({ownerOf:'bad id/'}),{q:'',filter:'all',page:1},'an invalid tournament id is dropped');
+ assert.deepEqual(listCall({filter:'organizers-pending'}),{route:'admin-members',options:{method:'POST',body:{q:'',filter:'organizers-pending',page:1}}});
+ const route=hash=>members.routeFilter(registry.parseRoute(hash).params);
+ assert.deepEqual(route('#members?filter=organizers-pending'),{filter:'organizers-pending',ownerOf:null});
+ assert.deepEqual(route('#members?ownerOf=t1'),{filter:'all',ownerOf:'t1'});
+ assert.equal(route('#members'),null);assert.equal(route('#members?filter=nope'),null);
+ assert.match(pageView({q:'',filter:'organizers-pending',page:1,ownerOf:'t1',data:null,error:''}).html,/Organizator wybranego turnieju/);
+ assert.match(pageView({q:'',filter:'all',page:1,data:null,error:''}).html,/<option value="organizers-pending">Organizatorzy do potwierdzenia<\/option>/);
+});
+
+test('role badges and organizer actions from the sparse fields caps, trusted and freeSignup',()=>{
+ const {roleBadges,organizerActions}=members,texts=m=>roleBadges(m).map(b=>b.text);
+ assert.deepEqual(texts({}),[],'a member without roles has no badges');
+ assert.deepEqual(texts({caps:{organizer:true}}),['Organizator']);
+ assert.deepEqual(texts({caps:{organizer:true,organizerTrusted:true},trusted:true}),['Organizator — potwierdzony']);
+ assert.deepEqual(texts({caps:{organizer:false,organizerBlocked:true}}),['Organizator — zablokowany']);
+ assert.deepEqual(texts({caps:{athlete:true},freeSignup:true}),['Zawodnik','Konto z okresu bezpłatnego']);
+ assert.deepEqual(organizerActions({caps:{organizer:true}}),['trust','block']);assert.deepEqual(organizerActions({caps:{organizer:true},trusted:true}),['untrust','block']);
+ assert.deepEqual(organizerActions({caps:{organizerBlocked:true}}),['unblock']);assert.deepEqual(organizerActions({caps:{athlete:true}}),[]);
+ const row=memberRow({id:'u1',email:'a@b.pl',active:true,billing:{state:'free'},caps:{organizer:true,athlete:true},tournaments:3,freeSignup:true}).html;
+ assert.match(row,/Organizator<\/span>/);assert.match(row,/Zawodnik/);assert.match(row,/Konto z okresu bezpłatnego/);assert.match(row,/Turnieje: 3/);
+ assert.match(row,/data-mem-act="org-trust"/);assert.match(row,/data-mem-act="org-block"/);assert.match(row,/data-mem-select="u1"/);assert.ok(!/ checked/.test(row));
+ assert.match(memberRow({id:'u1',email:'a@b.pl',active:true,billing:null},{selected:true}).html,/data-mem-select="u1" checked/);
+ assert.ok(!/org-/.test(memberRow({id:'u2',email:'b@b.pl',active:true,billing:null}).html),'no organizer actions without the role');
+ setLanguage('en',{persist:false});try{assert.deepEqual(texts({caps:{organizer:true,organizerTrusted:true}}),['Organiser — confirmed']);}finally{setLanguage('pl',{persist:false});}
+});
+
+test('trust, untrust, block and restore of the organizer role, the account block with hidden tournaments, create with the role',()=>{
+ assert.deepEqual(members.trustCall('u1',true),{route:'admin-member',options:{method:'POST',body:{action:'organizer-trust',userId:'u1',trusted:true}}});
+ assert.deepEqual(members.trustCall('u1',false).options.body,{action:'organizer-trust',userId:'u1',trusted:false});
+ assert.deepEqual(members.organizerCall('u1',{blocked:true,hide:true,reason:'Spam'}).options.body,{action:'organizer',userId:'u1',blocked:true,hideTournaments:true,reason:'Spam'});
+ assert.deepEqual(members.organizerCall('u1',{blocked:true}).options.body,{action:'organizer',userId:'u1',blocked:true});
+ assert.deepEqual(members.organizerCall('u1',{blocked:false,hide:true}).options.body,{action:'organizer',userId:'u1',blocked:false},'restoring never hides');
+ assert.deepEqual(members.blockCall('u1',{hide:true,reason:''}).options.body,{action:'active',userId:'u1',active:false,hideTournaments:true,reason:''});
+ assert.deepEqual(members.blockCall('u1').options.body,{action:'active',userId:'u1',active:false});
+ assert.deepEqual(members.hideReason('  a   b '),{ok:true,reason:'a b'});assert.equal(members.hideReason('x'.repeat(201)).ok,false);
+ assert.equal(createBody({email:'a@b.pl',organizer:true}).organizer,true);assert.ok(!('organizer' in createBody({email:'a@b.pl',organizer:false})));
+});
+
+test('bulk action: the payload of the selected rows and the done/failed summary',()=>{
+ const {bulkCall,bulkSummary,bulkSummaryView,bulkBar,BULK_MAX}=members;
+ assert.equal(BULK_MAX,50);
+ assert.deepEqual(bulkCall(['u1','u2','u1',''],{reason:'Fałszywe turnieje',deactivate:true}),{ok:true,call:{route:'admin-member',options:{method:'POST',body:{action:'organizer-bulk',userIds:['u1','u2'],block:true,hideTournaments:true,deactivate:true,reason:'Fałszywe turnieje'}}}});
+ assert.equal(bulkCall(['u1']).call.options.body.deactivate,false);
+ assert.equal(bulkCall([]).ok,false);assert.match(bulkCall([]).error,/co najmniej jedno/);
+ assert.equal(bulkCall(Array.from({length:51},(_,i)=>'u'+i)).ok,false);assert.equal(bulkCall(Array.from({length:50},(_,i)=>'u'+i)).ok,true);
+ const items=[{id:'u1',name:'Marta K.',email:'m@b.pl'},{id:'u2',name:'',email:HOSTILE}];
+ const s=bulkSummary({done:['u1'],failed:[{id:'u2',error:'Konto nie istnieje.'},{id:'u9',error:'Błąd serwera. Skontaktuj się z Administratorem.'}]},items);
+ assert.deepEqual(s,{done:['Marta K.'],failed:[{name:HOSTILE,error:'Konto nie istnieje.'},{name:'u9',error:'Błąd serwera. Skontaktuj się z Administratorem.'}]});
+ const html=bulkSummaryView(s).html;assert.ok(!html.includes('<img'));assert.match(html,/Zrobione: 1/);assert.match(html,/Nie udało się: 2/);assert.match(html,/Marta K\./);
+ setLanguage('en',{persist:false});try{assert.notEqual(bulkSummary({failed:[{id:'u2',error:'Konto nie istnieje.'}]},items).failed[0].error,'Konto nie istnieje.','server messages are translated');}finally{setLanguage('pl',{persist:false});}
+ assert.equal(bulkBar(0).html,'');assert.match(bulkBar(3).html,/Zaznaczono: 3/);assert.match(bulkBar(3).html,/data-mem-act="org-bulk"/);
+ const list=resultsView({selected:new Set(['a']),data:{items:[{id:'a',email:'a@b.pl',active:true,billing:null},{id:'b',email:'b@b.pl',active:true,billing:null}],total:2,page:1}}).html;
+ assert.match(list,/Zaznaczono: 1/);assert.match(list,/data-mem-select="a" checked/);assert.ok(!/data-mem-select="b" checked/.test(list));
+});
+
+test('the pending badge: the members menu item shows organizers waiting for confirmation (me.features.pendingOrganizers)',async()=>{
+ globalThis.BroadcastChannel=undefined;// me.js (imported by settings-boot.js) would otherwise keep this process alive
+ const {pendingOrganizers}=await import('../dist/settings-boot.js');
+ assert.equal(pendingOrganizers({user:{role:'admin'},features:{pendingOrganizers:2}}),2);
+ assert.equal(pendingOrganizers({user:{role:'admin'},features:{pendingOrganizers:0}}),0,'0 while the confirmation is not required (§17)');
+ assert.equal(pendingOrganizers({user:{role:'member'},features:{pendingOrganizers:2}}),0);
+ registry.setBadge('members',pendingOrganizers({user:{role:'admin'},features:{pendingOrganizers:2}}));
+ assert.equal(registry.navItems({role:'admin'}).find(i=>i.id==='members').badge,2);
+ registry.setBadge('members',0);assert.equal(registry.navItems({role:'admin'}).find(i=>i.id==='members').badge,0);
+});
