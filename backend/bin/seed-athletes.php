@@ -10,13 +10,18 @@ declare(strict_types=1);
  *
  * Options: --count=90, --seed=2026, --admin=e-mail (default: first active administrator).
  * Athletes are saved through Domain::execute, so the application's own validation applies.
- * They belong to six clubs ending in " (demo)"; --remove deletes those clubs, their profiles,
- * entries and any draws that contain them. Clubs with user accounts are never deleted.
+ * They belong to six clubs ending in " (demo)", created unverified by the seeding administrator, so they are not on
+ * the public club list nor named in public brackets (PLAN-REJESTRACJA-ROLE §6.3). --remove deletes the staff-created
+ * profiles without an owner in those clubs, their entries, the draws that contain them and the clubs; it refuses and
+ * changes nothing while a demo club holds any other profile or entry (community data) or is a merge target. Clubs with
+ * user accounts are never deleted. A demo club is a club whose name is exactly one of the six names (one rule for seeding
+ * and --remove); a club whose name only resembles one (Clubs::key) stops the seeding until it is renamed. Seeding and
+ * --remove first unverify demo clubs left verified by an earlier version (migration 0007 verified every existing club).
  */
 if(PHP_SAPI!=='cli'){http_response_code(404);exit;}
 require dirname(__DIR__).'/bootstrap.php';
 require_once dirname(__DIR__).'/src/SampleAthletes.php';
-use MatDraw\{Domain,Repository,Rules,SampleAthletes};
+use MatDraw\{Clubs,Domain,Repository,Rules,SampleAthletes};
 
 $opts=getopt('',['dry-run','list','remove','tournament:','count:','seed:','admin:','date:']);
 $out=fn(string $s)=>fwrite(STDOUT,$s."\n");
@@ -37,9 +42,11 @@ try {
   exit(0);
  }
 
+ if(($hidden=hideDemoClubs($pdo))>0)$out("Unverified $hidden demo clubs (off the public club list).");
+
  if(isset($opts['remove'])){
   $n=remove($pdo);
-  $out($n?"Removed $n sample athletes, their entries, draws and demo clubs.":'No sample data found.');
+  $out($n===null?'No sample data found.':"Removed $n sample athletes, their entries, draws and demo clubs.");
   exit(0);
  }
 
@@ -57,9 +64,12 @@ try {
 
   $names=SampleAthletes::clubNames();$clubIds=[];
   foreach($names as $name){
-   $club=null;foreach($db['clubs'] as $c)if($c['name']===$name)$club=$c;
+   // The exact name, as --remove finds it; a club that only resembles it (Clubs::key) or has accounts would stay behind.
+   $club=null;foreach($db['clubs'] as $c)if($c['name']===$name)$club=$c;elseif(Clubs::key($c['name'])===Clubs::key($name))throw new RuntimeException("The club \"{$c['name']}\" resembles the demo club \"$name\"; rename it in the app (Kluby) first.");
+   if($club)foreach($db['users'] as $x)if($x['clubId']===$club['id'])throw new RuntimeException("The demo club \"$name\" has user accounts; rename it in the app (Kluby) first.");
    if($club)foreach($db['profiles'] as $p)if($p['clubId']===$club['id'])throw new RuntimeException('Sample athletes already exist. Run with --remove first.');
-   if(!$club){$club=['id'=>Domain::id(),'name'=>$name];$db['clubs'][]=$club;}
+   // Unverified and created by the seeding administrator: off the public club list and out of public brackets (§6.3).
+   if(!$club){$club=['id'=>Domain::id(),'name'=>$name,'verified'=>false,'createdBy'=>$admin['id'],'createdAt'=>time(),'mergedInto'=>null];$db['clubs'][]=$club;}
    $clubIds[]=$club['id'];
   }
 
@@ -97,24 +107,58 @@ function summary(array $athletes,?array $clubNames,string $date,callable $out,?s
  foreach($unassigned as $u)$out("  unassigned: $u");
 }
 
-/** Deletes demo clubs (only those without accounts), their profiles, entries and draws containing them. */
-function remove(PDO $pdo):int {
+/** Ids of the demo clubs without accounts: the exact names (the column's collation also matches case and accents). */
+function demoClubs(PDO $pdo,bool $verified=false):array {
+ $names=SampleAthletes::clubNames();$in=implode(',',array_fill(0,count($names),'?'));
+ $q=$pdo->prepare("SELECT c.id,c.name FROM clubs c WHERE c.name IN ($in)".($verified?' AND c.verified=1':'')." AND NOT EXISTS (SELECT 1 FROM users u WHERE u.club_id=c.id)");$q->execute($names);
+ return array_values(array_map(fn($r)=>$r['id'],array_filter($q->fetchAll(PDO::FETCH_ASSOC),fn($r)=>in_array($r['name'],$names,true))));
+}
+
+/** Unverifies demo clubs (off the public club list and out of public brackets, §6.3) under the workspace lock; staff_rev=revision=R as Domain stamps a club change. */
+function hideDemoClubs(PDO $pdo):int {
  $pdo->beginTransaction();
  try {
   $pdo->query('SELECT revision FROM app_meta WHERE id=1 FOR UPDATE')->fetch();
-  $names=SampleAthletes::clubNames();$in=implode(',',array_fill(0,count($names),'?'));
-  $q=$pdo->prepare("SELECT c.id FROM clubs c WHERE c.name IN ($in) AND NOT EXISTS (SELECT 1 FROM users u WHERE u.club_id=c.id)");$q->execute($names);
-  $clubs=$q->fetchAll(PDO::FETCH_COLUMN);
-  if(!$clubs){$pdo->rollBack();return 0;}
+  $ids=demoClubs($pdo,true);if(!$ids){$pdo->rollBack();return 0;}
+  $R=(int)$pdo->query('SELECT revision FROM app_meta WHERE id=1')->fetchColumn()+1;
+  $pdo->prepare('UPDATE clubs SET verified=0 WHERE id IN ('.implode(',',array_fill(0,count($ids),'?')).')')->execute($ids);
+  $pdo->prepare('UPDATE app_meta SET revision=?,staff_rev=? WHERE id=1')->execute([$R,$R]);
+  $pdo->commit();return count($ids);
+ }catch(Throwable $e){$pdo->rollBack();throw $e;}
+}
+
+/**
+ * Deletes the demo clubs (only those without accounts) with their staff-created profiles without an owner, the entries of
+ * those profiles and the draws that contain them, under the workspace lock. Refuses (RuntimeException, nothing changed)
+ * while a demo club holds a profile of a member or with an owner, an entry of another profile, or is a merge target.
+ * The revision stamps follow Domain (§5.8): changed tournaments get rev=R, removed clubs staff_rev=R, revision=R.
+ */
+function remove(PDO $pdo):?int {
+ $pdo->beginTransaction();
+ try {
+  $pdo->query('SELECT revision FROM app_meta WHERE id=1 FOR UPDATE')->fetch();
+  $clubs=demoClubs($pdo);
+  if(!$clubs){$pdo->rollBack();return null;}
   $cin=implode(',',array_fill(0,count($clubs),'?'));
-  $q=$pdo->prepare("SELECT id FROM profiles WHERE club_id IN ($cin)");$q->execute($clubs);
-  $ids=array_flip($q->fetchAll(PDO::FETCH_COLUMN));
+  $q=$pdo->prepare("SELECT p.id FROM profiles p JOIN users u ON u.id=p.created_by WHERE p.club_id IN ($cin) AND p.owner_user_id IS NULL AND u.role IN ('admin','editor','club')");$q->execute($clubs);
+  $ids=$q->fetchAll(PDO::FETCH_COLUMN);$keep=array_flip($ids);
+  $q=$pdo->prepare("SELECT COUNT(*) FROM profiles WHERE club_id IN ($cin)");$q->execute($clubs);$others=(int)$q->fetchColumn()-count($ids);
+  $q=$pdo->prepare("SELECT profile_id FROM entries WHERE club_id IN ($cin)");$q->execute($clubs);foreach($q->fetchAll(PDO::FETCH_COLUMN) as $p)if(!isset($keep[$p]))$others++;
+  $q=$pdo->prepare("SELECT COUNT(*) FROM clubs WHERE merged_into IN ($cin)");$q->execute($clubs);$others+=(int)$q->fetchColumn();
+  if($others)throw new RuntimeException('Demo clubs are used by community profiles; merge or rename them in the app (Kluby) first.');
+  $R=(int)$pdo->query('SELECT revision FROM app_meta WHERE id=1')->fetchColumn()+1;$touched=[];
   foreach($pdo->query('SELECT tournament_id,category_key,data FROM draws')->fetchAll() as $d){
    $slots=json_decode($d['data'],true)['slots']??[];
-   if(array_intersect_key(array_flip(array_filter($slots,'is_string')),$ids))$pdo->prepare('DELETE FROM draws WHERE tournament_id=? AND category_key=?')->execute([$d['tournament_id'],$d['category_key']]);
+   if(array_intersect_key(array_flip(array_filter($slots,'is_string')),$keep)){$pdo->prepare('DELETE FROM draws WHERE tournament_id=? AND category_key=?')->execute([$d['tournament_id'],$d['category_key']]);$touched[$d['tournament_id']]=true;}
   }
-  foreach(['entries','profiles','clubs'] as $table)$pdo->prepare("DELETE FROM $table WHERE ".($table==='clubs'?'id':'club_id')." IN ($cin)")->execute($clubs);
-  $pdo->exec('UPDATE app_meta SET revision=revision+1 WHERE id=1');
+  if($ids){
+   $pin=implode(',',array_fill(0,count($ids),'?'));
+   $q=$pdo->prepare("SELECT DISTINCT tournament_id FROM entries WHERE profile_id IN ($pin)");$q->execute($ids);foreach($q->fetchAll(PDO::FETCH_COLUMN) as $t)$touched[$t]=true;
+   foreach(['entries'=>'profile_id','entry_withdrawals'=>'profile_id','profiles'=>'id'] as $table=>$col)$pdo->prepare("DELETE FROM $table WHERE $col IN ($pin)")->execute($ids);
+  }
+  $pdo->prepare("DELETE FROM clubs WHERE id IN ($cin)")->execute($clubs);
+  if($touched){$tin=implode(',',array_fill(0,count($touched),'?'));$pdo->prepare("UPDATE tournaments SET rev=? WHERE id IN ($tin)")->execute([$R,...array_keys($touched)]);}
+  $pdo->prepare('UPDATE app_meta SET revision=?,staff_rev=? WHERE id=1')->execute([$R,$R]);
   $pdo->commit();
   return count($ids);
  }catch(Throwable $e){$pdo->rollBack();throw $e;}
