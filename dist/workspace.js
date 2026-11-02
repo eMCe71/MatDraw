@@ -5,7 +5,9 @@ import {initials,warsawToday} from './guest-view.js';
  * PLAN-REJESTRACJA-ROLE). tests/roles-parity.test.mjs runs the same commands through both and compares statuses, messages of
  * the new paths and the normalised state; Domain::forgetMember and Domain::retain are PHP only. Members of the demo live in
  * db.users (the PHP workspace holds only staff plus the actor of the request); db.flags {organizers, trustRequired} mirrors
- * Settings::flags (missing = 'on', true). Times are epoch seconds, dates Europe/Warsaw (warsawToday). */
+ * Settings::flags (missing = 'on', true). Times are epoch seconds, dates Europe/Warsaw (warsawToday).
+ * Tournament materials (PLAN-MATERIALY): tournament.material, materialMeta, materialsView and rulesText mirror Domain and
+ * Materials (tests/roles-parity.test.mjs, tests/materials.test.mjs); the demo stores its files as src (dist/demo or a data URL). */
 
 export const ROLES={admin:'Administrator',editor:'Edytor',club:'Reprezentant klubu'};
 export const STATUSES={draft:'Roboczy',open:'Zapisy otwarte',closed:'Zapisy zamknięte',finished:'Zakończony'};
@@ -23,6 +25,77 @@ export const contact=s=>CONTACT.test(s);
 export const UNAFFILIATED='unaffiliated',DELETED='Dane usunięte';
 const NONE_KEYS=['niezrzeszony','niezrzeszona','brak','bezklubu','none'];
 const TOURNAMENT_SCOPE=['entry.remove','checkin.save','draw.create','result.save','result.clear','tournament.hide'];
+// Tournament materials (PLAN-MATERIALY §2, §4): mirror of backend/src/Materials.php (meta, view, text) and Domain::materialsPublic.
+// The rules are a PDF ({f,b,at}) or a typed text ({t,at}, the same shape in the demo).
+export const MATERIAL_KINDS=['poster','rules'],POSTER_MAX=4194304,RULES_MAX=10485760,RULES_TEXT_MAX=20000;
+const MATERIAL_SIDE=4096,MATERIAL_AT=9999999999;
+const ILL_FORMED=/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+const trimText=s=>s.replace(/^[\s\p{Z}]+|[\s\p{Z}]+$/gu,'');
+/**
+ * Mirror of Materials::text: a typed rules text as stored (Text::clean's steps for multiline text without its line limit, a fixed
+ * point): CRLF/CR → LF, tab → space, controls but LF and format characters but U+200D removed, NFC, white-space-only lines empty,
+ * at most 2 empty lines in a row, trimmed. Not a string or ill-formed: null; may give ''. The demo saves {t:rulesText(text), at}.
+ */
+export function rulesText(raw){
+ if(typeof raw!=='string'||ILL_FORMED.test(raw))return null;
+ const s=raw.replace(/\r\n/g,'\n').replace(/\r/g,'\n').replace(/\t/g,' ').replace(/(?!\n)\p{Cc}/gu,'').replace(/(?!‍)\p{Cf}/gu,'').normalize('NFC');
+ const lines=[];let empty=0;
+ for(const line of s.split('\n')){if(trimText(line)===''){if(++empty>2)continue;lines.push('');}else{empty=0;lines.push(line);}}
+ return trimText(lines.join('\n'));
+}
+const SHA_K=Uint32Array.from([0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
+ 0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,
+ 0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,
+ 0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2]);
+const shaCache=new Map();
+/** SHA-256 of the UTF-8 bytes of text as hex (synchronous: v of a typed rules text, as PHP hash('sha256')); the last 20 kept. */
+function sha256(text){
+ if(shaCache.has(text))return shaCache.get(text);
+ const data=new TextEncoder().encode(text),n=((data.length+9+63)>>6)<<6,m=new Uint8Array(n),w=new Uint32Array(64);m.set(data);m[data.length]=0x80;
+ const bits=data.length*8;new DataView(m.buffer).setUint32(n-8,Math.floor(bits/2**32));new DataView(m.buffer).setUint32(n-4,bits>>>0);
+ const h=Uint32Array.from([0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19]),dv=new DataView(m.buffer),r=(x,k)=>(x>>>k)|(x<<(32-k));
+ for(let o=0;o<n;o+=64){
+  for(let i=0;i<16;i++)w[i]=dv.getUint32(o+i*4);
+  for(let i=16;i<64;i++)w[i]=(w[i-16]+(r(w[i-15],7)^r(w[i-15],18)^(w[i-15]>>>3))+w[i-7]+(r(w[i-2],17)^r(w[i-2],19)^(w[i-2]>>>10)))>>>0;
+  let [a,b,c,d,e,f,g,k]=h;
+  for(let i=0;i<64;i++){const t1=(k+(r(e,6)^r(e,11)^r(e,25))+((e&f)^(~e&g))+SHA_K[i]+w[i])>>>0,t2=((r(a,2)^r(a,13)^r(a,22))+((a&b)^(a&c)^(b&c)))>>>0;k=g;g=f;f=e;e=(d+t1)>>>0;d=c;c=b;b=a;a=(t1+t2)>>>0;}
+  h[0]+=a;h[1]+=b;h[2]+=c;h[3]+=d;h[4]+=e;h[5]+=f;h[6]+=g;h[7]+=k;
+ }
+ const hex=Array.from(h,x=>x.toString(16).padStart(8,'0')).join('');
+ if(shaCache.size>=20)shaCache.delete(shaCache.keys().next().value);shaCache.set(text,hex);return hex;
+}
+const MATERIAL_FILE={poster:/^[0-9a-f]{32}\.(?:webp|jpg)$/,rules:/^[0-9a-f]{32}\.pdf$/};
+// The demo keeps the file itself: src instead of f, a file of dist/demo or a data URL (the poster already shrunk by the browser).
+const DEMO_SRC={poster:/^(?:\.\/demo\/[a-z0-9-]{1,60}\.(?:webp|jpg|jpeg)|data:image\/(?:webp|jpeg);base64,[A-Za-z0-9+/]+={0,2})$/,rules:/^(?:\.\/demo\/[a-z0-9-]{1,60}\.pdf|data:application\/pdf;base64,[A-Za-z0-9+/]+={0,2})$/};
+const DEMO_SRC_LENGTH={poster:Math.ceil(POSTER_MAX/3)*4+32,rules:Math.ceil(RULES_MAX/3)*4+40};
+const intIn=(v,min,max)=>Number.isInteger(v)&&v>=min&&v<=max;
+const keysAre=(o,keys)=>Object.keys(o).sort().join()===[...keys].sort().join();
+/** Mirror of Materials::meta: the stored meta of kind when v is exactly valid ({f,w,h,c,at} / {f,b,at} / {t,at}; the demo: src instead of f), else null. */
+export function materialMeta(kind,v){
+ if(!isObj(v)||!MATERIAL_KINDS.includes(kind))return null;
+ if(kind==='rules'&&has(v,'t')){const t=v.t,n=typeof t==='string'?[...t].length:0;return keysAre(v,['t','at'])&&typeof t==='string'&&rulesText(t)===t&&n>=1&&n<=RULES_TEXT_MAX&&intIn(v.at,0,MATERIAL_AT)?{t,at:v.at}:null;}
+ const demo=!has(v,'f')&&has(v,'src'),key=demo?'src':'f',file=v[key];
+ if(typeof file!=='string'||(demo?file.length>DEMO_SRC_LENGTH[kind]||!DEMO_SRC[kind].test(file):!MATERIAL_FILE[kind].test(file)))return null;
+ if(kind==='poster')return keysAre(v,[key,'w','h','c','at'])&&intIn(v.w,1,MATERIAL_SIDE)&&intIn(v.h,1,MATERIAL_SIDE)&&typeof v.c==='string'&&/^#[0-9a-f]{6}$/.test(v.c)&&intIn(v.at,0,MATERIAL_AT)?{[key]:file,w:v.w,h:v.h,c:v.c,at:v.at}:null;
+ return keysAre(v,[key,'b','at'])&&intIn(v.b,1,RULES_MAX)&&intIn(v.at,0,MATERIAL_AT)?{[key]:file,b:v.b,at:v.at}:null;
+}
+/** v of a demo file: 12 hex characters of a hash of its address (its length, beginning and end: a data URL may be megabytes). */
+function demoVersion(src){
+ const s=src.length+':'+src.slice(0,4096)+src.slice(-4096);let a=0x811c9dc5,b=0x9e3779b9;
+ for(let i=0;i<s.length;i++){const c=s.charCodeAt(i);a=Math.imul(a^c,0x01000193)>>>0;b=Math.imul(b^c,0x5bd1e995)>>>0;}
+ return (a.toString(16).padStart(8,'0')+b.toString(16).padStart(8,'0')).slice(0,12);
+}
+/**
+ * Mirror of Materials::view: sparse poster {v,w,h,color} and rules {v,size,type:'pdf'|'text'} of a tournament's materials. The demo
+ * (no material route) adds src to its files and text to a typed rules text; the server's views never carry either.
+ */
+export function materialsView(m){
+ const out={};if(!isObj(m))return out;
+ const p=materialMeta('poster',m.poster),r=materialMeta('rules',m.rules);
+ if(p)out.poster={v:p.f?p.f.slice(0,12):demoVersion(p.src),w:p.w,h:p.h,color:p.c,...(p.src?{src:p.src}:{})};
+ if(r)out.rules=has(r,'t')?{v:sha256(r.t).slice(0,12),size:[...r.t].length,type:'text',text:r.t}:{v:r.f?r.f.slice(0,12):demoVersion(r.src),size:r.b,type:'pdf',...(r.src?{src:r.src}:{})};
+ return out;
+}
 /** Log lines that end with an athlete's name, as Domain::NAMED; audit() marks each with the athlete's profileId. */
 const NAMED=/^((?:Zgłoszono|Zmieniono zgłoszenie|Zgłoszenie własne|Zmieniono zgłoszenie własne|Zmieniono klub w zgłoszeniu|Kontrola startowa|Wycofano zgłoszenie): )(.+)$/su;
 const nowSeconds=()=>Math.floor(Date.now()/1000);
@@ -65,6 +138,8 @@ export function trustedOrganizer(db,userId){
  return !!o&&!o.blocked&&(!!o.trusted||!trustRequired(db));
 }
 export const trusted=(db,t)=>db?!community(db,t)||trustedOrganizer(db,t.createdBy):!t?.community||!!t?.trusted;
+/** Mirror of Domain::materialsPublic: everyone may read the materials of t (not a draft, not hidden, the creator not closed); its manager always. */
+export const materialsPublic=(db,t)=>!!t&&t.status!=='draft'&&!isset(t.hiddenBy)&&!closedCreator(db,t);
 /** Mirror of Domain::closedCreator (final review R1.6, R2.1): a member creator blocked as organizer or deactivated (no new entries from outside; canEnter does not read it); without db the view field entriesClosed. Blocking also takes away trust, so in a blocked organizer's tournament only owners withdraw and the Administrator handles the rest (review M3). */
 export function closedCreator(db,t){
  if(!db)return t?.entriesClosed===true;if(typeof t?.createdBy!=='string')return false;let o=isObj(db.organizers)&&Object.hasOwn(db.organizers,t.createdBy)?db.organizers[t.createdBy]:null;
@@ -114,7 +189,8 @@ export function publicWorkspace(db,user){
   const entries=t.entries.filter(e=>manager?!(hidden&&!admin&&e.self):entryVisible(db,user,t,e,profiles,roots));for(const e of entries)used.add(e.clubId??'');
   const full=manager||role==='editor'&&!isCommunity;let draws=full?t.draws:{},activity=full?t.activity.map(({text,time})=>({text,time})):[];
   if(manager&&hidden&&!admin){const ids=new Set(entries.map(e=>e.id));draws=Object.fromEntries(Object.entries(draws).filter(([,d])=>d.slots.filter(Boolean).every(x=>ids.has(x))));activity=[];}
-  const v={...t,entries,draws,activity,community:isCommunity,trusted:trusted(db,t),selfEntry:t.selfEntry===true,rev:Number(t.rev)||0};
+  // Materials (PLAN-MATERIALY §2.1): the stored meta never leaves; the sparse views only where the material route serves the files.
+  const {materials,...rest}=t,v={...rest,...(manager||materialsPublic(db,t)?materialsView(materials):{}),entries,draws,activity,community:isCommunity,trusted:trusted(db,t),selfEntry:t.selfEntry===true,rev:Number(t.rev)||0};
   if(manager){v.hidden=hidden;v.hideReason=t.hideReason??null;}else{delete v.hideReason;delete v.createdAt;}
   // No new entries from outside (closedCreator, R1.6/R2.1), as Domain::publicData: only this flag; corrections stay.
   if(!manager&&closedCreator(db,t))v.entriesClosed=true;
@@ -138,8 +214,9 @@ export function publicWorkspace(db,user){
  if(admin)out.users=db.users.filter(u=>STAFF.includes(u.role)).map(publicUser);
  return out;
 }
-/** Tournaments as Repository::guestTournaments() hands them to GuestView: community and trusted flags, and for every entry the current club. */
-export function guestTournaments(db){return (db?.tournaments||[]).map(t=>({...t,community:community(db,t),trusted:trusted(db,t),entries:t.entries.map(e=>({...e,currentClub:currentClub(db.clubs||[],e.clubId)}))}));}
+/** Tournaments as Repository::guestTournaments() hands them to GuestView: community and trusted flags, for every entry the current
+ * club, and materials only while their creator is not closed (Domain::materialsPublic; GuestView shows them through materialsView). */
+export function guestTournaments(db){return (db?.tournaments||[]).map(t=>{const {materials,...rest}=t;return {...rest,...(isObj(materials)&&!closedCreator(db,t)?{materials}:{}),community:community(db,t),trusted:trusted(db,t),entries:t.entries.map(e=>({...e,currentClub:currentClub(db.clubs||[],e.clubId)}))};});}
 /** The club shown publicly for a snapshot's clubId (§5.6): merged → target; name '' for 'unaffiliated', null when unverified. */
 export function currentClub(clubs,clubId){const c=resolveClub(clubs,clubId),clubIdNow=c?.id??clubId??null;return {id:clubIdNow,name:clubIdNow===UNAFFILIATED?'':c&&c.verified!==false?c.name:null};}
 
@@ -186,6 +263,7 @@ export function stale(db,type,p,expected,actorId=null){
  if(type==='entry.save')return tour(p.tournamentId)||prof(p.profileId);
  if(TOURNAMENT_SCOPE.includes(type))return tour(p.tournamentId);
  if(type==='tournament.save')return isset(p.id)?tour(p.id):staff||own('tournaments');
+ if(type==='tournament.material')return tour(p.id);
  if(type==='profile.save')return (isset(p.id)?prof(p.id):staff||own('profiles'))||tour(reg);
  if(type==='profile.archive'||type==='profile.forget')return prof(p.id);
  if(type.startsWith('account.')||type.startsWith('club.'))return staff;
@@ -214,7 +292,9 @@ export function initialWorkspace(legacy){
  const entries=old.athletes.map(a=>({...a,profileId:a.id,clubId:profiles.find(p=>p.id===a.id).clubId}));
  clubs.push({id:UNAFFILIATED,name:clubs.some(c=>clubKey(c.name)==='niezrzeszony')?'Niezrzeszony (bez klubu)':'Niezrzeszony',verified:true});
  profiles.push({id:'demo-athlete-child',name:'Zuzanna Demo',clubId:clubs[Math.min(1,clubs.length-1)].id,sex:'F',birthDate:'2012-03-08',weight:42,height:152,gradeType:'cup',grade:7,events:['forms'],champion:false,createdBy:'demo-athlete',createdAt:1793484000,archived:false,ownerId:'demo-athlete',relation:'guardian',guardianDeclaredAt:1793484000});
- const t={...old.tournament,id:'t-autumn-2026',status:'open',createdBy:'demo-admin',selfEntry:false,entries,draws:old.draws||{},activity:old.activity||[]};
+ // The demo poster and rules document (PLAN-MATERIALY §3: files of dist/demo, src instead of the server's f).
+ const materials={poster:{src:'./demo/poster-demo.webp',w:1240,h:1754,c:'#2b4c7e',at:1793484000},rules:{src:'./demo/regulamin-demo.pdf',b:48000,at:1793484000}};
+ const t={...old.tournament,id:'t-autumn-2026',status:'open',createdBy:'demo-admin',selfEntry:false,entries,draws:old.draws||{},activity:old.activity||[],materials};
  const second={id:'t-winter-2027',name:'Puchar Zimy 2027',city:'Kraków',date:'2027-02-20',mat:'Mata 1',status:'open',createdBy:'demo-editor',selfEntry:true,entries:[],draws:{},activity:[]};
  // A further published date and an unpublished draft: the login screen's public list shows the first, never the draft.
  const third={id:'t-gp-gdansk-2026',name:'Grand Prix Pomorza 2026',city:'Gdańsk',date:'2026-12-05',mat:'Mata 1',status:'closed',createdBy:'demo-editor',selfEntry:false,entries:[],draws:{},activity:[]};
@@ -358,6 +438,16 @@ function apply(db,user,type,p){
   data.selfEntry=has(p,'selfEntry')?p.selfEntry===true:t?t.selfEntry===true:organizer(user);
   if(t){Object.assign(t,data);audit(t,'Zaktualizowano ustawienia turnieju.');return {id:t.id};}
   const next={id:id(),createdBy:user.id,createdAt:now,...data,entries:[],draws:{},activity:[]};audit(next,'Utworzono turniej.');db.tournaments.push(next);return {id:next.id};
+ }
+ // Materials (PLAN-MATERIALY §2.4), mirror of Domain: the server's routes set them; the demo passes src instead of f.
+ if(type==='tournament.material'){
+  const t=tour(db,user,p.id);if(!manages(user,t))fail('Możesz edytować tylko własne turnieje.',403);
+  const kind=p.kind;if(!MATERIAL_KINDS.includes(kind)||!has(p,'value'))fail('Niepoprawna operacja.',400);
+  const value=p.value===null?null:materialMeta(kind,p.value);if(p.value!==null&&!value)fail('Niepoprawna operacja.',400);
+  const m=isObj(t.materials)?{...t.materials}:{},old=m[kind],previous=isObj(old)&&typeof old.f==='string'?old.f:null;
+  if(value)m[kind]=value;else delete m[kind];
+  if(Object.keys(m).length)t.materials=m;else delete t.materials;
+  return {kind,previous};
  }
  if(type==='profile.save'){
   const old=isset(p.id)?prof(db,user,p.id):null;
