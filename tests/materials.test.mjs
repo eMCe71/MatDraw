@@ -148,6 +148,16 @@ test('the demo keeps the file itself (src: a file of dist/demo or a data URL) an
  assert.match(view.poster.v,/^[0-9a-f]{12}$/);assert.notEqual(view.poster.v,view.rules.v);assert.deepEqual(materialsView({poster:ok[0][1]}).poster.v,view.poster.v,'stable');
  assert.deepEqual([view.poster.src,view.rules.src,view.rules.size],['./demo/poster-demo.webp','./demo/regulamin-demo.pdf',48000]);
 });
+test('account deletion (Domain::forgetMember) drops the materials of every tournament the person created, others keep theirs',{skip},()=>{
+ // final review of the materials, point 3: a poster may show people (R12); the sweep then deletes the unreferenced files.
+ const db=initialWorkspace(),base=db.tournaments.find(x=>x.id==='t-winter-2027');
+ const mk=(id,date,status)=>({...structuredClone(base),id,createdBy:'u-gone',date,status,entries:[],draws:{},hiddenBy:null,materials:{poster:P,rules:R}});
+ db.tournaments.push(mk('t-gone-past','2020-05-05','finished'),mk('t-gone-next','2099-05-05','open'));
+ const r=spawnSync(php,['tests/php-bridge-roles.php'],{input:JSON.stringify({job:'forgetMember',db,users:['u-gone']}),encoding:'utf8',maxBuffer:100_000_000});
+ assert.equal(r.status,0,r.stderr);const out=JSON.parse(r.stdout).db;
+ for(const id of ['t-gone-past','t-gone-next'])assert.ok(!('materials' in out.tournaments.find(x=>x.id===id)),id);
+ assert.ok(out.tournaments.find(x=>x.id==='t-autumn-2026').materials,'a tournament of someone else keeps its materials');
+});
 test('demo seed and commands: t-autumn-2026 has the demo poster and rules; tournament.material sets a data URL, removes, refuses others',()=>{
  let db=initialWorkspace();const t=db.tournaments.find(x=>x.id==='t-autumn-2026');
  assert.deepEqual(t.materials,{poster:{src:'./demo/poster-demo.webp',w:1240,h:1754,c:'#4c4e59',at:1793484000},rules:{src:'./demo/regulamin-demo.pdf',b:41049,at:1793484000}});

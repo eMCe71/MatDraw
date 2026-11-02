@@ -114,3 +114,20 @@ jednego rodzaju zastępuje drugi.
   akapit, `## ` = nagłówek, `- ` lub `• ` = punkt listy, `1. ` = lista numerowana, adresy `https://…` jako linki
   (`rel="noopener noreferrer nofollow ugc"`, nowa karta). „Regulamin” otwiera czytelny dialog (na telefonie pełny ekran);
   tekst pobierany z trasy `material` (w demo z `rules.text`). PDF otwiera się jak wcześniej.
+
+## 5. Przegląd niezależny (2026-11-02) i rozstrzygnięcia
+
+Przegląd bezpieczeństwa, poprawności i UX (także ataki na działający serwer: SVG udający PNG, bomba pikselowa, HTML udający
+PDF, `t=../..`, cudzy turniej, plakat szkicu jako gość, `<script>` i `javascript:` w tekście): bez uwag blokujących i poważnych.
+Cztery drobne, wszystkie poprawione z testami, które bez poprawki nie przechodzą:
+
+| # | Uwaga | Rozstrzygnięcie |
+|---|---|---|
+| 1 | Kafel „Dodaj plakat” na kartach pojawiał się dopiero po ponownym narysowaniu strony (po wczytaniu `me`) | `cardPoster`: kafel także przed wczytaniem danych konta (jak `available()`); test zaraz po zalogowaniu i po przeładowaniu |
+| 2 | Wklejenie obrazka w dowolne pole okna („Kopiuj obraz” daje plik i text/html) podmieniało plakat | Wklejanie działa tylko w sekcji „Materiały” i nigdy w polu tekstowym; test z wklejeniem do nazwy turnieju |
+| 3 | Usunięcie konta zostawiało materiały turniejów tej osoby w bazie i na dysku | `Domain::forgetMember` usuwa `materials` każdego turnieju utworzonego przez tę osobę; pliki usuwa `Materials::sweep` (nieużywane, starsze niż dzień) |
+| 4 | Każde wczytanie przestrzeni pod blokadą czyściło ponownie wszystkie zapisane teksty regulaminów | Ścisła kontrola tekstu tylko przy zapisie; widoki i trasa `material` sprawdzają tanio (UTF-8, brak znaków usuwanych przy zapisie), w PHP i JS; sprzątanie czyta tylko wiersze z materiałami |
+
+Do sprawdzenia po wdrożeniu (niezweryfikowane lokalnie): czy `Header always set Content-Security-Policy` z `.htaccess` nie
+nadpisuje na LiteSpeed nagłówka `default-src 'none'; sandbox`, który PHP ustawia dla obrazów i tekstu (ten sam wzór mają
+zdjęcia profilowe; `nosniff` i typy inne niż HTML chronią niezależnie). Sprawdzenie: `curl -sI` na adres plakatu.

@@ -77,22 +77,27 @@ final class Materials {
 
  // Stored meta and its views (mirrored by dist/workspace.js).
  /** The stored meta of $kind when $v is exactly valid (keys, types, ranges, patterns), with its keys in order; else null. */
- public static function meta(string $kind,mixed $v):?array {
+ /**
+  * Stored meta of $kind, or null. Writes check a typed text strictly (text(t) === t); views and the material route ($strict
+  * false) only check that it is well-formed UTF-8 without the characters text() removes, so a workspace load does not clean
+  * every stored text again under the lock (final review of the materials, point 4). Every stored text passed the strict check.
+  */
+ public static function meta(string $kind,mixed $v,bool $strict=true):?array {
   if(!is_array($v))return null;$keys=array_map('strval',array_keys($v));sort($keys,SORT_STRING);
   $int=static fn(mixed $x,int $min,int $max):bool=>is_int($x)&&$x>=$min&&$x<=$max;
   if($kind==='poster')return $keys===['at','c','f','h','w']&&is_string($v['f'])&&preg_match('/^[0-9a-f]{32}\.(?:webp|jpg)$/D',$v['f'])&&$int($v['w'],1,self::MAX_SIDE)&&$int($v['h'],1,self::MAX_SIDE)
    &&is_string($v['c'])&&preg_match('/^#[0-9a-f]{6}$/D',$v['c'])&&$int($v['at'],0,self::MAX_AT)?['f'=>$v['f'],'w'=>$v['w'],'h'=>$v['h'],'c'=>$v['c'],'at'=>$v['at']]:null;
   if($kind!=='rules')return null;
   if($keys===['at','b','f'])return is_string($v['f'])&&preg_match('/^[0-9a-f]{32}\.pdf$/D',$v['f'])&&$int($v['b'],1,self::RULES_MAX)&&$int($v['at'],0,self::MAX_AT)?['f'=>$v['f'],'b'=>$v['b'],'at'=>$v['at']]:null;
-  return $keys===['at','t']&&is_string($v['t'])&&self::text($v['t'])===$v['t']&&self::chars($v['t'])>=1&&self::chars($v['t'])<=self::TEXT_MAX&&$int($v['at'],0,self::MAX_AT)?['t'=>$v['t'],'at'=>$v['at']]:null;
+  return $keys===['at','t']&&is_string($v['t'])&&($strict?self::text($v['t'])===$v['t']:mb_check_encoding($v['t'],'UTF-8')&&!preg_match('/\r|(?!\n)\p{Cc}|(?!\x{200D})\p{Cf}/u',$v['t']))&&self::chars($v['t'])>=1&&self::chars($v['t'])<=self::TEXT_MAX&&$int($v['at'],0,self::MAX_AT)?['t'=>$v['t'],'at'=>$v['at']]:null;
  }
  /** Characters (code points) of a UTF-8 string. */
  private static function chars(string $s):int{return mb_strlen($s,'UTF-8');}
  /** Sparse outside fields of a tournament's materials: poster {v, w, h, color} and rules {v, size, type}, only for valid meta. */
  public static function view(mixed $m):array {
   if(!is_array($m))return [];$out=[];
-  if($p=self::meta('poster',$m['poster']??null))$out['poster']=['v'=>substr($p['f'],0,12),'w'=>$p['w'],'h'=>$p['h'],'color'=>$p['c']];
-  if($r=self::meta('rules',$m['rules']??null))$out['rules']=isset($r['f'])?['v'=>substr($r['f'],0,12),'size'=>$r['b'],'type'=>'pdf']:['v'=>substr(hash('sha256',$r['t']),0,12),'size'=>self::chars($r['t']),'type'=>'text'];
+  if($p=self::meta('poster',$m['poster']??null,false))$out['poster']=['v'=>substr($p['f'],0,12),'w'=>$p['w'],'h'=>$p['h'],'color'=>$p['c']];
+  if($r=self::meta('rules',$m['rules']??null,false))$out['rules']=isset($r['f'])?['v'=>substr($r['f'],0,12),'size'=>$r['b'],'type'=>'pdf']:['v'=>substr(hash('sha256',$r['t']),0,12),'size'=>self::chars($r['t']),'type'=>'text'];
   return $out;
  }
  /**
@@ -306,7 +311,7 @@ final class Materials {
   if(!is_string($id)||!preg_match(self::ID,$id)||!in_array($k,self::KINDS,true)||!is_string($v)||!preg_match('/^[0-9a-f]{12}$/D',$v)||($k==='poster'?!in_array($s,['sm','lg'],true):$s!==null))$missing();
   $q=$ctx->pdo()->prepare('SELECT t.name,t.status,t.hidden_by,t.created_by,t.materials,u.role,u.active,u.organizer_blocked_at FROM tournaments t LEFT JOIN users u ON u.id=t.created_by WHERE t.id=?');
   $q->execute([$id]);$t=$q->fetch(PDO::FETCH_ASSOC);$q->closeCursor();if(!$t)$missing();
-  $meta=self::meta($k,self::decode($t['materials'])[$k]??null);$view=self::view([$k=>$meta])[$k]??null;
+  $meta=self::meta($k,self::decode($t['materials'])[$k]??null,false);$view=self::view([$k=>$meta])[$k]??null;
   if(!$meta||!$view||!hash_equals($view['v'],$v))$missing();
   $public=$t['status']!=='draft'&&$t['hidden_by']===null&&!($t['role']==='member'&&($t['organizer_blocked_at']!==null||(int)$t['active']!==1));
   if(!$public&&!self::managedBy($ctx,$t['created_by']))$missing();
@@ -332,7 +337,7 @@ final class Materials {
  /**
   * Cleanup for the accounts-cleanup job: in each tournament directory, files that the tournament's current materials do not
   * name and that are older than one day (also temporary files of interrupted writes, and the PDF of rules now typed as text);
-  * directories whose tournament no longer exists (older than one day); empty prefix directories older than one day. At most
+  * directories of tournaments that no longer exist or have no materials any more (older than one day); empty prefix directories older than one day. At most
   * $budget tournament directories and about $seconds per run, in name order, resuming after $after (the last directory the
   * previous run visited). Returns [files removed, directories removed, cursor]: the last directory visited when the run
   * stopped early, else null.
@@ -342,7 +347,7 @@ final class Materials {
   if(!is_dir($root)||is_link($root))return [0,0,null];
   if($after!==null&&!preg_match('/^[0-9a-f]{32}$/D',$after))$after=null;
   // Directory name => file names in use, for every tournament (ids are hashed here: no path is ever built from a directory name).
-  $keep=[];foreach($pdo->query('SELECT id,materials FROM tournaments') as $r){$m=self::decode($r['materials'])??[];$keep[self::hash((string)$r['id'])]=array_flip([...self::files('poster',$m['poster']??null),...self::files('rules',$m['rules']??null)]);}
+  $keep=[];foreach($pdo->query('SELECT id,materials FROM tournaments WHERE materials IS NOT NULL') as $r){$m=self::decode($r['materials'])??[];$keep[self::hash((string)$r['id'])]=array_flip([...self::files('poster',$m['poster']??null),...self::files('rules',$m['rules']??null)]);}
   $start=microtime(true);$seen=0;$files=0;$dirs=0;$day=86400;$last=$after;$from=$after===null?'':substr($after,0,2);
   foreach(scandir($root)?:[] as $prefix){
    if(!preg_match('/^[0-9a-f]{2}$/D',$prefix)||strcmp($prefix,$from)<0||!is_dir("$root/$prefix")||is_link("$root/$prefix"))continue;

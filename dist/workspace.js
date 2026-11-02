@@ -71,9 +71,10 @@ const DEMO_SRC_LENGTH={poster:Math.ceil(POSTER_MAX/3)*4+32,rules:Math.ceil(RULES
 const intIn=(v,min,max)=>Number.isInteger(v)&&v>=min&&v<=max;
 const keysAre=(o,keys)=>Object.keys(o).sort().join()===[...keys].sort().join();
 /** Mirror of Materials::meta: the stored meta of kind when v is exactly valid ({f,w,h,c,at} / {f,b,at} / {t,at}; the demo: src instead of f), else null. */
-export function materialMeta(kind,v){
+/** strict false (views): a typed text only has to be free of what rulesText removes, like Materials::meta (writes stay strict). */
+export function materialMeta(kind,v,strict=true){
  if(!isObj(v)||!MATERIAL_KINDS.includes(kind))return null;
- if(kind==='rules'&&has(v,'t')){const t=v.t,n=typeof t==='string'?[...t].length:0;return keysAre(v,['t','at'])&&typeof t==='string'&&rulesText(t)===t&&n>=1&&n<=RULES_TEXT_MAX&&intIn(v.at,0,MATERIAL_AT)?{t,at:v.at}:null;}
+ if(kind==='rules'&&has(v,'t')){const t=v.t,n=typeof t==='string'?[...t].length:0;return keysAre(v,['t','at'])&&typeof t==='string'&&(strict?rulesText(t)===t:!/\r|(?!\n)\p{Cc}|(?!\u200D)\p{Cf}/u.test(t)&&t.isWellFormed?.()!==false)&&n>=1&&n<=RULES_TEXT_MAX&&intIn(v.at,0,MATERIAL_AT)?{t,at:v.at}:null;}
  const demo=!has(v,'f')&&has(v,'src'),key=demo?'src':'f',file=v[key];
  if(typeof file!=='string'||(demo?file.length>DEMO_SRC_LENGTH[kind]||!DEMO_SRC[kind].test(file):!MATERIAL_FILE[kind].test(file)))return null;
  if(kind==='poster')return keysAre(v,[key,'w','h','c','at'])&&intIn(v.w,1,MATERIAL_SIDE)&&intIn(v.h,1,MATERIAL_SIDE)&&typeof v.c==='string'&&/^#[0-9a-f]{6}$/.test(v.c)&&intIn(v.at,0,MATERIAL_AT)?{[key]:file,w:v.w,h:v.h,c:v.c,at:v.at}:null;
@@ -91,7 +92,7 @@ function demoVersion(src){
  */
 export function materialsView(m){
  const out={};if(!isObj(m))return out;
- const p=materialMeta('poster',m.poster),r=materialMeta('rules',m.rules);
+ const p=materialMeta('poster',m.poster,false),r=materialMeta('rules',m.rules,false);
  if(p)out.poster={v:p.f?p.f.slice(0,12):demoVersion(p.src),w:p.w,h:p.h,color:p.c,...(p.src?{src:p.src}:{})};
  if(r)out.rules=has(r,'t')?{v:sha256(r.t).slice(0,12),size:[...r.t].length,type:'text',text:r.t}:{v:r.f?r.f.slice(0,12):demoVersion(r.src),size:r.b,type:'pdf',...(r.src?{src:r.src}:{})};
  return out;

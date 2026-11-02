@@ -243,7 +243,12 @@ test('static demo: poster and PDF in the settings dialog, the card, the guest pa
  try{
   for(const options of [{},PHONE]){
    const {ctx,page,errors}=await open(browser,url,options),phone=!!options.isMobile;
-   await login(page,'admin');await settings(page,'t-winter-2027');
+   await login(page,'admin');
+   // review 1: right after login and after a reload (before the account details load) a manager sees "Dodaj plakat" at once
+   const addTile='main .mat-add-tile[data-id="t-winter-2027"]';
+   assert.equal(await page.locator(addTile).count(),1,'the tile right after login');
+   await page.reload();await page.waitForSelector('.app-shell');assert.equal(await page.locator(addTile).count(),1,'the tile after a reload');
+   await settings(page,'t-winter-2027');
    assert.equal(await page.locator('.mat-poster .mat-pick').count(),1,'an empty poster tile');
    await page.setInputFiles('[data-material-input="poster"]',DIST+'brand/og-image.jpg');
    await page.waitForSelector('.mat-poster [data-action="material-remove"]',{timeout:30000});
@@ -258,7 +263,21 @@ test('static demo: poster and PDF in the settings dialog, the card, the guest pa
    assert.equal(await card.locator('.tournament-rules').getAttribute('target'),'_blank');
    // a manager without a poster sees the quiet tile, which opens the dialog at the materials
    const tile=page.locator('.mat-add-tile').first();
-   if(await tile.count()){await tile.click();await page.waitForSelector('#tournament-materials');assert.equal(await page.evaluate(()=>document.activeElement?.dataset.action),'material-pick');await page.keyboard.press('Escape');}
+   // (review 1: it must be there right away, not only after the account details load and the page is drawn again)
+   assert.ok(await tile.count()>0,'the "Dodaj plakat" tile is on the cards of tournaments without a poster');
+   await tile.click();await page.waitForSelector('#tournament-materials');assert.equal(await page.evaluate(()=>document.activeElement?.dataset.action),'material-pick');await page.keyboard.press('Escape');
+   // review 2: "Copy image" puts a file next to text/html; pasting it into the tournament name must not replace the poster
+   await page.waitForFunction(()=>!document.querySelector('#modal-root .modal'));
+   await page.click('[data-action="edit-tournament"][data-id="t-autumn-2026"]');await page.waitForSelector('#tournament-materials .mat-frame img');
+   const posterBefore=await page.getAttribute('#tournament-materials .mat-frame img','src');
+   const pasted=await page.evaluate(async()=>{const name=document.querySelector('#tournament-form [name="name"]');name.focus();const c=document.createElement('canvas');c.width=c.height=300;c.getContext('2d').fillRect(0,0,300,300);
+    const blob=await new Promise(r=>c.toBlob(r,'image/png'));const dt=new DataTransfer();dt.items.add(new File([blob],'copied.png',{type:'image/png'}));dt.setData('text/html','<img src="x">');
+    const e=new ClipboardEvent('paste',{clipboardData:dt,bubbles:true,cancelable:true});name.dispatchEvent(e);return e.defaultPrevented;});
+   await sleep(1500);
+   assert.equal(pasted,false,'a paste into a text field is left to the field');
+   assert.equal(await page.getAttribute('#tournament-materials .mat-frame img','src'),posterBefore,'the poster stays');
+   assert.equal(await page.locator('#tournament-materials .mat-progress:not([hidden])').count(),0,'no upload started');
+   await page.keyboard.press('Escape');
    await logout(page);
    await page.goto(url+'#guest?t=t-winter-2027');await page.click('.promo [data-action="close-modal"]');await page.waitForSelector('.mat-hero img');
    assert.ok(await page.locator('.mat-hero img').evaluate(img=>new Promise(r=>img.complete?r(img.naturalWidth>0):img.addEventListener('load',()=>r(img.naturalWidth>0)))),'the large poster loads');

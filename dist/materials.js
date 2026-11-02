@@ -300,12 +300,12 @@ export function rulesLink(t,{cls='mat-rules-link',label=null}={}){
  if(r.type==='text')return h`<button type="button" class="${cls}" data-action="material-rules" data-id="${t.id}" aria-haspopup="dialog">${icon('file')}<span>${label??rulesLabel(r)}</span></button>`;
  return h`<a class="${cls}" href="${rulesUrl(t)}" target="_blank" rel="noopener" data-mat-open="rules" title="${rulesLabel(r)}">${icon('file')}<span>${label??rulesLabel(r)}</span></a>`;
 }
-/** Card of a tournament (tournaments page): the thumbnail, for a manager without a poster the quiet "Add poster" tile (only when
- * the server takes posters), else the trophy symbol. */
+/** Card of a tournament (tournaments page): the thumbnail, for a manager without a poster the quiet "Add poster" tile (unless the
+ * account details already say the server takes no posters: before they load the tile shows, like available()), else the trophy. */
 export function cardPoster(t,{manager=false}={}){
  const p=posterOf(t);
  if(p&&posterUrl(t,'sm'))return thumb(t,{cls:'mat-card'});
- if(manager&&limits()?.poster>0)return h`<button type="button" class="mat-thumb mat-card mat-add-tile" data-action="edit-tournament" data-id="${t.id}" data-focus="materials" aria-label="${T('Dodaj plakat: {name}',{name:t.name})}">${icon('image')}<span>${T('Dodaj plakat')}</span></button>`;
+ if(manager&&(!getMe()||limits()?.poster>0))return h`<button type="button" class="mat-thumb mat-card mat-add-tile" data-action="edit-tournament" data-id="${t.id}" data-focus="materials" aria-label="${T('Dodaj plakat: {name}',{name:t.name})}">${icon('image')}<span>${T('Dodaj plakat')}</span></button>`;
  return h`<span class="tournament-symbol">${icon('trophy')}</span>`;
 }
 /** The guest page's large poster (lg, with sm for small screens) that opens the full-screen preview; '' without a poster. */
@@ -693,9 +693,12 @@ if(typeof document!=='undefined'){
   if(!ctl.section.contains(event.target))return;
   route([...(event.dataTransfer.files||[])].slice(0,2),zoneOf(event)?.dataset.materialDrop||null);
  });
- // Pasting a picture (or a PDF) while the dialog is open adds it, unless the clipboard carries text for a field.
+ // Pasting a picture (or a PDF) adds it only inside the materials section and never into a text field: "Copy image" puts the file
+ // next to text/html, so a paste into the tournament name must not replace the poster.
  document.addEventListener('paste',event=>{
   if(!ctl?.section?.isConnected)return;const files=[...(event.clipboardData?.files||[])];if(!files.length)return;
+  const target=event.target instanceof Element?event.target:null;
+  if(!target||!ctl.section.contains(target)||target.closest('input,textarea,select,[contenteditable]:not([contenteditable="false"])'))return;
   if(event.clipboardData.getData('text/plain'))return;
   event.preventDefault();route(files.slice(0,2),null);
  });

@@ -350,6 +350,9 @@ final class Domain {
  public static function forgetMember(array &$db,string $userId):array {
   $db['withdrawals']??=[];$before=$db;$today=date('Y-m-d');$out=['profiles'=>0,'tournaments'=>0];$me=['id'=>$userId,'role'=>'member','organizer'=>true];
   foreach($db['profiles'] as $a)if(($a['ownerId']??null)===$userId&&self::forgetProfile($db,$a['id'],false,$me)!=='missing')$out['profiles']++;
+  // Posters and rules of every tournament the person created go too (a poster may show people, R12); Materials::sweep then
+  // deletes the unreferenced files (final review of the materials, point 3).
+  foreach($db['tournaments'] as $k=>$t)if($t['createdBy']===$userId&&!empty($t['materials']))unset($db['tournaments'][$k]['materials']);
   foreach($db['tournaments'] as $k=>$t){
    if($t['createdBy']!==$userId||$t['date']<$today||$t['status']==='finished'||($t['hiddenBy']??null)!==null)continue;
    foreach($t['entries'] as $e)if(!empty($e['self'])&&self::detach($t,$e['id']))self::withdrawn($db,$e,$t['id'],'system');
