@@ -38,7 +38,7 @@ const trimText=s=>s.replace(/^[\s\p{Z}]+|[\s\p{Z}]+$/gu,'');
  */
 export function rulesText(raw){
  if(typeof raw!=='string'||ILL_FORMED.test(raw))return null;
- const s=raw.replace(/\r\n/g,'\n').replace(/\r/g,'\n').replace(/\t/g,' ').replace(/(?!\n)\p{Cc}/gu,'').replace(/(?!‍)\p{Cf}/gu,'').normalize('NFC');
+ const s=raw.replace(/\r\n/g,'\n').replace(/\r/g,'\n').replace(/\t/g,' ').replace(/(?!\n)\p{Cc}/gu,'').replace(/(?!\u200D)\p{Cf}/gu,'').normalize('NFC');
  const lines=[];let empty=0;
  for(const line of s.split('\n')){if(trimText(line)===''){if(++empty>2)continue;lines.push('');}else{empty=0;lines.push(line);}}
  return trimText(lines.join('\n'));

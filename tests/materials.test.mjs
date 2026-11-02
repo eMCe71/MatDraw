@@ -96,17 +96,17 @@ test('the rules file name: regulamin-<ASCII words of the tournament name>.pdf (.
 });
 
 // The rules text (PLAN-MATERIALY §4): Materials::text equals rulesText (Text::clean's steps without its line limit, a fixed point).
-const TEXTS=['Regulamin zawodów','  Regulamin  \n','a\r\nb\rc','a\n\n\n\n\nb','a\n \n\t\n   \nb','\tWiersz\tz\ttabulatorem ','x‮y⁦z​y﻿','👨‍👩‍👧 rodzina','é → é','e‌́',
- Array.from({length:40},(_,i)=>'linia '+(i+1)).join('\n'),'a\u0007b\u0000c\u0085d',' 　 spacje  ','','   \n\n  ','## Nagłówek\n\n- punkt\n1. numer\nhttps://example.com/regulamin?a=1&b=2','<script>alert(1)</script>',null,7,['x']];
+const TEXTS=['Regulamin zawodów','  Regulamin  \n','a\r\nb\rc','a\n\n\n\n\nb','a\n \n\t\n   \nb','\tWiersz\tz\ttabulatorem ','x\u202Ey\u2066z\u200By\uFEFF','👨\u200D👩\u200D👧 rodzina','e\u0301 → é','e\u200C\u0301',
+ Array.from({length:40},(_,i)=>'linia '+(i+1)).join('\n'),'a\u0007b\u0000c\u0085d','\u00A0\u3000 spacje \u2028','','   \n\n  ','## Nagłówek\n\n- punkt\n1. numer\nhttps://example.com/regulamin?a=1&b=2','<script>alert(1)</script>',null,7,['x']];
 test('rules text: Materials::text equals rulesText; the stored text is a fixed point; textMeta: 422 when empty, 413 above 20 000 characters',{skip},()=>{
  const out=bridge({job:'text',cases:TEXTS});
  TEXTS.forEach((s,i)=>assert.deepEqual(out[i],rulesText(s),JSON.stringify(s)));
  assert.deepEqual(out.slice(0,6),['Regulamin zawodów','Regulamin','a\nb\nc','a\n\n\nb','a\n\n\nb','Wiersz z tabulatorem']);
- assert.equal(out[6],'xyzy','bidi and zero-width characters removed');assert.equal(out[7],'👨‍👩‍👧 rodzina','the zero-width joiner of emoji stays');assert.equal(out[9],'é','format characters go before NFC, so the result is a fixed point');
+ assert.equal(out[6],'xyzy','bidi and zero-width characters removed');assert.equal(out[7],'👨\u200D👩\u200D👧 rodzina','the zero-width joiner of emoji stays');assert.equal(out[9],'é','format characters go before NFC, so the result is a fixed point');
  assert.equal(out[10].split('\n').length,40,'no line limit (unlike chat texts)');assert.deepEqual([out[11],out[13],out[14],out[17],out[18],out[19]],['abcd','','',null,null,null]);
  assert.equal(out[16],'<script>alert(1)</script>','kept as text: it is served as text/plain and shown as text, never as HTML');
  for(const s of out.filter(x=>typeof x==='string'))assert.equal(rulesText(s),s,'fixed point');
- const long='a'.repeat(RULES_TEXT_MAX),r=bridge({job:'textMeta',cases:['  Regulamin\r\n',long,long+'b','  \n ','',null,'a\n'+'́'.repeat(3)]});
+ const long='a'.repeat(RULES_TEXT_MAX),r=bridge({job:'textMeta',cases:['  Regulamin\r\n',long,long+'b','  \n ','',null,'a\n'+'\u0301'.repeat(3)]});
  assert.deepEqual(r.map(x=>x.status??200),[200,200,413,422,422,422,200]);assert.deepEqual([r[0].ok,r[3].error],['Regulamin','Wpisz treść regulaminu albo usuń regulamin.']);
  assert.equal(RULES_TEXT_MAX,20000);
 });
@@ -117,8 +117,8 @@ const META=[['poster',P],['rules',R],['poster',R],['rules',P],['banner',P],['pos
  ['poster',{...P,f:'9'.repeat(32)+'.webp\n'}],['poster',{...P,f:'/'+P.f}],['poster',{...P,w:0}],['poster',{...P,w:4096,h:1}],['poster',{...P,h:4097}],['poster',{...P,w:12.5}],['poster',{...P,w:'1240'}],['poster',{...P,c:'#2B4C7E'}],['poster',{...P,c:'#2b4c7'}],
  ['poster',{...P,at:0}],['poster',{...P,at:9999999999}],['poster',{...P,at:10000000000}],['poster',{...P,at:-1}],['poster',{...P,at:true}],['poster',{...P,x:1}],['poster',(({at,...x})=>x)(P)],['poster',{...P,src:'./demo/a.webp'}],
  ['rules',{...R,b:1}],['rules',{...R,b:10485760}],['rules',{...R,b:10485761}],['rules',{...R,b:0}],['rules',{...R,f:'8'.repeat(32)+'.pdf.pdf'}],['rules',{f:R.f,b:1}],['rules',{...R,w:1}],
- ['rules',T],['rules',{t:'x',at:0}],['rules',{t:'a'.repeat(20000),at:1}],['rules',{t:'a'.repeat(20001),at:1}],['rules',{t:'',at:1}],['rules',{t:' x',at:1}],['rules',{t:'a\r\nb',at:1}],['rules',{t:'a\n\n\n\nb',at:1}],['rules',{t:'a‮b',at:1}],
- ['rules',{t:'é',at:1}],['rules',{t:7,at:1}],['rules',{t:'x'}],['rules',{t:'x',at:1,f:R.f}],['rules',{t:'x',b:1,at:1}],['rules',{...T,src:'./demo/a.pdf'}],['poster',T]];
+ ['rules',T],['rules',{t:'x',at:0}],['rules',{t:'a'.repeat(20000),at:1}],['rules',{t:'a'.repeat(20001),at:1}],['rules',{t:'',at:1}],['rules',{t:' x',at:1}],['rules',{t:'a\r\nb',at:1}],['rules',{t:'a\n\n\n\nb',at:1}],['rules',{t:'a\u202Eb',at:1}],
+ ['rules',{t:'e\u0301',at:1}],['rules',{t:7,at:1}],['rules',{t:'x'}],['rules',{t:'x',at:1,f:R.f}],['rules',{t:'x',b:1,at:1}],['rules',{...T,src:'./demo/a.pdf'}],['poster',T]];
 test('meta and views: Materials::meta and Materials::view equal materialMeta and materialsView for the server\'s shape (PDF and text rules)',{skip},()=>{
  const out=bridge({job:'meta',cases:META.map(([kind,v])=>({kind,v}))});
  META.forEach(([kind,v],i)=>assert.deepEqual(out[i],materialMeta(kind,v),JSON.stringify([kind,v]).slice(0,120)));

@@ -191,7 +191,7 @@ test('rules as a typed text (PLAN-MATERIALY §4): saved cleaned, PDF → text �
  const o=member('tekst',{organizer:true}),c=await signIn(o.email),t=tournament(o.id,{name:'Turniej z tekstem'}),draft=tournament(o.id,{status:'draft'});
  const pdf=(await rules(c,t)).data.result.rules;assert.equal(pdf.type,'pdf');assert.equal(Object.keys(fixture('materials-files',{t}).files).length,1);
  // A text replaces the PDF: cleaned (CRLF, at most 2 empty lines, trimmed), its v and size in the answer, the PDF file gone after the commit.
- const raw='  Regulamin zawodów\r\n\r\n\r\n\r\n\r\n## Zasady\n- punkt <b>pierwszy</b> ‮odwrócony\n1. numer\nhttps://example.com/regulamin?a=1&b=2  \n\n';
+ const raw='  Regulamin zawodów\r\n\r\n\r\n\r\n\r\n## Zasady\n- punkt <b>pierwszy</b> \u202Eodwrócony\n1. numer\nhttps://example.com/regulamin?a=1&b=2  \n\n';
  const clean='Regulamin zawodów\n\n\n## Zasady\n- punkt <b>pierwszy</b> odwrócony\n1. numer\nhttps://example.com/regulamin?a=1&b=2';
  const s=await c.req('rules-text',{t,text:raw});assert.equal(s.status,200,JSON.stringify(s.data));
  const v=createHash('sha256').update(clean).digest('hex').slice(0,12),text={v,size:[...clean].length,type:'text'};
@@ -212,9 +212,10 @@ test('rules as a typed text (PLAN-MATERIALY §4): saved cleaned, PDF → text �
  notFound(await get(url(draft,'rules',dv)),'draft');const own=await get(url(draft,'rules',dv),{cookie:c.cookie});assert.equal(own.status,200);
  assert.equal(own.headers.get('cache-control'),'private, max-age=31536000, immutable');assert.equal(own.buf.toString(),'Roboczy regulamin');
  // Lengths: 20 000 characters (multi-byte too), more is 413; nothing left after cleaning is 422; the JSON body has its own bound.
- const max='ż'.repeat(20000),ok=await c.req('rules-text',{t:draft,text:max+'  \n'});assert.equal(ok.status,200,JSON.stringify(ok.data).slice(0,200));assert.equal(ok.data.result.rules.size,20000);
+ const max='🙂'.repeat(20000),ok=await c.req('rules-text',{t:draft,text:max+'  \n'});assert.equal(ok.status,200,JSON.stringify(ok.data).slice(0,200));assert.equal(ok.data.result.rules.size,20000);
+ const long=await get(url(draft,'rules',ok.data.result.rules.v),{cookie:c.cookie});assert.equal(long.buf.length,80000,'20 000 four-byte characters stored whole (MEDIUMTEXT)');assert.equal(long.buf.toString('utf8'),max);
  assert.deepEqual([(await c.req('rules-text',{t:draft,text:max+'ż'})).status],[413]);
- for(const bad of ['   \r\n\t ​',undefined,7,['x']]){const r=await c.req('rules-text',{t:draft,text:bad});assert.deepEqual([r.status,r.data.error],[422,'Wpisz treść regulaminu albo usuń regulamin.'],JSON.stringify(bad));}
+ for(const bad of ['   \r\n\t \u200B',undefined,7,['x']]){const r=await c.req('rules-text',{t:draft,text:bad});assert.deepEqual([r.status,r.data.error],[422,'Wpisz treść regulaminu albo usuń regulamin.'],JSON.stringify(bad));}
  assert.equal((await c.req('rules-text',{t:draft,text:'\u0000'.repeat(20500)})).status,413,'the request body above its bound');
  // Back to a PDF: the text goes with the commit (it has no file), the PDF is stored again.
  const back=await rules(c,t);assert.equal(back.status,200);assert.equal(back.data.result.rules.type,'pdf');
@@ -250,7 +251,7 @@ test('migration 0009 again on the test database: nothing changes; the column hol
  const backend=path.join(process.env.MATDRAW_TEST_RELEASE||repo,'backend');
  const sql=(code,input='null')=>{const r=spawnSync(php,['-r',`require ${JSON.stringify(path.join(backend,'bootstrap.php'))};$pdo=matdraw_database(matdraw_config());$in=json_decode(stream_get_contents(STDIN),true);echo json_encode((function()use($pdo,$in){${code}})());`],{encoding:'utf8',input,env:process.env});assert.equal(r.status,0,r.stderr||r.stdout);return JSON.parse(r.stdout);};
  const HASH="$t=[];foreach(['tournaments','users','profiles','entries','clubs'] as $n)$t[$n]=hash('sha256',json_encode($pdo->query(\"SELECT * FROM `$n` ORDER BY 1\")->fetchAll(PDO::FETCH_NUM)));return $t;";
- assert.deepEqual(sql("return $pdo->query(\"SELECT LOWER(DATA_TYPE),IS_NULLABLE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='tournaments' AND COLUMN_NAME='materials'\")->fetch(PDO::FETCH_NUM);"),['text','YES']);
+ assert.deepEqual(sql("return $pdo->query(\"SELECT LOWER(DATA_TYPE),IS_NULLABLE FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='tournaments' AND COLUMN_NAME='materials'\")->fetch(PDO::FETCH_NUM);"),['mediumtext','YES']);
  const before=sql(HASH),version=sql("return (int)$pdo->query('SELECT schema_version FROM app_meta WHERE id=1')->fetchColumn();");assert.ok(version>=9);
  sql("$pdo->exec('UPDATE app_meta SET schema_version=8 WHERE id=1');return true;");
  const run=spawnSync(php,[path.join(backend,'bin','migrate.php')],{encoding:'utf8',env:process.env});assert.equal(run.status,0,run.stderr);assert.match(run.stdout,/0009_materials/);

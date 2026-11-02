@@ -112,10 +112,10 @@ test('0007 matches PLAN-REJESTRACJA-ROLE §9.1: columns through addColumn (NULL 
  assert.match(m.code,/'floor'=>fn\(PDO \$pdo\):bool=>/);
 });
 
-test('0009 matches PLAN-MATERIALY §2.1: only tournaments.materials TEXT NULL through addColumn, no floor, no rows of existing tables',()=>{
+test('0009 matches PLAN-MATERIALY §2.1, §4: only tournaments.materials MEDIUMTEXT NULL through addColumn, no floor, no rows of existing tables',()=>{
  const m=parsed.find(x=>x.id===9);assert.ok(m,'0009_materials.php');assert.equal(m.name,'0009_materials.php');assert.equal(m.destructive,false);
  assert.match(m.code,/'name'\s*=>\s*'materials'/);
- assert.ok(m.code.includes("$m->addColumn('tournaments','materials','TEXT NULL');"),'the column, idempotent through addColumn');
+ assert.ok(m.code.includes("$m->addColumn('tournaments','materials','MEDIUMTEXT NULL');"),'the column, idempotent through addColumn (MEDIUMTEXT: 20 000 characters of rules text may need 80 000 bytes)');
  assert.equal((m.code.match(/\$m->/g)||[]).length,1,'nothing else');
  assert.ok(!/'floor'\s*=>/.test(m.code),'the previous release ignores the column: no floor');
  assert.ok(!/\b(INSERT|UPDATE|DELETE|REPLACE|ALTER|CREATE)\b/i.test(m.code),'no statement of its own: existing rows stay as they are');
