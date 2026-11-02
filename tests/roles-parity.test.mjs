@@ -6,6 +6,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
+import {createHash} from 'node:crypto';
 import {initialWorkspace,execute,publicWorkspace,stale,contact,pickClub,athleteFields,drawAthletes,ageAt,UNAFFILIATED,canEnter,canAddEntry} from '../dist/workspace.js';
 import {classify,categories,makeDraw,sameClub,signature,firstPairs,clubConflicts,fingerprintCounts} from '../dist/engine.js';
 import {clubKey} from '../dist/profile-data.js';
@@ -49,8 +50,14 @@ function rich(){
  for(const t of [t1,t5]){const key=classify(t.entries[0],'forms').id,d=makeDraw(t.entries,7);d.seed=null;t.draws[key]=d;}
  const d5=Object.values(t5.draws)[0];d5.slots=['p-o2','p-ed2',null,null,'p-self',null,null,null];d5.results={'0-0':'p-o2'};
  db.tournaments.push(t1,t2,t3,t4,t5,t6);db.revision=10;db.staffRev=4;
+ // Materials in the server's shape (f; the demo's src never reaches PHP): public, unconfirmed, hidden, a blocked organizer's, drafts.
+ const mat={'t-autumn-2026':{poster:POSTER('a'),rules:RULES('b')},'t-org1':{poster:POSTER('c')},'t-org1-hidden':{poster:POSTER('d'),rules:RULES('e')},'t-org3':{poster:POSTER('f')},'t-spring-2027':{rules:RULES('1')},'t-org2-closed':{rules:RULES('2')}};
+ for(const t of db.tournaments)if(mat[t.id])t.materials=mat[t.id];else delete t.materials;
  return db;
 }
+/** Stored materials meta of the server (Materials::meta): f = 32 times the hex digit n. */
+function POSTER(n,over={}){return {f:n.repeat(32)+'.webp',w:1240,h:1754,c:'#2b4c7e',at:NOW-100,...over};}
+function RULES(n,over={}){return {f:n.repeat(32)+'.pdf',b:48000,at:NOW-100,...over};}
 /** Commands over rich(): every command type, every actor, the new error paths. '@N' is the result id of command N, '#club:Name' a club id. */
 function commands(){
  const A={sex:'M',birthDate:'1995-04-04',weight:70,height:175,gradeType:'cup',grade:5,events:['forms']},E={events:['forms'],weight:70,height:175,gradeType:'cup',grade:5},T={city:'Łódź',mat:'Mata 1'};
@@ -280,6 +287,76 @@ test('publicData equals publicWorkspace for every actor, before and after the co
   const views=bridge({job:'public',db,flags,actors:ACTORS}),state=flags?{...db,flags}:db;
   ACTORS.forEach((id,i)=>{const js=JSON.parse(JSON.stringify(publicWorkspace(state,state.users.find(u=>u.id===id))));assert.deepEqual(blockedOnly(views[i],js,state,id),js,id+' '+JSON.stringify(flags));});
  }
+});
+
+// tournament.material (PLAN-MATERIALY §2.4): who may set or remove a poster or rules document, the strict meta, the result
+// {kind, previous}, the revision stamp and stale scope, and the sparse views of publicData, the same in PHP and JS.
+test('tournament.material: permissions, strict meta, previous, stamps and the views are equal in PHP and JS',{skip},()=>{
+ const P=POSTER('9'),R=RULES('8'),poster=[{...P,f:P.f.toUpperCase()},{...P,extra:1},{...P,w:1.5},{...P,w:0},{...P,h:4097},{...P,c:'#ABCDEF'},{...P,c:'red'},{...P,at:-1},{...P,at:'1'},{...P,f:'9'.repeat(32)+'.png'},{...P,f:'9'.repeat(31)+'.webp'},
+  {...P,f:'../'+P.f},(({c,...x})=>x)(P),{...P,w:'1240'},{...P,src:'./demo/x.webp'},R,[P],'x',7,true,{}],rules=[{...R,b:0},{...R,b:10485761},{...R,b:2.5},{...R,f:'8'.repeat(32)+'.PDF'},{...R,f:P.f},{...R,at:10000000000},P,{f:R.f,b:1},
+  {t:'',at:1},{t:' x',at:1},{t:'a\r\nb',at:1},{t:'a\n\n\n\nb',at:1},{t:'a'.repeat(20001),at:1},{t:'x'},{t:'x',at:1,b:1},{t:7,at:1}];
+ const TX={t:'Regulamin turnieju\n\n- punkt pierwszy',at:NOW-50},RX=RULES('7');
+ const bad=[...poster.map(v=>['poster',v]),...rules.map(v=>['rules',v])];
+ const M=(actor,id,kind,value,revision)=>({actor,type:'tournament.material',payload:value===undefined?{id,kind}:{id,kind,value},...(revision!==undefined?{revision}:{})});
+ const list=[
+  M('demo-admin','t-org1','poster',P),            // 0 the Administrator on a community tournament: replaces 'c'
+  M('u-org1','t-org1','rules',R),                 // 1 own tournament
+  M('u-org1','t-org1-hidden','poster',null),      // 2 own tournament hidden by the Administrator: removal allowed
+  M('u-org1','t-staff-self','poster',P),          // 3 seen, not managed: 403
+  M('u-org1','t-spring-2027','poster',P),         // 4 a staff draft: unseen, 404
+  M('u-org1','missing','poster',P),               // 5 missing: the same 404
+  M('u-org2','t-org1','poster',null),             // 6 another organizer, an unconfirmed tournament: unseen, 404
+  M('u-org3','t-org3','poster',null),             // 7 a blocked organizer, own tournament: 404
+  M('demo-club','t-autumn-2026','poster',null),   // 8 club: 403
+  M('demo-editor','t-staff-self','rules',R),      // 9 editor, own tournament
+  M('demo-editor','t-autumn-2026','rules',null),  // 10 editor, another's tournament: 403
+  M('u-mem','t-staff-self','poster',null),        // 11 member without the organizer role: 404
+  M('u-ath','t-staff-self','poster',null),        // 12 athlete: 404
+  M('demo-admin','t-autumn-2026','banner',null),  // 13 unknown kind: 400
+  M('demo-admin','t-autumn-2026','poster'),       // 14 no value: 400
+  ...bad.map(([kind,v])=>M('demo-admin','t-autumn-2026',kind,v)), // 15… invalid meta: 400
+ ];
+ const n=list.length;
+ list.push(M('demo-admin','t-autumn-2026','rules',{...R,f:P.f}),                 // n   poster file as rules: 400
+  M('demo-admin','t-autumn-2026','poster',null),M('demo-admin','t-autumn-2026','rules',null), // n+1, n+2 removal: materials gone
+  M('demo-admin','t-autumn-2026','rules',null),                                  // n+3 nothing to remove: 200, previous null
+  M('demo-admin','t-org3','poster',null),                                        // n+4 the Administrator on a blocked organizer's tournament
+  M('demo-admin','t-org1','poster',null,10),                                     // n+5 t-org1 changed after revision 10: stale 409
+  M('demo-admin','t-org2','poster',P,10),                                        // n+6 t-org2 untouched since 10: fresh
+  M('u-org1','t-org1','poster',{...P,c:'#000000'}),                              // n+7 own tournament again
+  M('u-org1','t-org1','rules',TX),                                               // n+8 a typed text replaces the PDF: previous R
+  M('u-org1','t-org1','rules',RX),                                               // n+9 a PDF replaces the text: previous null
+  M('demo-editor','t-staff-self','rules',TX));                                   // n+10 the editor's PDF becomes a text
+ const js=runJs(rich(),list),ph=bridge({job:'execute',db:rich(),commands:list});compare(js,ph,list);
+ const want=[200,200,200,403,404,404,404,404,403,200,403,404,404,400,400,...bad.map(()=>400),400,200,200,200,200,409,200,200,200,200,200];
+ assert.deepEqual(STATUS(js.results),want);assert.deepEqual(STATUS(ph.results),want);
+ assert.deepEqual([3,8,10].map(i=>js.results[i].error),Array(3).fill('Możesz edytować tylko własne turnieje.'));
+ assert.deepEqual([4,5,6,7,11,12].map(i=>js.results[i].error),[...Array(6).fill('Turniej nie jest dostępny.')]);
+ for(const r of [js,ph]){
+  assert.deepEqual(r.results.slice(0,3).map(x=>x.result),[{kind:'poster',previous:'c'.repeat(32)+'.webp'},{kind:'rules',previous:null},{kind:'poster',previous:'d'.repeat(32)+'.webp'}]);
+  assert.deepEqual([r.results[n+1].result,r.results[n+2].result,r.results[n+3].result],[{kind:'poster',previous:'a'.repeat(32)+'.webp'},{kind:'rules',previous:'b'.repeat(32)+'.pdf'},{kind:'rules',previous:null}]);
+  assert.deepEqual([r.results[n+8].result,r.results[n+9].result,r.results[n+10].result],[{kind:'rules',previous:R.f},{kind:'rules',previous:null},{kind:'rules',previous:R.f}]);
+  const t=id=>r.db.tournaments.find(x=>x.id===id);
+  assert.deepEqual(t('t-org1').materials,{poster:{...P,c:'#000000'},rules:RX});assert.deepEqual(t('t-org1-hidden').materials,{rules:RULES('e')});
+  assert.ok(!('materials' in t('t-autumn-2026')),'no kind left: no materials at all');assert.ok(!('materials' in t('t-org3')));
+  assert.deepEqual(t('t-org2').materials,{poster:P});assert.deepEqual(t('t-staff-self').materials,{rules:TX});
+  assert.ok(t('t-org1').rev>10&&t('t-org2').rev>10&&!t('t-winter-2027').rev,'changed tournaments carry the new stamp, others none');
+ }
+ // The answer of the routes: the sparse views (f never leaves), for the manager and for others where the files are public.
+ const views=bridge({job:'public',db:js.db,actors:['demo-admin','u-org1','demo-club']}),admin=views[0],org=views[1],club=views[2];
+ const tv=(v,id)=>v.tournaments.find(x=>x.id===id);
+ assert.deepEqual([tv(admin,'t-org1').poster,tv(admin,'t-org1').rules],[{v:'9'.repeat(12),w:1240,h:1754,color:'#000000'},{v:'7'.repeat(12),size:48000,type:'pdf'}]);
+ assert.deepEqual(tv(org,'t-org1-hidden').rules,{v:'e'.repeat(12),size:48000,type:'pdf'},'the manager of a hidden tournament');
+ assert.deepEqual(tv(club,'t-staff-self').rules,{v:createHash('sha256').update(TX.t).digest('hex').slice(0,12),size:[...TX.t].length,type:'text'},'a typed text: v and size, never the text');
+ assert.deepEqual(tv(club,'t-org2').poster,{v:'9'.repeat(12),w:1240,h:1754,color:'#2b4c7e'},'an outsider of a public tournament');
+ assert.ok(!JSON.stringify(views).includes('.webp')&&!JSON.stringify(views).includes('.pdf')&&!JSON.stringify(views).includes('"materials"')&&!JSON.stringify(views).includes('punkt pierwszy'),'stored names and texts never leave');
+ // A deactivated or blocked creator (closedCreator): outsiders lose the views (the material route refuses the files), managers keep them.
+ const closed=structuredClone(js.db);closed.users.find(u=>u.id==='u-org2').active=false;
+ // The demo's view of a typed text also carries the text (no material route in the demo): the server's never.
+ const serverView=v=>{for(const x of v.tournaments)if(x.rules)delete x.rules.text;return v;};
+ const actors=['demo-admin','demo-club','u-org1'],php=bridge({job:'public',db:closed,actors}),mirror=actors.map(id=>serverView(JSON.parse(JSON.stringify(publicWorkspace(closed,closed.users.find(u=>u.id===id))))));
+ actors.forEach((id,i)=>assert.deepEqual(blockedOnly(php[i],mirror[i],closed,id),mirror[i],id));
+ assert.deepEqual(actors.map((_,i)=>tv(mirror[i],'t-org2')?.poster?.v??null),['9'.repeat(12),null,null]);
 });
 
 test('profile.save with a registration that is not an object: the same status in PHP and JS, never a server error',{skip},()=>{

@@ -10,7 +10,7 @@ import {Client,base,fixture} from './helpers/http-client.mjs';
 const skip=!base,ADMIN=['admin@test.example','AdminForTests2026!'],PASSWORD='ContractPassword2026!';
 let seq=0;const uniq=p=>`${p}${Date.now().toString(36)}${(seq++).toString(36)}`;
 const NO_CAPS={organizer:false,organizerBlocked:false,organizerTrusted:false,athlete:false};
-const FEATURES=['signup','avatars','chat','signupMode','selfEntry','rolesOpen'];
+const FEATURES=['signup','avatars','chat','signupMode','selfEntry','rolesOpen','materials'];
 /** A GET without cookies: {status, headers, data}. */
 async function guest(route){const r=await fetch(base+'?route='+route,{headers:{'X-MatBravo-Client':'1'}});return {status:r.status,headers:r.headers,data:await r.json()};}
 async function signIn(email,password=PASSWORD){const c=new Client();await c.req('session');const r=await c.req('login',{email,password});assert.equal(r.status,200,JSON.stringify(r.data));return c;}
@@ -20,6 +20,8 @@ async function me(c){
  assert.deepEqual(Object.keys(m.user),['id','clubId','email','role','active','caps']);
  assert.deepEqual(Object.keys(m.features),m.user.role==='admin'?[...FEATURES,'pendingOrganizers']:FEATURES);
  assert.equal(m.features.selfEntry,true);assert.ok(Array.isArray(m.athletes));
+ // PLAN-MATERIALY §2.2: the largest poster and rules uploads in bytes (0 when that kind cannot be stored), never above 4 MB and 10 MB.
+ assert.deepEqual(Object.keys(m.features.materials),['poster','rules']);for(const [k,max] of [['poster',4194304],['rules',10485760]])assert.ok(Number.isInteger(m.features.materials[k])&&m.features.materials[k]>=0&&m.features.materials[k]<=max,k);
  return m;
 }
 const member=(prefix,extra={})=>{const email=uniq(prefix)+'@contract.test';return {...fixture('member',{email,password:PASSWORD,profile:true,exempt:true,...extra}),email};};

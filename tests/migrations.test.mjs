@@ -111,3 +111,14 @@ test('0007 matches PLAN-REJESTRACJA-ROLE §9.1: columns through addColumn (NULL 
   assert.ok(m.code.includes(part),'floor: '+part);
  assert.match(m.code,/'floor'=>fn\(PDO \$pdo\):bool=>/);
 });
+
+test('0009 matches PLAN-MATERIALY §2.1: only tournaments.materials TEXT NULL through addColumn, no floor, no rows of existing tables',()=>{
+ const m=parsed.find(x=>x.id===9);assert.ok(m,'0009_materials.php');assert.equal(m.name,'0009_materials.php');assert.equal(m.destructive,false);
+ assert.match(m.code,/'name'\s*=>\s*'materials'/);
+ assert.ok(m.code.includes("$m->addColumn('tournaments','materials','TEXT NULL');"),'the column, idempotent through addColumn');
+ assert.equal((m.code.match(/\$m->/g)||[]).length,1,'nothing else');
+ assert.ok(!/'floor'\s*=>/.test(m.code),'the previous release ignores the column: no floor');
+ assert.ok(!/\b(INSERT|UPDATE|DELETE|REPLACE|ALTER|CREATE)\b/i.test(m.code),'no statement of its own: existing rows stay as they are');
+ // Repository writes the column with explicit names (persist), so code before 0009 never touches it and code after it reads it.
+ assert.match(readFileSync('backend/src/Repository.php','utf8'),/'materials'=>is_array\(\$t\['materials'\]\?\?null\)&&\$t\['materials'\]!==\[\]\?self::json\(\$t\['materials'\]\):null/);
+});

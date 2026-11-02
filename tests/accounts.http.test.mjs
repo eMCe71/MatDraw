@@ -42,8 +42,8 @@ const KEYS={user:['id','clubId','email','role','active'],profile:['publicId','us
  access:['full','state','until','canPost','block','mutedUntil'],billing:['enabled','enforce','mode','currency','amounts','exempt','hasCustomer','pending'],features:['signup','avatars','chat']};
 // me adds the role contract (PLAN-REJESTRACJA-ROLE §4.4, §8.1, §8.2): user.caps always, athletes always (a list),
 // features.signupMode, features.selfEntry and features.rolesOpen (final review B10), and features.pendingOrganizers for the
-// Administrator only.
-const ME_KEYS={...KEYS,user:[...KEYS.user,'caps'],features:[...KEYS.features,'signupMode','selfEntry','rolesOpen']},CAPS=['organizer','organizerBlocked','organizerTrusted','athlete'];
+// Administrator only; features.materials {poster, rules} (PLAN-MATERIALY §2.2).
+const ME_KEYS={...KEYS,user:[...KEYS.user,'caps'],features:[...KEYS.features,'signupMode','selfEntry','rolesOpen','materials']},CAPS=['organizer','organizerBlocked','organizerTrusted','athlete'];
 const NO_CAPS={organizer:false,organizerBlocked:false,organizerTrusted:false,athlete:false};
 async function me(c){
  const r=await raw('me',{cookie:c.cookie});assert.equal(r.status,200,JSON.stringify(r.data));

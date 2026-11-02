@@ -436,7 +436,7 @@ test('guest projection of community tournaments: sparse fields, home list withou
  const list=guestTournaments(db),today=day(0),up=guestUpcoming(list,today,20).tournaments;
  assert.ok(!up.some(t=>t.name==='Niepotwierdzony publiczny'));const conf=up.find(t=>t.name==='Potwierdzony publiczny');
  assert.deepEqual(Object.keys(conf).sort(),['city','community','date','id','name','status','trusted']);assert.equal(conf.trusted,true);
- for(const t of up.filter(t=>t.name!=='Potwierdzony publiczny'))assert.deepEqual(Object.keys(t).sort(),['city','date','id','name','status'],'staff tournaments keep five fields');
+ for(const t of up.filter(t=>t.name!=='Potwierdzony publiczny'))assert.deepEqual(Object.keys(t).filter(k=>k!=='poster'&&k!=='rules').sort(),['city','date','id','name','status'],'staff tournaments keep five fields (and the sparse materials of the demo)');
  const hidden=list.find(t=>t.name==='Niepotwierdzony publiczny');const v=guestTournament(list,hidden.id,today);
  assert.deepEqual([v.tournament.community,v.tournament.trusted],[true,false],'public under its own address');
  assert.deepEqual(guestUpcoming(guestTournaments({...db,flags:{trustRequired:false}}),today,20).tournaments.filter(t=>t.community).length,2,'trustRequired=false lists every organizer not blocked');

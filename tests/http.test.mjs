@@ -59,7 +59,8 @@ test('real PHP/MySQL: public guest routes are GET-only, cookie-free, read-only a
  const ids=list.data.tournaments.map(t=>t.id),dates=list.data.tournaments.map(t=>t.date);
  assert.ok(ids.includes(open)&&ids.indexOf(open)<ids.indexOf(closed),JSON.stringify(ids));assert.ok(!ids.includes(draft)&&!ids.includes(past));
  assert.ok(ids.length<=6);assert.deepEqual([...dates].sort(),dates);assert.ok(dates.every(d=>d>=day(0)));
- for(const t of list.data.tournaments)assert.deepEqual(Object.keys(t).sort(),['city','date','id','name','status']);
+ // Five fields, plus the sparse poster {v,w,h,color} and rules {v,size,type} of a tournament with materials (PLAN-MATERIALY §2.1).
+ for(const {poster,rules,...t} of list.data.tournaments){assert.deepEqual(Object.keys(t).sort(),['city','date','id','name','status']);if(poster)assert.deepEqual(Object.keys(poster),['v','w','h','color']);if(rules)assert.deepEqual(Object.keys(rules),['v','size','type']);}
  const view=await pub('route=public-tournament&id='+open);
  assert.equal(view.status,200,JSON.stringify(view.data));assert.equal(view.headers.get('set-cookie'),null);
  assert.deepEqual(view.data.tournament,{id:open,name:'Publiczny otwarty',date:day(1),city:'Gdańsk',status:'open'});

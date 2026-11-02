@@ -5,6 +5,8 @@
 // tests/contract.http.test.mjs assert for the server.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import {existsSync} from 'node:fs';
+const MATERIALS=existsSync(new URL('../dist/materials.js',import.meta.url));
 
 class MemoryStorage{#m=new Map();get length(){return this.#m.size;}key(i){return [...this.#m.keys()][i]??null;}getItem(k){return this.#m.has(k)?this.#m.get(k):null;}setItem(k,v){this.#m.set(k,String(v));}removeItem(k){this.#m.delete(k);}clear(){this.#m.clear();}}
 globalThis.localStorage=new MemoryStorage();globalThis.sessionStorage=new MemoryStorage();
@@ -28,7 +30,10 @@ test('demo me: the server shapes of the role fields for staff, the organizer and
   const m=await meOf(id);out[id]=m;
   assert.deepEqual(Object.keys(m).filter(k=>k!=='demo'),TOP,id);
   assert.deepEqual(Object.keys(m.user),USER,id);assert.deepEqual(Object.keys(m.user.caps),CAPS,id);
-  assert.deepEqual(Object.keys(m.features),m.user.role==='admin'?[...FEATURES,'pendingOrganizers']:FEATURES,id);
+  // features.materials (PLAN-MATERIALY §2.2): the largest uploads, in the demo always 4 MB and 10 MB; required once the frontend half
+  // of the feature (dist/materials.js) is installed, its place among the keys is free.
+  assert.deepEqual(Object.keys(m.features).filter(k=>k!=='materials'),m.user.role==='admin'?[...FEATURES,'pendingOrganizers']:FEATURES,id);
+  if(MATERIALS||'materials' in m.features)assert.deepEqual(m.features.materials,{poster:4194304,rules:10485760},id);
   assert.equal(m.features.signupMode,'off');assert.equal(m.features.signup,false);assert.equal(m.features.selfEntry,true);assert.equal(m.features.rolesOpen,true);
   assert.ok(Array.isArray(m.athletes));
  }

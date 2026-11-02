@@ -356,7 +356,7 @@ test('accounts-cleanup: the avatar sweep resumes where the previous run stopped'
  assert.deepEqual(fixture('accounts-sweep',{after:pid('0'),budget:1}),{files:0,dirs:1,next:pid('a')});assert.deepEqual(['a','b','c'].map(gone),[true,false,false]);
  // The job reads the cursor of its previous result: directories up to it wait for the next pass.
  const out=fixture('accounts-cleanup',{config:{billing_enforce:false},prev:'abandoned=off deleted=0 failed=0 avatar_files=0 avatar_dirs=1 avatar_next='+pid('b')});
- assert.match(out,/ avatar_next=(-|[A-Za-z0-9]{12})$/);assert.deepEqual(['b','c'].map(gone),[false,true],'resumed after b');
+ assert.match(out,/ avatar_next=(-|[A-Za-z0-9]{12})( |$)/);assert.deepEqual(['b','c'].map(gone),[false,true],'resumed after b');
  assert.match(fixture('accounts-cleanup',{config:{billing_enforce:false},prev:'avatar_next=-'}),/avatar_dirs=[1-9]/);assert.ok(gone('b'),'the next pass starts from the beginning');
 });
 test('diagnostics: admin only, no secrets; probe=stripe limited to 6 per hour',{skip},async()=>{

@@ -27,6 +27,8 @@ function drawn(){
  const keys=Object.keys(db.tournaments[0].draws);
  keys.forEach((key,k)=>{for(let i=0;i<(k===1?99:2);i++){const m=resolveDraw(db.tournaments[0].draws[key]).flat().find(m=>m.ready);if(!m)break;db=execute(db,'demo-admin','result.save',{tournamentId:t.id,categoryId:key,matchId:m.id,winnerId:i%2?m.a:m.b}).db;}});
  db.tournaments.push({id:'t-past',name:'Turniej miniony',city:'Opole',date:'2026-10-30',mat:'Mata 1',status:'finished',createdBy:'demo-admin',entries:structuredClone(t.entries),draws:{},activity:[]});
+ // The demo's materials hold the file itself (src), a shape the server never stores: the materials test below compares the server's shape.
+ for(const x of db.tournaments)delete x.materials;
  return db;
 }
 const NAMES=['Jan Kowalski','Łukasz Żak','anna maria kowalska-nowak','  Zofia   Wróbel ','Jean-Luc Picard','Madonna','(Ola) Nowak',"Zoë D'Arcy",'Ewa Lis','Émile Zola','','123'];
@@ -114,4 +116,37 @@ test('PHP public projection: sparse selfEntry in the preview of an open tourname
  assert.deepEqual(org.tournament,{id:'t-self-org',name:'Społeczny z zapisami',date:'2026-11-23',city:'Opole',status:'open',community:true,trusted:false,selfEntry:true});
  assert.equal(winter.tournament.selfEntry,true,'demo t-winter-2027 takes self-entries');
  assert.deepEqual(Object.keys(staff.tournament).sort(),['city','date','id','name','status'],'a staff tournament without self-entries keeps five fields');
+});
+
+// Materials in the public projection (PLAN-MATERIALY §2.1, §4): GuestView adds the sparse poster {v,w,h,color} and rules {v,size,type} to
+// the summary of the list and of the preview, from the server's meta (f and a rules text never leave), nothing for invalid meta or a closed
+// creator (guestTournaments hands no materials over then); dist/guest-view.js gives the same once the frontend half of the
+// feature (dist/materials.js) is installed.
+import {existsSync} from 'node:fs';
+import {createHash} from 'node:crypto';
+test('PHP public projection: sparse poster and rules in the list and the preview, never the stored file names',{skip:!php},()=>{
+ const db=drawn(),today='2026-10-31',base={city:'Opole',mat:'Mata 1',createdBy:'demo-admin',entries:[],draws:{},activity:[]};
+ const P={f:'9'.repeat(32)+'.webp',w:1240,h:1754,c:'#2b4c7e',at:1793484000},R={f:'8'.repeat(32)+'.pdf',b:48000,at:1793484000};
+ db.users.push({id:'org-b',role:'member',organizer:true,organizerTrustedAt:1,organizerBlockedAt:1});
+ db.tournaments.push({...base,id:'t-poster',name:'Z plakatem',date:'2026-11-20',status:'open',materials:{poster:P,rules:R}},{...base,id:'t-rules',name:'Z regulaminem',date:'2026-11-21',status:'closed',materials:{rules:R}},
+  {...base,id:'t-broken',name:'Zepsute materiały',date:'2026-11-22',status:'open',materials:{poster:{...P,f:'x.webp'},rules:{...R,extra:1}}},{...base,id:'t-blocked',name:'Zablokowany',date:'2026-11-23',status:'open',createdBy:'org-b',materials:{poster:P}},
+  {...base,id:'t-text',name:'Z regulaminem w tekście',date:'2026-11-24',status:'open',materials:{rules:{t:'Regulamin zawodów\n\n- tajny punkt',at:1793484000}}});
+ const list=guestTournaments(db),ids=['t-poster','t-rules','t-broken','t-blocked','t-text'];
+ const out=bridge({job:'guest',tournaments:list,today,ids,limit:20});
+ const poster={v:'9'.repeat(12),w:1240,h:1754,color:'#2b4c7e'},rules={v:'8'.repeat(12),size:48000,type:'pdf'};
+ const listed=id=>out.upcoming.tournaments.find(x=>x.id===id);
+ assert.deepEqual(listed('t-poster'),{id:'t-poster',name:'Z plakatem',date:'2026-11-20',city:'Opole',status:'open',poster,rules});
+ assert.deepEqual(listed('t-rules'),{id:'t-rules',name:'Z regulaminem',date:'2026-11-21',city:'Opole',status:'closed',rules});
+ assert.deepEqual(Object.keys(listed('t-broken')).sort(),['city','date','id','name','status'],'invalid meta: nothing');
+ const [p,r,broken,blocked,text]=out.tournaments;
+ assert.deepEqual([listed('t-text').rules,text.tournament.rules],Array(2).fill({v:createHash('sha256').update('Regulamin zawodów\n\n- tajny punkt').digest('hex').slice(0,12),size:32,type:'text'}),'a typed text: v and size (characters) only');
+ assert.deepEqual([p.tournament.poster,p.tournament.rules,r.tournament.poster,r.tournament.rules],[poster,rules,undefined,rules]);
+ assert.deepEqual(Object.keys(broken.tournament).sort(),['city','date','id','name','status']);
+ assert.equal(blocked.tournament.poster,undefined,'a blocked organizer\'s tournament: the material route refuses its files, so no poster');
+ const json=JSON.stringify(out);assert.ok(!json.includes('.webp')&&!json.includes('.pdf')&&!json.includes('"at"')&&!json.includes('tajny punkt'),'stored meta never leaves');
+ if(existsSync(new URL('../dist/materials.js',import.meta.url))){
+  // The demo may add the text to its own views (it has no material route); the rest equals the server's.
+  const server=v=>{const o=JSON.parse(JSON.stringify(v));for(const x of [...(o?.tournaments??[]),o?.tournament].filter(Boolean))if(x.rules)delete x.rules.text;return o;};
+  assert.deepEqual(out.upcoming,server(guestUpcoming(list,today,20)));assert.deepEqual(out.tournaments,ids.map(id=>server(guestTournament(list,id,today))));
+ }
 });
