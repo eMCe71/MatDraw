@@ -6,7 +6,9 @@
 //  - every visible text-like field (input, select, textarea) has at least 16px text, so iOS never zooms on focus;
 //  - forms are one column below 440 px (the date and the city fields are stacked, both inside the dialog).
 // The 320 px pass blocks the web font, so the layout must also hold on a wider fallback font.
-// Static demo: every demo role, every page of its menu, "Moje konto", and the tournament, profile, entry and account dialogs.
+// Static demo: every demo role, every page of its menu, "Moje konto", and the tournament, profile, entry and account dialogs; the
+// tournament settings with the "Materiały" section (poster tile, rules row, the PDF / text switch and the text field), the guest
+// page of the demo tournament with its poster and the full-screen preview (PLAN-MATERIALY).
 // PHP build (under scripts/test-http.sh): sign-up with both roles and the athlete step, "Moje konto" with each tab,
 // "Moje starty", and the Administrator's Ustawienia, Członkowie and Kluby.
 // Opt-in like the other browser tests: MATDRAW_BROWSER_TESTS=1 node --test tests/mobile-layout.test.mjs; the PHP part runs via
@@ -81,6 +83,10 @@ test('static demo on phones (393 px PL, 320 px EN): no page wider than the scree
    const page=await ctx.newPage();page.on('pageerror',e=>errors.push(e.message));
    await page.goto(url);await page.waitForSelector('[data-action="demo-login"]');await check(page,`${width} ${lang} home`,problems);
    for(const hash of ['#signup','#guest']){await page.goto(url+hash);await sleep(600);await check(page,`${width} ${lang} ${hash}`,problems);}
+   // The guest page of the demo tournament: its poster on top (with the backend's demo seed) and the full-screen preview.
+   await page.goto(url+'#guest?t=t-autumn-2026');await page.waitForSelector('.promo [data-action="close-modal"]');await page.click('.promo [data-action="close-modal"]');await sleep(600);
+   await check(page,`${width} ${lang} #guest?t=t-autumn-2026`,problems);
+   if(await page.locator('.mat-hero').count()){await page.click('.mat-hero');await page.waitForSelector('.mat-viewer');await check(page,`${width} ${lang} poster preview`,problems);await page.keyboard.press('Escape');}
    for(const role of ['admin','editor','club','organizer','athlete']){
     await page.goto(url);await page.waitForSelector('[data-action="demo-login"]');
     await page.click(`[data-action="demo-login"][data-role="${role}"]`);await page.waitForSelector('.app-shell');await sleep(300);
@@ -102,6 +108,13 @@ test('static demo on phones (393 px PL, 320 px EN): no page wider than the scree
       }
       await page.keyboard.press('Escape');await page.waitForFunction(()=>!document.querySelector('#modal-root .modal'));
      }
+     // The settings of the demo tournament: the "Materiały" section, then the rules switched to text (the field must be 16px).
+     await page.evaluate(()=>document.querySelector('[data-page="tournaments"]')?.click());await sleep(500);
+     await page.locator('main .tournament-card-actions [data-action="edit-tournament"]').first().click();await page.waitForSelector('#tournament-form [data-materials]');
+     await page.evaluate(()=>document.querySelector('#tournament-materials').scrollIntoView());await check(page,`${width} ${lang} dialog materials`,problems);
+     await page.click('[data-action="material-rules-mode"][data-mode="text"]');await page.waitForSelector('#tournament-materials .mat-rules');
+     await page.evaluate(()=>document.querySelector('#tournament-materials .mat-rules').scrollIntoView());await check(page,`${width} ${lang} dialog materials (text rules)`,problems);
+     await page.keyboard.press('Escape');await page.waitForFunction(()=>!document.querySelector('#modal-root .modal'));
     }
     await page.evaluate(()=>document.querySelector('[data-action="logout"]')?.click());await sleep(300);
    }
