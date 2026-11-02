@@ -24,7 +24,7 @@ Na produkcję trafia wyłącznie gałąź `main`. Inne gałęzie i pull requesty
 ├── matdraw/                                  (poza katalogami domen i poza WWW)
 │   ├── shared/                               (700; deploy nigdy go nie nadpisuje)
 │   │   ├── config.php                        (600; sekrety, tworzysz raz)
-│   │   ├── uploads/                          (700; zdjęcia profilowe członków)
+│   │   ├── uploads/                          (700; zdjęcia profilowe członków, materials/: plakaty i regulaminy PDF)
 │   │   ├── sessions/                         (700; pliki sesji logowania)
 │   │   ├── jobs-tick                         (znacznik zadań porządkowych)
 │   │   ├── maintenance                       (tylko podczas przywracania bazy: przerwa techniczna)
@@ -169,7 +169,7 @@ Migracje tylko **dodają** tabele i kolumny, więc poprzednie wydanie dalej dzia
 **Kopie automatyczne przy wdrożeniu:**
 
 - **kopia bazy** — gdy czekają migracje (nazwa `db-<data>-pre-vX-to-vY-<wydanie>.sql.gz`) albo gdy najnowsza kopia jest starsza niż 24 godziny (`…-daily-…`). Przy zwykłym wdrożeniu bez zmian schematu i ze świeżą kopią nic się nie kopiuje, więc wdrożenie zostaje szybkie;
-- **kopia zdjęć** (`shared/uploads`) — gdy najnowsza jest starsza niż 7 dni (`uploads-<data>.tar.gz`);
+- **kopia zdjęć** (`shared/uploads`, także plakaty i regulaminy PDF turniejów z `materials/`) — gdy najnowsza jest starsza niż 7 dni (`uploads-<data>.tar.gz`);
 - kopia jest przyjęta dopiero po sprawdzeniu (poprawny plik gzip, rozmiar ponad 1 KiB, znacznik „Dump completed” na końcu). Pliki mają uprawnienia 600, katalog 700, poza WWW. Hasło bazy nigdy nie trafia do linii poleceń (narzędzie dostaje je w pliku tymczasowym o uprawnieniach 600);
 - kopię robi `mysqldump` albo `mariadb-dump`, a gdy ich nie ma albo zawiodą — wbudowany `backend/bin/dump.php`.
 

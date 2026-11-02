@@ -12,7 +12,7 @@ PHP 8.3 lub nowszy (zalecana utrzymywana wersja 8.4+). Na serwerze skryptów uż
 |---|---|---|
 | `pdo_mysql`, `mbstring`, `session`, `json` | tak | podstawa aplikacji |
 | `curl` i `openssl` | tak, gdy włączasz płatności | połączenie z `api.stripe.com` (HTTPS) |
-| `gd` **z obsługą WebP** | zalecane | zdjęcia profilowe: przycięty obraz jest zapisywany od nowa jako WebP. Bez WebP, ale z JPEG: zapis jako JPEG. Bez `gd`: zdjęć nie ma, zostają inicjały (reszta działa) |
+| `gd` **z obsługą WebP** | zalecane | zdjęcia profilowe i plakaty turniejów: obraz jest zapisywany od nowa jako WebP. Bez WebP, ale z JPEG: zapis jako JPEG. Bez `gd`: zdjęć i plakatów nie ma, zostają inicjały; regulaminy (PDF i tekst) działają (reszta też) |
 | `exif` | zalecane | prawidłowy obrót zdjęć z telefonu |
 | `intl` | zalecane | normalizacja polskich znaków w nazwach i nazwach użytkowników (bez niej działa prostsze porównanie) |
 | `zlib` | zalecane | skompresowane kopie bazy z wbudowanego `bin/dump.php` (gdy na serwerze nie ma `mysqldump`) |
@@ -25,6 +25,7 @@ Pozostałe wymagania:
 - Możliwość ustawienia katalogu domeny na `public/` oraz uruchomienia poleceń PHP CLI (SSH lub panel hostingu). Node.js nie jest potrzebny na serwerze.
 - Wychodzące połączenia HTTPS z PHP do `api.stripe.com` (tylko dla płatności). Czy hosting je przepuszcza, pokazuje sonda Stripe (`DEPLOY-PL.md`, „Kroki ręczne właściciela”, punkt 3). Bez tego płatności nie zadziałają, reszta aplikacji tak.
 - Cron nie jest potrzebny (zadania porządkowe uruchamiają się przy okazji ruchu na stronie); opcjonalne wpisy opisano niżej.
+- Materiały turnieju: największy plakat to 4 MB, a regulamin PDF 10 MB, ale nigdy więcej niż `post_max_size` PHP minus 64 KB (przy domyślnych 8 MB regulamin może mieć ok. 7,9 MB). Pełne 10 MB wymaga `post_max_size` co najmniej `11M` (ustawienie hostingu albo `.user.ini`). Aplikacja sama podaje przeglądarce aktualne limity (`me.features.materials`). Plakat ze zdjęcia 12 Mpx potrzebuje ok. 128 MB `memory_limit`; przeglądarka i tak zmniejsza zdjęcia przed wysłaniem.
 
 ## Przygotowanie wydania ze źródeł
 
@@ -41,7 +42,7 @@ Wynikiem jest wydanie `build/matdraw-php/` z katalogami `public/` i `backend/`. 
 1. Rozpakuj paczkę poza publicznym katalogiem serwera. Ustaw katalog dokumentów domeny na `matdraw-php/public`. Katalog `backend` musi pozostać poza dostępem WWW. Nie ustawiaj katalogu całej paczki jako katalogu domeny. (Przy wdrożeniu przez GitHub Actions robi to deploy: układ katalogów opisuje `DEPLOY-PL.md`.)
 2. Utwórz pustą bazę i użytkownika MySQL z prawami z listy wyżej.
 3. Skopiuj `backend/config.example.php` do `backend/config.php` (przy wdrożeniu przez GitHub Actions: `~/matdraw/shared/config.php`; plik może też leżeć gdzie indziej i być wskazany zmienną środowiskową `MATDRAW_CONFIG`). Uzupełnij dokładny adres aplikacji, DSN, użytkownika i hasło bazy. Wygeneruj `app_key`: `php -r 'echo bin2hex(random_bytes(32)), PHP_EOL;'`. `app_key` zostaje taki sam między wydaniami (bez niego nikt nie zaloguje się po aktualizacji). Ustaw uprawnienia pliku tak, aby mógł go czytać tylko właściciel i proces PHP (np. 600 lub 640, zależnie od hostingu). Nie przesyłaj tego pliku do repozytorium. Wszystkie pozostałe klucze są opcjonalne i mają bezpieczne wartości domyślne (Załącznik A).
-4. Obok `config.php` utwórz katalogi `sessions` i `uploads` (uprawnienia 700, poza `public/`). Aplikacja zapisuje w nich pliki sesji i zdjęcia profilowe; deploy przez GitHub Actions zakłada je sam.
+4. Obok `config.php` utwórz katalogi `sessions` i `uploads` (uprawnienia 700, poza `public/`). Aplikacja zapisuje w nich pliki sesji, zdjęcia profilowe oraz plakaty i regulaminy PDF turniejów (`uploads/materials`); deploy przez GitHub Actions zakłada je sam.
 5. Utwórz tabele i pierwszego Administratora. **Instalator zakłada tabele bazowe oraz wszystkie tabele z migracji** (konta członków, czat, płatności), więc nie trzeba osobno uruchamiać `migrate.php`. Hasło nie trafia do argumentów procesu ani historii powłoki. Przykład dla Bash:
 
 ```bash
@@ -174,7 +175,7 @@ Obowiązkowe są tylko `app_url`, `db` i `app_key`. **Każdy inny klucz jest opc
 | `member_session_idle_seconds`, `member_session_max_seconds` | `1209600`, `2592000` | sesja członka (14 i 30 dni) |
 | `anon_session_seconds` | `10800` | po ilu sekundach porządki usuwają plik sesji osoby niezalogowanej (3 h) |
 | `session_dir` | `null` (katalog `sessions` obok `config.php`, jeśli istnieje) | katalog plików sesji; poza `public/` |
-| `uploads_dir` | `null` (katalog `uploads` obok `config.php`) | zdjęcia profilowe; **nigdy w katalogu publicznym** (aplikacja odmówi) |
+| `uploads_dir` | `null` (katalog `uploads` obok `config.php`) | zdjęcia profilowe, plakaty i regulaminy PDF turniejów (`materials/`); **nigdy w katalogu publicznym** (aplikacja odmówi) |
 | `avatars_enabled` | `true` | wyłącznik zdjęć profilowych (zostają inicjały) |
 | `signup_enabled` | `false` | **wartość początkowa** rejestracji członków (do pierwszego zapisu w panelu „Ustawienia”); jako ustawienie pliku wymaga `billing_enforce=true` i `support_email` (albo jawnej bety niżej) |
 | `signup_force_off` | `false` | **awaryjne zamknięcie rejestracji ponad ustawieniem z panelu** (przez SSH, gdy panel jest niedostępny); panel pokazuje wtedy czerwony baner |
