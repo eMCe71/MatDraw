@@ -5,6 +5,7 @@
 //  - nothing is wider than the screen (document scroll width = viewport; no element sticks out unless a scroll box clips it);
 //  - every visible text-like field (input, select, textarea) has at least 16px text, so iOS never zooms on focus;
 //  - forms are one column below 440 px (the date and the city fields are stacked, both inside the dialog).
+// The 320 px pass blocks the web font, so the layout must also hold on a wider fallback font.
 // Static demo: every demo role, every page of its menu, "Moje konto", and the tournament, profile, entry and account dialogs.
 // PHP build (under scripts/test-http.sh): sign-up with both roles and the athlete step, "Moje konto" with each tab,
 // "Moje starty", and the Administrator's Ustawienia, Członkowie and Kluby.
@@ -69,6 +70,13 @@ test('static demo on phones (393 px PL, 320 px EN): no page wider than the scree
  try{
   for(const [width,lang] of [[393,'pl'],[320,'en']]){
    const ctx=await browser.newContext(phone(width,lang));
+   // 320 px runs without Manrope: the page must also fit while the web font loads (font-display: swap) or on a fallback font,
+   // which is wider (CI measured "New athlete" + "Add from database" 6px past the screen before the font arrived).
+   if(width<360){
+    await ctx.route('**/fonts/**',r=>r.abort());
+    // The same wide fallback everywhere (DejaVu Sans is the CI runner's default sans-serif; locally it may be Inter).
+    await ctx.addInitScript(()=>document.addEventListener('DOMContentLoaded',()=>{const s=document.createElement('style');s.textContent='@font-face{font-family:Manrope;src:local("DejaVu Sans")}@font-face{font-family:Manrope;font-weight:600 800;src:local("DejaVu Sans Bold")}';document.head.append(s);}));
+   }
    await ctx.addInitScript(l=>{try{localStorage.setItem('matdraw.language',l);}catch{}},lang);
    const page=await ctx.newPage();page.on('pageerror',e=>errors.push(e.message));
    await page.goto(url);await page.waitForSelector('[data-action="demo-login"]');await check(page,`${width} ${lang} home`,problems);

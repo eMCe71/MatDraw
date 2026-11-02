@@ -26,3 +26,6 @@ html{-webkit-text-size-adjust:100%;text-size-adjust:100%}
 @supports (-webkit-touch-callout:none){input[type=date],input[type=time],input[type=datetime-local],input[type=month]{-webkit-appearance:none;appearance:none;min-width:0;max-width:100%}input[type=date]::-webkit-date-and-time-value,input[type=time]::-webkit-date-and-time-value,input[type=datetime-local]::-webkit-date-and-time-value,input[type=month]::-webkit-date-and-time-value{text-align:left;min-height:1.5em}}
 /* Narrow phones: one column per form row, so 16px labels and selects ("Registration open") are not cut in a 160px column. */
 @media(max-width:440px){.form-grid{grid-template-columns:minmax(0,1fr)}}
+/* Phones: page heading buttons ("Nowy zawodnik", "Dodaj z bazy") wrap and share the row instead of pushing the page wider
+   (CI measured 6px past a 320px screen on the fallback font, 31px with DejaVu Sans). */
+@media(max-width:650px){.heading-actions{flex-wrap:wrap;max-width:100%}.heading-actions .btn{flex:1 1 auto}}
