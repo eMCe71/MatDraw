@@ -68,11 +68,19 @@ final class Avatars {
   * horizontally first, then every value turns counter-clockwise (imagerotate): 2 mirror, 3 180°, 4 mirror+180° (= vertical
   * mirror), 5 mirror+90° (transpose), 6 270° (90° clockwise), 7 mirror+270° (transverse), 8 90°.
   */
- private static function orient(\GdImage $img,string $raw):\GdImage {
-  if(!function_exists('exif_read_data'))return $img;
-  $f=fopen('php://memory','w+b');if($f===false)return $img;
+ private static function orient(\GdImage $img,string $raw):\GdImage{return self::rotate($img,self::orientation($raw));}
+ /** The EXIF Orientation (1–8) of a JPEG, 1 without ext-exif or a readable value (Materials reads it before decoding, for its memory check). */
+ public static function orientation(string $raw):int {
+  if(!function_exists('exif_read_data'))return 1;
+  $f=fopen('php://memory','w+b');if($f===false)return 1;
   try{fwrite($f,$raw);rewind($f);$exif=@exif_read_data($f);}catch(\Throwable){$exif=false;}finally{fclose($f);}
   $o=is_array($exif)?(int)($exif['Orientation']??1):1;
+  return $o>=1&&$o<=8?$o:1;
+ }
+ /** Whether orientation $o needs imagerotate (a second full-size image while it runs): 3–8. */
+ public static function rotates(int $o):bool{return $o>=3&&$o<=8;}
+ /** $img turned upright for EXIF orientation $o (see orient()); returns the image to use (the old one is destroyed when replaced). */
+ public static function rotate(\GdImage $img,int $o):\GdImage {
   if($o<2||$o>8)return $img;
   if(in_array($o,[2,4,5,7],true))imageflip($img,IMG_FLIP_HORIZONTAL);
   $angle=match($o){3,4=>180,5,8=>90,6,7=>270,default=>0};

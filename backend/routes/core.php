@@ -18,8 +18,10 @@
 // adds signupMode (the same value as me) and roles:true (this server has the member roles, §8.1).
 // features.rolesOpen (me) and rolesOpen (public-config): members may gain roles now, i.e. switch the organizer role on or
 // create an athlete profile (Settings::rolesOpen: sign-up is open; final review B10). Existing roles keep working.
+// features.materials (me, PLAN-MATERIALY §2.2): {poster, rules}, the largest upload of each kind in bytes (Materials::limits:
+// poster 0 without GD or a writable uploads directory, rules 0 without the directory).
 declare(strict_types=1);
-use MatDraw\{Access,Accounts,Actors,Billing,BillingSync,Capabilities,Chat,ChatModeration,Jobs,Members,RouteContext,Routes,Settings};
+use MatDraw\{Access,Accounts,Actors,Billing,BillingSync,Capabilities,Chat,ChatModeration,Jobs,Materials,Members,RouteContext,Routes,Settings};
 
 /** Avatar mode of this server: 'off' while avatars are disabled or the avatar code is not installed. */
 $avatarMode=static function(array $c):string{
@@ -67,7 +69,7 @@ return [
     'avatar'=>is_string($p['avatar'])&&$p['avatar']!==''?substr($p['avatar'],0,12):null,'complete'=>$complete,'usernameChangeAt'=>$changeAt,'mustChangePassword'=>$mustChange],
    'access'=>$access+['canPost'=>$block===null,'block'=>$block,'mutedUntil'=>$mutedUntil],
    'billing'=>$billing,
-   'features'=>['signup'=>!empty($c['signup_enabled']),'avatars'=>$avatarMode($c),'chat'=>$chat,'signupMode'=>$signupMode($c),'selfEntry'=>true,'rolesOpen'=>Settings::rolesOpen($c)]+($admin?['pendingOrganizers'=>$pending]:[]),
+   'features'=>['signup'=>!empty($c['signup_enabled']),'avatars'=>$avatarMode($c),'chat'=>$chat,'signupMode'=>$signupMode($c),'selfEntry'=>true,'rolesOpen'=>Settings::rolesOpen($c),'materials'=>Materials::limits($c)]+($admin?['pendingOrganizers'=>$pending]:[]),
    'athletes'=>$athletes];
  }],
  // Switches for the guest pages (§4.3, §6.10): signup is false in invite-only mode; billing means a price is shown

@@ -19,6 +19,12 @@ class AppError extends \RuntimeException{public function __construct(string $mes
  * execute() stamps every changed tournament and profile (rev) and staff accounts or existing clubs (staffRev).
  * Log lines naming an athlete carry its profileId (audit()), so forgetting a profile rewrites only lines about it and
  * never another tenant's tournament for a namesake; publicData() shows text and time only.
+ * Materials (PLAN-MATERIALY §2.4, §4): a tournament may hold materials {poster?, rules? (a PDF or a text)} (Materials::meta);
+ * tournament.material {id, kind, value: meta|null} sets or removes one for whoever manages the tournament (404 as tour(), else
+ * 403 as tournament.save; 400 for another kind or value) and returns {kind, previous: the replaced file (a poster or a PDF) or
+ * null}; only the routes
+ * of backend/routes/materials.php run it. publicData() replaces materials with the sparse views of Materials::view where
+ * the material route serves the files (the manager, else materialsPublic()).
  */
 final class Domain {
  public const ORGANIZER_DAY=3,ORGANIZER_ACTIVE=10,COMMUNITY_DAY_GLOBAL=50,ORGANIZER_PROFILES_DAY=300,CLUBS_DAY_PER_USER=3,CLUBS_DAY_GLOBAL=30,MINOR_SELF_AGE=16,ADULT_AGE=18,ATHLETES_PER_ACCOUNT=1,RETENTION_MONTHS=24;
@@ -70,6 +76,11 @@ final class Domain {
   return $o!==null&&empty($o['blocked'])&&(!empty($o['trusted'])||!self::trustRequired($db));
  }
  public static function trusted(?array $db,array $t):bool{return $db===null?empty($t['community'])||!empty($t['trusted']):!self::community($db,$t)||self::trustedOrganizer($db,$t['createdBy']??null);}
+ /**
+  * Whether everyone may read the materials of $t (PLAN-MATERIALY §2.2, the material route; its manager always may): not a
+  * draft, not hidden by the Administrator and the creator not closed (closedCreator: a member blocked as organizer or deactivated).
+  */
+ public static function materialsPublic(?array $db,array $t):bool{return ($t['status']??null)!=='draft'&&($t['hiddenBy']??null)===null&&!self::closedCreator($db,$t);}
  public static function manages(array $u,array $t):bool{return $u['role']==='admin'||($u['role']==='editor'||self::organizer($u))&&($t['createdBy']??null)===$u['id'];}
  public static function managesProfile(array $u,array $a,?array $db=null):bool {
   if($u['role']==='admin')return true;
@@ -123,6 +134,8 @@ final class Domain {
    if(!$manager&&self::closedCreator($db,$t))$v['entriesClosed']=true;
    if($admin){$v['hiddenBy']=$t['hiddenBy']??null;$v['hiddenFrom']=$t['hiddenFrom']??null;if($community&&!empty(self::organizerState($db,$t['createdBy']??null)['blocked']))$v['organizerBlocked']=true;}else unset($v['hiddenBy'],$v['hiddenFrom']);
    if(!$manager&&($community||$role==='member'))unset($v['createdBy']);
+   // Materials (PLAN-MATERIALY §2.1): the stored meta never leaves; the sparse poster/rules views only where the material route serves the files.
+   unset($v['materials']);if($manager||self::materialsPublic($db,$t))$v+=Materials::view($t['materials']??null);
    $out['tournaments'][]=$v;
   }
   foreach($db['profiles'] as $a){
@@ -161,6 +174,7 @@ final class Domain {
    $type==='entry.save'=>$tour($p['tournamentId']??null)||$prof($p['profileId']??null),
    in_array($type,self::TOURNAMENT_SCOPE,true)=>$tour($p['tournamentId']??null),
    $type==='tournament.save'=>isset($p['id'])?$tour($p['id']):$staff||$own('tournaments'),
+   $type==='tournament.material'=>$tour($p['id']??null),
    $type==='profile.save'=>(isset($p['id'])?$prof($p['id']):$staff||$own('profiles'))||$tour($reg),
    $type==='profile.archive'||$type==='profile.forget'=>$prof($p['id']??null),
    str_starts_with($type,'account.')||str_starts_with($type,'club.')=>$staff,
@@ -400,6 +414,16 @@ final class Domain {
    $selfEntry=array_key_exists('selfEntry',$p)?$p['selfEntry']===true:($old?($old['selfEntry']??false)===true:self::organizer($u));
    $t=array_replace($old??['id'=>self::id(),'createdBy'=>$u['id'],'createdAt'=>$now,'entries'=>[],'draws'=>[],'activity'=>[]],['name'=>$name,'city'=>$city,'date'=>$date,'mat'=>$mat,'status'=>$status,'selfEntry'=>$selfEntry]);self::audit($t,$old?'Zaktualizowano ustawienia turnieju.':'Utworzono turniej.');
    if($old){$target=&self::entity($db['tournaments'],$old['id'],'Turniej');$target=$t;}else $db['tournaments'][]=$t;return ['id'=>$t['id']];
+  }
+  // Materials (PLAN-MATERIALY §2.4): set by the materials routes only (the command route refuses the type), value = Materials::meta or null.
+  if($type==='tournament.material'){
+   $t=&self::tour($db,$u,$p['id']??null);if(!self::manages($u,$t))throw new AppError('Możesz edytować tylko własne turnieje.',403);
+   $kind=$p['kind']??null;if(!in_array($kind,Materials::KINDS,true)||!array_key_exists('value',$p))throw new AppError('Niepoprawna operacja.',400);
+   $value=$p['value']===null?null:Materials::meta($kind,$p['value']);if($p['value']!==null&&$value===null)throw new AppError('Niepoprawna operacja.',400);
+   $m=is_array($t['materials']??null)?$t['materials']:[];$old=$m[$kind]??null;$previous=is_array($old)&&is_string($old['f']??null)?$old['f']:null;
+   if($value===null)unset($m[$kind]);else $m[$kind]=$value;
+   if($m)$t['materials']=$m;else unset($t['materials']);
+   return ['kind'=>$kind,'previous'=>$previous];
   }
   if($type==='profile.save'){
    $old=isset($p['id'])?self::prof($db,$u,$p['id']):null;

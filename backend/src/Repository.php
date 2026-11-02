@@ -42,7 +42,8 @@ final class Repository {
  }
  /**
   * Read-only data for GuestView: only tournaments that may be public (not drafts, dated $today or later), without
-  * creators, mats or activity; entries and draws only for the one requested tournament. Accounts and the athlete
+  * creators, mats or activity, with their materials unless the creator is closed (Domain::materialsPublic; GuestView sends
+  * only Materials::view of them); entries and draws only for the one requested tournament. Accounts and the athlete
   * database are never read here. selfEntry is the tournament's switch (GuestView::tournament shows it while open, F2);
   * community/trusted come from the creator's row (§5.6; trusted follows $flags trustRequired, §17) and every entry gets currentClub {id, name}: the merge target, name null for an unverified club
   * and '' for 'unaffiliated' (PS-10: snapshots keep the name of the moment of entry, the public view the current one).
@@ -50,11 +51,14 @@ final class Repository {
  public function guestTournaments(string $today,?string $id=null,?array $flags=null):array {
   $this->pdo->beginTransaction();
   try{
-   $q=$this->pdo->prepare("SELECT t.id,t.name,t.city,t.event_date,t.status,t.self_entry,u.role,u.organizer_trusted_at,u.organizer_blocked_at FROM tournaments t LEFT JOIN users u ON u.id=t.created_by WHERE t.status IN ('open','closed','finished') AND t.event_date>=?".($id===null?'':' AND t.id=?').' ORDER BY t.event_date,t.id');
+   $q=$this->pdo->prepare("SELECT t.id,t.name,t.city,t.event_date,t.status,t.self_entry,t.materials,u.role,u.active,u.organizer_trusted_at,u.organizer_blocked_at FROM tournaments t LEFT JOIN users u ON u.id=t.created_by WHERE t.status IN ('open','closed','finished') AND t.event_date>=?".($id===null?'':' AND t.id=?').' ORDER BY t.event_date,t.id');
    $q->execute($id===null?[$today]:[$today,$id]);$list=[];$any=($flags['trustRequired']??true)===false;
    foreach($q->fetchAll() as $t){
     $community=!in_array($t['role'],Domain::STAFF,true);$trusted=!$community||$t['organizer_blocked_at']===null&&($t['organizer_trusted_at']!==null||$any);
-    $list[]=['id'=>$t['id'],'name'=>$t['name'],'city'=>$t['city'],'date'=>$t['event_date'],'status'=>$t['status'],'selfEntry'=>(int)$t['self_entry']===1,'community'=>$community,'trusted'=>$trusted,'entries'=>[],'draws'=>[]];
+    // Materials only while the material route serves them to everyone: a member creator blocked as organizer or deactivated (Domain::closedCreator) hides them.
+    $closed=$t['role']==='member'&&($t['organizer_blocked_at']!==null||(int)$t['active']!==1);
+    $list[]=['id'=>$t['id'],'name'=>$t['name'],'city'=>$t['city'],'date'=>$t['event_date'],'status'=>$t['status'],'selfEntry'=>(int)$t['self_entry']===1,'community'=>$community,'trusted'=>$trusted,'entries'=>[],'draws'=>[]]
+     +(!$closed&&($m=Materials::decode($t['materials']))!==null?['materials'=>$m]:[]);
    }
    if($id!==null&&$list){
     $e=$this->pdo->prepare('SELECT e.snapshot,c.id cid,c.verified,m.id mid,m.name mname,m.verified mverified,c.name cname FROM entries e LEFT JOIN clubs c ON c.id=e.club_id LEFT JOIN clubs m ON m.id=c.merged_into WHERE e.tournament_id=? ORDER BY e.profile_id');$e->execute([$id]);
@@ -70,7 +74,12 @@ final class Repository {
  }
  private static function club(array $c):array{return ['id'=>$c['id'],'name'=>$c['name'],'verified'=>(bool)$c['verified'],'createdBy'=>$c['created_by'],'createdAt'=>$c['created_at']===null?null:(int)$c['created_at'],'mergedInto'=>$c['merged_into']];}
  private static function profile(array $a):array{return array_replace(self::decode($a['data']),['id'=>$a['id'],'clubId'=>$a['club_id'],'createdBy'=>$a['created_by'],'archived'=>(bool)$a['archived'],'ownerId'=>$a['owner_user_id'],'rev'=>(int)$a['rev']]);}
- private static function tournament(array $t):array{return ['id'=>$t['id'],'createdBy'=>$t['created_by'],'createdAt'=>$t['created_at']===null?null:(int)$t['created_at'],'name'=>$t['name'],'city'=>$t['city'],'date'=>$t['event_date'],'mat'=>$t['mat'],'status'=>$t['status'],'selfEntry'=>(bool)$t['self_entry'],'hiddenBy'=>$t['hidden_by'],'hiddenFrom'=>$t['hidden_from'],'hideReason'=>$t['hide_reason'],'rev'=>(int)$t['rev'],'activity'=>self::decode($t['activity']),'entries'=>[],'draws'=>[]];}
+ /** A tournament row in the workspace shape; materials (migration 0009) only when the column holds some (PLAN-MATERIALY §2.1). */
+ private static function tournament(array $t):array {
+  $out=['id'=>$t['id'],'createdBy'=>$t['created_by'],'createdAt'=>$t['created_at']===null?null:(int)$t['created_at'],'name'=>$t['name'],'city'=>$t['city'],'date'=>$t['event_date'],'mat'=>$t['mat'],'status'=>$t['status'],'selfEntry'=>(bool)$t['self_entry'],'hiddenBy'=>$t['hidden_by'],'hiddenFrom'=>$t['hidden_from'],'hideReason'=>$t['hide_reason'],'rev'=>(int)$t['rev'],'activity'=>self::decode($t['activity']),'entries'=>[],'draws'=>[]];
+  if(($m=Materials::decode($t['materials']??null))!==null)$out['materials']=$m;
+  return $out;
+ }
  /** [revision, staffRev, revFloor] of app_meta (rev_floor: the global revision when migration 0007 ran, Domain::stale, final review B8). */
  private function meta():array{$m=$this->pdo->query('SELECT revision,staff_rev,rev_floor FROM app_meta WHERE id=1')->fetch();return [(int)$m['revision'],(int)$m['staff_rev'],(int)$m['rev_floor']];}
  /** Members who created tournaments: {id:{trusted, blocked}} (Domain::trustedOrganizer). */
@@ -110,7 +119,7 @@ final class Repository {
    $q=$this->pdo->prepare('SELECT e.tournament_id,e.profile_id FROM profiles p JOIN entries e ON e.profile_id=p.id WHERE p.created_by=? UNION ALL SELECT e.tournament_id,e.profile_id FROM profiles p JOIN entries e ON e.profile_id=p.id WHERE p.owner_user_id=? AND p.created_by<>?');
    $q->execute([$userId,$userId,$userId]);$keys=$q->fetchAll();$entered=array_values(array_unique(array_column($keys,'tournament_id')));
    // The log (it names athletes) and the hide reason only of his own tournaments, the log not of the hidden ones: publicData shows nothing more.
-   $q=$this->pdo->prepare("SELECT id,created_by,created_at,name,city,event_date,mat,status,self_entry,rev,hidden_by,hidden_from,CASE WHEN created_by=? THEN hide_reason END AS hide_reason,CASE WHEN created_by=? AND hidden_by IS NULL THEN activity ELSE '[]' END AS activity FROM tournaments WHERE created_by=? OR (status='open' AND self_entry=1 AND hidden_by IS NULL)".($entered?' OR id IN ('.self::in($entered).')':'').' ORDER BY event_date,id');
+   $q=$this->pdo->prepare("SELECT id,created_by,created_at,name,city,event_date,mat,status,self_entry,rev,hidden_by,hidden_from,materials,CASE WHEN created_by=? THEN hide_reason END AS hide_reason,CASE WHEN created_by=? AND hidden_by IS NULL THEN activity ELSE '[]' END AS activity FROM tournaments WHERE created_by=? OR (status='open' AND self_entry=1 AND hidden_by IS NULL)".($entered?' OR id IN ('.self::in($entered).')':'').' ORDER BY event_date,id');
    $q->execute([$userId,$userId,$userId,...$entered]);$index=[];
    foreach($q->fetchAll() as $t){$index[$t['id']]=count($db['tournaments']);$db['tournaments'][]=self::tournament($t);}
    $q=$this->pdo->prepare('SELECT e.* FROM entries e JOIN tournaments t ON t.id=e.tournament_id WHERE t.created_by=? ORDER BY e.tournament_id,e.profile_id');$q->execute([$userId]);$rows=$q->fetchAll();
@@ -136,7 +145,8 @@ final class Repository {
   foreach($db['users'] as $u){if(($u['role']??null)==='member')continue;$rows['users'][$u['id']]=['id'=>$u['id'],'club_id'=>$u['clubId'],'email'=>$u['email'],'role'=>$u['role'],'active'=>(int)$u['active'],'password_hash'=>$u['passwordHash'],'auth_version'=>$u['authVersion']];}
   foreach($db['profiles'] as $a)$rows['profiles'][$a['id']]=self::profileRow($a);
   foreach($db['tournaments'] as $t){
-   $rows['tournaments'][$t['id']]=['id'=>$t['id'],'created_by'=>$t['createdBy'],'name'=>$t['name'],'city'=>$t['city'],'event_date'=>$t['date'],'mat'=>$t['mat'],'status'=>$t['status'],'activity'=>self::json($t['activity']),'created_at'=>$t['createdAt']??null,'hidden_by'=>$t['hiddenBy']??null,'hidden_from'=>$t['hiddenFrom']??null,'hide_reason'=>$t['hideReason']??null,'self_entry'=>(int)(($t['selfEntry']??false)===true),'rev'=>(int)($t['rev']??0)];
+   $rows['tournaments'][$t['id']]=['id'=>$t['id'],'created_by'=>$t['createdBy'],'name'=>$t['name'],'city'=>$t['city'],'event_date'=>$t['date'],'mat'=>$t['mat'],'status'=>$t['status'],'activity'=>self::json($t['activity']),'created_at'=>$t['createdAt']??null,'hidden_by'=>$t['hiddenBy']??null,'hidden_from'=>$t['hiddenFrom']??null,'hide_reason'=>$t['hideReason']??null,'self_entry'=>(int)(($t['selfEntry']??false)===true),'rev'=>(int)($t['rev']??0),
+    'materials'=>is_array($t['materials']??null)&&$t['materials']!==[]?self::json($t['materials']):null];
    foreach($t['entries'] as $e)$rows['entries'][$t['id'].'/'.$e['id']]=['tournament_id'=>$t['id'],'profile_id'=>$e['profileId'],'club_id'=>$e['clubId'],'snapshot'=>self::json($e)];
    foreach($t['draws'] as $key=>$d)$rows['draws'][$t['id'].'/'.$key]=['tournament_id'=>$t['id'],'category_key'=>$key,'data'=>self::json($d)];
   }return $rows;

@@ -18,6 +18,9 @@ namespace MatDraw;
  * null for an unverified club and '' for 'unaffiliated'; summary.clubs does not count 'unaffiliated'.
  * Self-entries (§7.1, §10.1): tournament() adds the sparse field selfEntry:true while the tournament takes them (open,
  * self-entries on), so the preview offers "Załóż konto zawodnika i zgłoś się" only there; upcoming() never carries it.
+ * Materials (PLAN-MATERIALY §2.1, §4): both summaries add the sparse poster {v, w, h, color} and rules {v, size, type} of the
+ * tournament's materials (Materials::view; the stored file names and the rules text never). Repository::guestTournaments hands over materials
+ * only while the material route serves them to guests (Domain::materialsPublic).
  * categoryList() and bracket() are public for AthleteView (same codes and order as tournament()).
  * dist/guest-view.js mirrors this class for the browser demo; tests/php.test.mjs checks that both agree.
  */
@@ -27,7 +30,7 @@ final class GuestView {
  private const PREFIX=['forms'=>'UF','soft'=>'SO','hogo'=>'HG','semi'=>'SC','light'=>'LC','special'=>'TS','power'=>'SI'];
 
  public static function visible(array $t,string $today):bool{return in_array($t['status']??null,self::STATUSES,true)&&is_string($t['date']??null)&&$t['date']>=$today;}
- private static function summary(array $t,bool $detail=false):array{$s=['id'=>(string)$t['id'],'name'=>(string)$t['name'],'date'=>(string)$t['date'],'city'=>(string)$t['city'],'status'=>(string)$t['status']];if(!empty($t['community'])){$s['community']=true;$s['trusted']=!empty($t['trusted']);}if($detail&&$s['status']==='open'&&($t['selfEntry']??false)===true)$s['selfEntry']=true;return $s;}
+ private static function summary(array $t,bool $detail=false):array{$s=['id'=>(string)$t['id'],'name'=>(string)$t['name'],'date'=>(string)$t['date'],'city'=>(string)$t['city'],'status'=>(string)$t['status']];if(!empty($t['community'])){$s['community']=true;$s['trusted']=!empty($t['trusted']);}if($detail&&$s['status']==='open'&&($t['selfEntry']??false)===true)$s['selfEntry']=true;return $s+Materials::view($t['materials']??null);}
  private static function listed(array $t):bool{return empty($t['community'])||!empty($t['trusted']);}
 
  public static function upcoming(array $tournaments,string $today,int $limit=self::LIMIT):array{

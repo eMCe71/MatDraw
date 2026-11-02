@@ -96,6 +96,8 @@ try {
   $db=(new Repository($pdo))->snapshot();$db['flags']=$flags;Routes::respond(Domain::publicData($db,Auth::current($db)));
  }
  if(!is_string($p['type']??null)||!is_array($p['payload']??null)||!is_int($p['expectedRevision']??null))throw new AppError('Niepoprawna operacja.',400);
+ // Materials (PLAN-MATERIALY §2.2): only backend/routes/materials.php sets them, from a file the server stored itself.
+ if($p['type']==='tournament.material')throw new AppError('Niepoprawna operacja.',400);
  $u=Accounts::current($pdo,true);
  if($u['role']==='member'){
   // A member organizer (§4.4, §3.7, R12): only ORGANIZER_TYPES (never account.password: members have member-password),

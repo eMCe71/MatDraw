@@ -20,10 +20,13 @@
 //  2. Avatar files (always): in each person's directory, files other than the current photo older than one day, and
 //     directories of public_ids without a profile row (Avatars::sweep, at most 5000 directories and about 2 s). A run
 //     that stops early stores avatar_next=<public_id> in its result (job_runs.last_result) and the next one resumes there.
+//  3. Tournament materials (always, PLAN-MATERIALY §2.3): in each tournament directory, files the tournament's materials do
+//     not name and older than one day, and directories of tournaments that no longer exist (Materials::sweep, at most 5000
+//     directories and about 1 s); a run that stops early stores material_next=<directory> and the next one resumes there.
 // The chat tables (migration 0003) and billing_customers (migration 0006) are checked before use; without them their
 // conditions do not apply. The switches come from Settings::effective (bin/cron.php passes config.php as it is).
 declare(strict_types=1);
-use MatDraw\{Avatars,Members,Routes,Settings};
+use MatDraw\{Avatars,Materials,Members,Routes,Settings};
 return [
  'accounts-cleanup'=>['every'=>86400,'needsFlush'=>false,'run'=>function(PDO $pdo,array $c,int $now):string{
   $c=Settings::effective($pdo,$c);$deleted=0;$failed=0;$state='off';
@@ -60,6 +63,7 @@ return [
   }
   $prev=$pdo->query("SELECT last_result FROM job_runs WHERE name='accounts-cleanup'")->fetchColumn();
   [$files,$dirs,$next]=Avatars::sweep($pdo,$c,$now,5000,is_string($prev)&&preg_match('/\bavatar_next=([A-Za-z0-9]{12})\b/',$prev,$m)?$m[1]:null);
-  return "abandoned=$state deleted=$deleted failed=$failed avatar_files=$files avatar_dirs=$dirs avatar_next=".($next??'-');
+  [$mFiles,$mDirs,$mNext]=Materials::sweep($pdo,$c,$now,5000,is_string($prev)&&preg_match('/\bmaterial_next=([0-9a-f]{32})\b/',$prev,$m)?$m[1]:null);
+  return "abandoned=$state deleted=$deleted failed=$failed avatar_files=$files avatar_dirs=$dirs avatar_next=".($next??'-')." material_files=$mFiles material_dirs=$mDirs material_next=".($mNext??'-');
  }],
 ];
