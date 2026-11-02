@@ -27,7 +27,7 @@ const {registry,h,SafeHtml}=await import('../dist/registry.js');
 const {t,setLanguage,getLanguage}=await import('../dist/i18n.js');setLanguage('pl',{persist:false});
 registry.provide('ui',{T:t,icon:name=>h`<svg data-icon="${name}"></svg>`});
 const M=await import('../dist/materials.js');
-const {publicMaterials,sha256Hex,shortHash,guestUpcoming,guestTournament}=await import('../dist/guest-view.js');
+const {publicMaterials,sha256Hex,demoVersion,guestUpcoming,guestTournament}=await import('../dist/guest-view.js');
 const {projectAthleteView,athleteView}=await import('../dist/athlete-view.js');
 const Client=await import('../dist/client.js');
 const DIST=fileURLToPath(new URL('../dist/',import.meta.url));
@@ -123,16 +123,20 @@ test('typed rules: paragraphs, ## headings, - and • lists, 1. lists, https lin
  assert.ok(!/<[^>]*\son\w+\s*=/i.test(evil),'no event handler attribute in any tag: '+evil);
  assert.match(evil,/&lt;img src=x onerror=alert\(1\)&gt;/);assert.match(evil,/<h3>&lt;script&gt;alert\(1\)&lt;\/script&gt;<\/h3>/);
  assert.ok(M.renderRules('x') instanceof SafeHtml);
- // Cleaning as the server does (Text::clean with new lines) and counting characters as the server does.
- assert.equal(M.cleanRulesText('  a\r\nb\rc  \n\n\n\n\nd\u0007  '),'a\nb\nc\n\n\nd');assert.equal(M.textLength('zażółć 🥋'),8);
- assert.equal(M.textVersion('## Zasady'),sha('## Zasady').slice(0,12));
+ // Cleaning as the server does (Materials::text: CRLF, tabs, controls, at most two empty lines, trimmed) and counting characters.
+ assert.equal(M.cleanRulesText('  a\r\nb\rc  \n\n\n\n\nd\u0007\tx  '),'a\nb\nc  \n\n\nd x');
+ assert.equal(M.cleanRulesText('  Regulamin\r\n\r\n\r\n\r\n- punkt  '),'Regulamin\n\n\n- punkt','the backend test case');assert.equal(M.cleanRulesText(42),'42');assert.equal(M.cleanRulesText('\ud800'),'','ill-formed text is refused');assert.equal(M.textLength('zażółć 🥋'),8);
 });
 
 test('SHA-256 and the sparse poster/rules of the guest and athlete views (PHP shape: f; demo: src; typed text: t)',()=>{
  for(const s of ['','abc','Zażółć gęślą jaźń 🥋','a'.repeat(55),'a'.repeat(56),'a'.repeat(64),'x'.repeat(5000)])assert.equal(sha256Hex(s),sha(s),'length '+s.length);
- assert.match(shortHash('./demo/x|1'),/^[0-9a-f]{12}$/);
+ assert.match(demoVersion('./demo/x.pdf'),/^[0-9a-f]{12}$/);
  const f='0123456789abcdef0123456789abcdef';
- assert.deepEqual(publicMaterials({poster:{f:f+'.webp',w:1240,h:1754,c:'#494B55',at:1},rules:{f:f+'.pdf',b:41049,at:2}}),{poster:{v:'0123456789ab',w:1240,h:1754,color:'#494b55'},rules:{v:'0123456789ab',size:41049,type:'pdf'}});
+ assert.deepEqual(publicMaterials({poster:{f:f+'.webp',w:1240,h:1754,c:'#494b55',at:1},rules:{f:f+'.pdf',b:41049,at:2}}),{poster:{v:'0123456789ab',w:1240,h:1754,color:'#494b55'},rules:{v:'0123456789ab',size:41049,type:'pdf'}});
+ // Exactly the server's meta (Materials::meta): anything else gives nothing, as GuestView and AthleteView.
+ for(const bad of [{poster:{f:'x.webp',w:1,h:1,c:'#000000',at:1}},{poster:{f:f+'.webp',w:1,h:1,c:'#ABCDEF',at:1}},{poster:{f:f+'.webp',w:1,h:1,c:'#000000',at:1,extra:1}},{poster:{f:f+'.gif',w:1,h:1,c:'#000000',at:1}},
+  {poster:{f:f+'.webp',w:5000,h:1,c:'#000000',at:1}},{rules:{f:f+'.pdf',b:0,at:1}},{rules:{t:'  nieoczyszczony',at:1}},{rules:{t:'x',at:1,v:'a'}},{poster:{src:'https://evil.example/p.webp',w:1,h:1,c:'#000000',at:1}},{poster:{src:'./demo/a.webp',f:f+'.webp',w:1,h:1,c:'#000000',at:1}}])
+  assert.deepEqual(publicMaterials(bad),{},JSON.stringify(bad));
  assert.deepEqual(publicMaterials({rules:{t:'## Zasady\n- jeden',at:3}}),{rules:{v:sha('## Zasady\n- jeden').slice(0,12),size:17,type:'text'}},'the text itself never leaves');
  const demo=publicMaterials({poster:{src:'./demo/poster-demo.webp',w:1240,h:1754,c:'#494b55',at:1},rules:{src:'./demo/regulamin-demo.pdf',b:41049,at:1}});
  assert.equal(demo.poster.src,'./demo/poster-demo.webp');assert.equal(demo.rules.src,'./demo/regulamin-demo.pdf');assert.match(demo.poster.v,/^[0-9a-f]{12}$/);
@@ -144,8 +148,10 @@ test('SHA-256 and the sparse poster/rules of the guest and athlete views (PHP sh
  assert.deepEqual(guestTournament([base],'t1','2030-06-15').tournament.poster,list[0].poster);assert.ok(!('materials' in guestTournament([base],'t1','2030-06-15').tournament));
  const view=projectAthleteView([{id:'p1',name:'Ola',birthDate:'2010-01-01',sex:'F',relation:'guardian'}],[{...base,community:false,trusted:true,closed:false,entries:[{id:'p1',profileId:'p1',name:'Ola',events:['forms']}]}],[],'2030-06-15',{});
  assert.deepEqual(view.open[0].poster,list[0].poster);assert.deepEqual(view.entries[0].tournament.poster,list[0].poster);
- const db={clubs:[],profiles:[{id:'p1',ownerId:'u1',name:'Ola',clubId:null,birthDate:'2010-01-01'}],users:[],flags:{trustRequired:false},tournaments:[{...base,createdBy:'x',entries:[]}]};
- assert.deepEqual(athleteView(db,{id:'u1'},'2030-06-15').open[0].poster,list[0].poster,'athleteView passes materials on');
+ const db={clubs:[],profiles:[{id:'p1',ownerId:'u1',name:'Ola',clubId:null,birthDate:'2010-01-01'}],users:[{id:'org',role:'member',active:true,organizer:true,organizerBlockedAt:null}],flags:{trustRequired:false},tournaments:[{...base,createdBy:'x',entries:[]},{...base,id:'t3',createdBy:'org',entries:[]}]};
+ assert.deepEqual(athleteView(db,{id:'u1'},'2030-06-15').open.map(o=>o.poster),[list[0].poster,list[0].poster],'athleteView passes materials on');
+ db.users[0].organizerBlockedAt=1;
+ assert.deepEqual(athleteView(db,{id:'u1'},'2030-06-15').open.map(o=>o.poster),[list[0].poster,undefined],'a closed creator: no materials (the route refuses its files)');
 });
 
 test('templates: thumbnails in a 3:4 frame with intrinsic sizes, lazy; the rules as a PDF link or a reader button; everything escaped',()=>{
@@ -178,7 +184,9 @@ test('client: XHR upload with the client headers, demo features.materials, the d
  await assert.rejects(Client.upload({route:'poster-upload',t:'x'},{body:new Blob(['x'])}),/niedostępna w wersji demonstracyjnej/);
  const m=readFileSync(DIST+'materials.js','utf8');
  assert.match(m,/Client\.command\('tournament\.material',\{id,kind,value\}/);
- assert.match(m,/value=\{type:'text',text:item\.text,size:textLength\(item\.text\),v:await textVersion\(item\.text\)\}/,'demo text meta {type,text,size,v}');
+ assert.match(m,/value=\{src:item\.demo\.src,w:item\.demo\.w,h:item\.demo\.h,c:item\.color,at\}/,'demo poster meta as stored: {src,w,h,c,at}');
+ assert.match(m,/value=\{t:cleanRulesText\(item\.text\),at\}/,'demo text meta as stored: {t,at}');
+ assert.match(m,/value=\{src:'data:application\/pdf;base64,'\+String\(await readDataUrl\(item\)\)\.split\(','\)\[1\],b:item\.size,at\}/,'demo PDF meta as stored: {src,b,at}, the type forced to PDF');
  assert.match(m,/Client\.request\('rules-text',\{method:'POST',body:\{t:id,text:item\.text\}\}\)/);assert.match(m,/Client\.request\('material-delete',\{method:'POST',body:\{t:id,kind\}\}\)/);
  assert.match(m,/Client\.upload\(\{route:routes\[kind\],t:id\}/);assert.match(m,/routes=\{poster:'poster-upload',rules:'rules-upload'\}/);
  const app=readFileSync(DIST+'app.js','utf8');

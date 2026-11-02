@@ -8,7 +8,8 @@
  *  publicClubs(clubs) = the public-clubs route: verified clubs that are not merged, by name, at most 2000, plus the id of
  *   'unaffiliated'.
  *  Materials (PLAN-MATERIALY §2.1): the open tournaments and the tournaments of own entries (while available) carry the sparse
- *   fields poster {v,w,h,color} and rules {v,size} of guest-view.js publicMaterials (the demo adds src). */
+ *   fields poster {v,w,h,color} and rules {v,size,type} of guest-view.js publicMaterials (the demo adds src); athleteView hands
+ *   no materials over for a tournament whose creator is closed (the material route refuses its files). */
 import {resolveDraw} from './engine.js';
 import {categoryList,publicMaterials} from './guest-view.js';
 import {ADULT_AGE,UNAFFILIATED,ageAt,community,trusted,closedCreator,currentClub,resolveClub} from './workspace.js';
@@ -84,7 +85,7 @@ export function athleteView(db,user,today,{withdrawals=null,organizers={},includ
  const clubs=db.clubs||[],byId=new Map(db.tournaments.map(t=>[t.id,t]));
  const profiles=db.profiles.filter(a=>a.ownerId!=null&&a.ownerId===user.id).map(a=>{const c=resolveClub(clubs,a.clubId??null);return {...a,clubRow:c?{id:c.id,name:c.name,verified:c.verified!==false}:null};});
  const tournaments=db.tournaments.map(t=>({id:t.id,name:t.name,city:t.city,date:t.date,status:t.status,selfEntry:t.selfEntry===true,hiddenBy:t.hiddenBy??null,createdBy:t.createdBy??null,community:community(db,t),trusted:trusted(db,t),closed:closedCreator(db,t),
-  entries:t.entries.map(e=>({...e,currentClub:currentClub(clubs,e.clubId??null)})),draws:t.draws,...(t.materials?{materials:t.materials}:{})}));
+  entries:t.entries.map(e=>({...e,currentClub:currentClub(clubs,e.clubId??null)})),draws:t.draws,...(t.materials&&!closedCreator(db,t)?{materials:t.materials}:{})}));
  const gone=[];for(const w of withdrawals??db.withdrawals??[]){const t=byId.get(w.tournamentId);if(t)gone.push({profileId:w.profileId,tournament:{id:t.id,name:t.name,date:t.date},by:w.by,at:Math.trunc(w.at)});}
  return projectAthleteView(profiles,tournaments,gone,today,organizers,include);
 }

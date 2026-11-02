@@ -5,8 +5,9 @@
  *    fetched only when someone reads it); the demo uses src and text.
  *  - Writing: poster-upload and rules-upload (raw bytes, XMLHttpRequest through Client.upload for the progress bar), rules-text (JSON
  *    {t,text}) and material-delete (JSON). Each answers like the command route, {workspace,result}; ui.applyWorkspace puts the workspace
- *    in place exactly as a command does. The demo runs the domain command tournament.material: poster meta {src,w,h,color} (a JPEG data
- *    URL of at most 1200 px), PDF meta {src,size} (a data URL), text meta {type:'text',text,size,v}; value null removes.
+ *    in place exactly as a command does. The demo runs the domain command tournament.material with the stored meta (Materials::meta,
+ *    src instead of f): poster {src,w,h,c,at} (a JPEG data URL of at most 1200 px), PDF {src,b,at} (a data URL), text {t,at} (t as
+ *    rulesText cleans it); value null removes.
  *  - Poster in the browser: EXIF orientation (createImageBitmap with imageOrientation from-image, else an <img> from a data URL: the
  *    CSP allows no blob: images), at most 2400 px on the longer side, WebP checked by the blob's type, else JPEG 0.88 (Safari encodes
  *    no WebP); never cropped; transparency on white; the average colour for the frame behind the picture.
@@ -19,7 +20,7 @@
 import {registry,h,setHtml} from './registry.js';
 import * as Client from './client.js';
 import {getMe,loadMe} from './me.js';
-import {sha256Hex} from './guest-view.js';
+import {rulesText} from './guest-view.js';
 import {t as T,locale,translateMessage} from './i18n.js';
 
 export const KINDS=['poster','rules'];
@@ -90,11 +91,8 @@ export function slug(name){
 export const posterFileName=t=>T('plakat')+'-'+slug(t?.name);
 
 // ---- Typed rules ----
-/** The text as the server keeps it (Text::clean with new lines): LF only, no control characters, no spaces at line ends, at most two
- * empty lines in a row, trimmed. */
-export function cleanRulesText(s){
- return String(s??'').replace(/\r\n?/g,'\n').replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g,'').replace(/[ \t\u00a0]+$/gm,'').replace(/\n{4,}/g,'\n\n\n').trim();
-}
+/** The text as the server keeps it (Materials::text, mirrored by rulesText of guest-view.js); '' for a value it refuses. */
+export function cleanRulesText(s){return rulesText(String(s??''))??'';}
 /** Length in characters (code points, as the server counts). */
 export const textLength=s=>[...String(s??'')].length;
 const URL_RE=/https:\/\/[^\s<>"'`]+/g;
@@ -131,8 +129,6 @@ export function renderRules(text){
  const li=items=>items.map(i=>h`<li>${inlineHtml(i)}</li>`);
  return h`${rulesBlocks(text).map(b=>b.type==='h'?h`<h3>${inlineHtml(b.text)}</h3>`:b.type==='ul'?h`<ul>${li(b.items)}</ul>`:b.type==='ol'?h`<ol${b.start!==1?h` start="${b.start}"`:''}>${li(b.items)}</ol>`:h`<p>${b.lines.map((l,i)=>i?h`<br>${inlineHtml(l)}`:inlineHtml(l))}</p>`)}`;
 }
-/** 12 hex characters of the SHA-256 of the text: the server's v (the demo command's meta carries it). */
-export const textVersion=text=>sha256Hex(String(text??'')).slice(0,12);
 const texts=new Map();
 /** The typed rules of t: from the view (the demo's workspace), from the demo's data, else from the material route (text/plain), kept
  * per version. Throws a message when they cannot be read. */
@@ -266,10 +262,10 @@ const demoCommand=(id,kind,value)=>{const ws=ui()?.getWorkspace?.();return Clien
 export async function sendMaterial(kind,id,item,{onProgress}={}){
  const text=kind==='rules'&&item?.type==='text';
  if(Client.isDemo){
-  let value;
-  if(kind==='poster')value={src:item.demo.src,w:item.demo.w,h:item.demo.h,color:item.color};
-  else if(text)value={type:'text',text:item.text,size:textLength(item.text),v:await textVersion(item.text)};
-  else value={src:await readDataUrl(item),size:item.size};
+  const at=Math.floor(Date.now()/1000);let value;
+  if(kind==='poster')value={src:item.demo.src,w:item.demo.w,h:item.demo.h,c:item.color,at};
+  else if(text)value={t:cleanRulesText(item.text),at};
+  else value={src:'data:application/pdf;base64,'+String(await readDataUrl(item)).split(',')[1],b:item.size,at};
   onProgress?.(1);return applied(await demoCommand(id,kind,value));
  }
  if(text)return applied(await reauth(()=>Client.request('rules-text',{method:'POST',body:{t:id,text:item.text}})));
