@@ -293,7 +293,7 @@ export function initialWorkspace(legacy){
  clubs.push({id:UNAFFILIATED,name:clubs.some(c=>clubKey(c.name)==='niezrzeszony')?'Niezrzeszony (bez klubu)':'Niezrzeszony',verified:true});
  profiles.push({id:'demo-athlete-child',name:'Zuzanna Demo',clubId:clubs[Math.min(1,clubs.length-1)].id,sex:'F',birthDate:'2012-03-08',weight:42,height:152,gradeType:'cup',grade:7,events:['forms'],champion:false,createdBy:'demo-athlete',createdAt:1793484000,archived:false,ownerId:'demo-athlete',relation:'guardian',guardianDeclaredAt:1793484000});
  // The demo poster and rules document (PLAN-MATERIALY §3: files of dist/demo, src instead of the server's f).
- const materials={poster:{src:'./demo/poster-demo.webp',w:1240,h:1754,c:'#2b4c7e',at:1793484000},rules:{src:'./demo/regulamin-demo.pdf',b:48000,at:1793484000}};
+ const materials={poster:{src:'./demo/poster-demo.webp',w:1240,h:1754,c:'#4c4e59',at:1793484000},rules:{src:'./demo/regulamin-demo.pdf',b:41049,at:1793484000}};
  const t={...old.tournament,id:'t-autumn-2026',status:'open',createdBy:'demo-admin',selfEntry:false,entries,draws:old.draws||{},activity:old.activity||[],materials};
  const second={id:'t-winter-2027',name:'Puchar Zimy 2027',city:'Kraków',date:'2027-02-20',mat:'Mata 1',status:'open',createdBy:'demo-editor',selfEntry:true,entries:[],draws:{},activity:[]};
  // A further published date and an unpublished draft: the login screen's public list shows the first, never the draft.

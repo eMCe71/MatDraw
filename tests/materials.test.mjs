@@ -8,7 +8,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
-import {existsSync,mkdtempSync,rmSync} from 'node:fs';
+import {existsSync,mkdtempSync,rmSync,statSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import path from 'node:path';
 import {initialWorkspace,execute,publicWorkspace,guestTournaments,materialMeta,materialsView,rulesText,MATERIAL_KINDS,POSTER_MAX,RULES_MAX,RULES_TEXT_MAX} from '../dist/workspace.js';
@@ -150,11 +150,13 @@ test('the demo keeps the file itself (src: a file of dist/demo or a data URL) an
 });
 test('demo seed and commands: t-autumn-2026 has the demo poster and rules; tournament.material sets a data URL, removes, refuses others',()=>{
  let db=initialWorkspace();const t=db.tournaments.find(x=>x.id==='t-autumn-2026');
- assert.deepEqual(t.materials,{poster:{src:'./demo/poster-demo.webp',w:1240,h:1754,c:'#2b4c7e',at:1793484000},rules:{src:'./demo/regulamin-demo.pdf',b:48000,at:1793484000}});
+ assert.deepEqual(t.materials,{poster:{src:'./demo/poster-demo.webp',w:1240,h:1754,c:'#4c4e59',at:1793484000},rules:{src:'./demo/regulamin-demo.pdf',b:41049,at:1793484000}});
+ // The seed matches the real demo files: their byte size and the GD average colour Materials::poster would compute.
+ assert.equal(statSync(new URL('../dist/demo/regulamin-demo.pdf',import.meta.url)).size,41049);
  assert.ok(db.tournaments.filter(x=>x.id!=='t-autumn-2026').every(x=>!('materials' in x)));
  for(const id of ['demo-admin','demo-editor','demo-club']){
   const v=publicWorkspace(db,db.users.find(u=>u.id===id)).tournaments.find(x=>x.id==='t-autumn-2026');
-  assert.ok(!('materials' in v),id);assert.deepEqual([v.poster.w,v.poster.h,v.poster.color,v.poster.src,v.rules.size,v.rules.src],[1240,1754,'#2b4c7e','./demo/poster-demo.webp',48000,'./demo/regulamin-demo.pdf'],id);
+  assert.ok(!('materials' in v),id);assert.deepEqual([v.poster.w,v.poster.h,v.poster.color,v.poster.src,v.rules.size,v.rules.src],[1240,1754,'#4c4e59','./demo/poster-demo.webp',41049,'./demo/regulamin-demo.pdf'],id);
  }
  assert.ok(guestTournaments(db).find(x=>x.id==='t-autumn-2026').materials,'the guest view gets the materials of a staff tournament');
  const src='data:image/jpeg;base64,'+Buffer.from('\xff\xd8\xff').toString('base64');
