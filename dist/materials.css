@@ -1,0 +1,222 @@
+/* Tournament materials (docs/plan/PLAN-MATERIALY.md, dist/materials.js): the poster and the rules document.
+   Thumbnails sit in a fixed 3:4 frame filled with the poster's colour (--poster) and show the whole poster (contain, never cropped), so
+   cards keep one height whatever the poster's shape. Breakpoints of the app only (440, 650/651); touch targets of 44 px under a
+   coarse pointer; brand.css keeps the last word. */
+
+/* ---- Thumbnail (cards, rows, the upcoming list) ---- */
+.mat-thumb{--poster:#e9eff6;position:relative;display:grid;place-items:center;flex:0 0 auto;width:84px;aspect-ratio:3/4;padding:0;margin:0;border:1px solid #0f2a4a14;border-radius:8px;overflow:hidden;background:var(--poster);box-shadow:0 1px 2px #0f2a4a14,0 6px 16px #0f2a4a14;color:inherit;text-decoration:none}
+.mat-thumb img,.mat-frame img{display:block;width:100%;height:100%;object-fit:contain}
+button.mat-thumb{cursor:zoom-in;transition:transform .18s,box-shadow .18s}
+button.mat-thumb:hover{transform:translateY(-1px);box-shadow:0 1px 2px #0f2a4a1f,0 10px 24px #0f2a4a26}
+.mat-thumb-zoom{position:absolute;right:5px;bottom:5px;width:24px;height:24px;display:grid;place-items:center;border-radius:50%;background:#0b1d36b3;color:#fff;opacity:0;transition:opacity .18s}
+.mat-thumb-zoom .icon{width:13px;height:13px}
+button.mat-thumb:hover .mat-thumb-zoom,button.mat-thumb:focus-visible .mat-thumb-zoom{opacity:1}
+.mat-thumb.is-broken img,.mat-frame.is-broken img,.mat-hero.is-broken img,.mat-viewer-stage.is-broken img{visibility:hidden}
+
+/* Tournament card: the poster takes the trophy symbol's place; a manager without a poster sees a quiet "Add a poster" tile. */
+.tournament-card-top:has(.mat-thumb){align-items:flex-start}
+.mat-card{width:84px}
+.mat-add-tile{cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px;padding:8px;border:1.5px dashed #b6cbe0;background:#f6f9fd;box-shadow:none;color:#4f7aa3;font-size:10px;font-weight:650;line-height:1.3;text-align:center;transition:border-color .18s,background .18s,color .18s}
+.mat-add-tile .icon{width:22px;height:22px;color:#7aa3c8}
+.mat-add-tile:hover{border-color:#0072bc;background:#eef6fc;color:#00448a}
+.mat-add-tile:hover .icon{color:#0072bc}
+.tournament-card-meta{flex-wrap:wrap;row-gap:10px}
+.tournament-rules{display:inline-flex;align-items:center;gap:6px;padding:4px 11px 4px 9px;border:1px solid #d4e0eb;border-radius:999px;background:#fff;color:#00448a;font-size:11px;font-weight:650;text-decoration:none;transition:background .18s,border-color .18s}
+.tournament-rules .icon{width:14px;height:14px;color:#c2414b}
+.tournament-rules:hover{background:#eef6fc;border-color:#a6c9e1}
+
+/* ---- The "Materials" section of the tournament dialog ---- */
+.mat-section{margin-top:22px;padding-top:20px;border-top:1px solid var(--line,#dfe7f0);outline:0}
+.mat-head h3{font-size:15px;line-height:1.3;color:#19324f;font-weight:700}
+.mat-head p{margin-top:5px;font-size:11px;line-height:1.6;color:#687e9a}
+.mat-notice{margin:14px 0 0}
+.mat-grid{display:grid;gap:12px;margin-top:14px}
+.mat-poster,.mat-rules{display:grid;align-items:start;gap:16px;padding:14px;border:1px solid #dfe7f0;border-radius:11px;background:#fbfdff;transition:border-color .18s,background .18s,box-shadow .18s}
+.mat-poster{grid-template-columns:128px minmax(0,1fr)}
+.mat-rules{grid-template-columns:44px minmax(0,1fr)}
+.mat-poster.is-drop,.mat-rules.is-drop{border-color:#00aeef;background:#eef8fd;box-shadow:0 0 0 3px #00aeef33}
+.mat-frame-box{position:relative}
+.mat-frame{--poster:#eef3f9;display:grid;place-items:center;width:100%;aspect-ratio:3/4;padding:0;border:1px solid #0f2a4a14;border-radius:8px;overflow:hidden;background:var(--poster);box-shadow:0 1px 2px #0f2a4a14}
+.mat-pick{cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;padding:10px;border:1.5px dashed #a9c3dd;background:#f3f8fd;box-shadow:none;color:#0063a4;text-align:center;transition:border-color .18s,background .18s}
+.mat-pick .icon{width:28px;height:28px;color:#4d8fc4}
+.mat-pick strong{font-size:12px;font-weight:700;line-height:1.3}
+.mat-pick small{font-size:10px;color:#6c86a3;line-height:1.35}
+.mat-pick:hover,.is-drop .mat-pick{border-color:#0072bc;background:#e8f3fc}
+.mat-frame-off{background:#f1f4f8;color:#9aabbf}
+.mat-frame-off .icon{width:26px;height:26px}
+.mat-drop-hint{display:none}
+@media (hover:hover) and (pointer:fine){.mat-drop-hint{display:block}}
+.mat-side{display:flex;flex-direction:column;gap:6px;min-width:0}
+.mat-label{font-size:13px;line-height:1.4;color:#19324f;font-weight:700;overflow-wrap:anywhere}
+.mat-note{font-size:11px;line-height:1.6;color:#687e9a}
+.mat-buttons{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:4px}
+.mat-buttons .btn{gap:6px}
+.mat-buttons .btn .icon{width:14px;height:14px}
+.mat-buttons a.btn{text-decoration:none;color:#345675}
+.mat-side-pick{border-color:#a9c3dd!important;color:#00448a;font-weight:650}
+.mat-confirm-text{flex-basis:100%;font-size:12px;font-weight:650;color:#8a3a40}
+.btn.mat-danger{border-color:#e7c3c6;color:#a8434a;background:#fff}
+.btn.mat-danger:hover{background:#fdf1f2;border-color:#d99ea3}
+.mat-error{font-size:11px;line-height:1.5;color:#b3424a;font-weight:600}
+.mat-error:empty{display:none}
+.mat-done{display:flex;align-items:center;gap:5px;font-size:11px;color:#1d7a4f;font-weight:600}
+.mat-done .icon{width:14px;height:14px}
+.mat-doc{position:relative;width:44px;height:54px;display:grid;place-items:center;border-radius:8px;background:#fdf0f0;color:#c2414b;border:1px solid #f3d6d8}
+.mat-doc .icon{width:22px;height:22px;margin-top:-8px}
+.mat-doc small{position:absolute;bottom:6px;left:0;right:0;text-align:center;font-size:8px;font-weight:800;letter-spacing:.6px}
+.mat-rules:not(.has-file) .mat-doc{background:#f3f6fa;color:#8aa0b8;border-color:#e2e9f1}
+
+.mat-rules.is-text.has-file .mat-doc{background:#eaf4fc;color:#0072bc;border-color:#cfe3f4}
+.mat-rules-top{display:flex;align-items:center;justify-content:space-between;gap:8px 12px;flex-wrap:wrap}
+
+/* PDF / text switch of the rules (two pressed-state buttons). */
+.mat-switch{display:inline-flex;padding:3px;border-radius:999px;background:#eaf0f6;border:1px solid #dbe5ef;gap:2px}
+.mat-switch button{min-height:30px;min-width:58px;padding:4px 14px;border-radius:999px;border:0;background:transparent;color:#4f6784;font-size:11px;font-weight:700;letter-spacing:.2px;transition:background .18s,color .18s,box-shadow .18s}
+.mat-switch button[aria-pressed="true"]{background:#fff;color:#00448a;box-shadow:0 1px 3px #0f2a4a26}
+.mat-switch button:hover:not([aria-pressed="true"]){color:#00448a}
+
+/* Typed rules: the editor below the row, full width. */
+.mat-editor-box{grid-column:1/-1;display:flex;flex-direction:column;gap:8px;min-width:0}
+.mat-editor{display:flex;flex-direction:column;gap:8px}
+.mat-editor-bar{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.mat-editor-label{font-size:11px;font-weight:600;color:#687e9b}
+.mat-preview-toggle{display:inline-flex;align-items:center;gap:6px;min-height:32px;padding:4px 10px;border-radius:6px;border:1px solid #d4e0eb;background:#fff;color:#00448a;font-size:11px;font-weight:650}
+.mat-preview-toggle .icon{width:14px;height:14px}
+.mat-preview-toggle[aria-pressed="true"]{background:#eef6fc;border-color:#a6c9e1}
+.mat-textarea{display:block;width:100%;min-height:190px;max-height:46vh;resize:vertical;padding:11px 12px;border:1px solid #cfdbe7;border-radius:8px;background:#fff;color:#19324f;font:inherit;font-size:13px;line-height:1.6;box-sizing:border-box}
+.mat-textarea:focus{border-color:#0072bc;outline:3px solid #0072bc33;outline-offset:0}
+.mat-textarea[readonly]{background:#f6f9fc;color:#5b6f89}
+.mat-textarea[hidden],.mat-text-preview[hidden]{display:none}
+.mat-text-preview{min-height:120px;max-height:46vh;overflow:auto;padding:12px 14px;border:1px dashed #cfdbe7;border-radius:8px;background:#fff}
+.mat-editor-foot{display:flex;align-items:flex-start;justify-content:space-between;gap:6px 14px;flex-wrap:wrap}
+.mat-help{flex:1 1 260px;font-size:10.5px;line-height:1.9;color:#687e9a}
+.mat-help code{padding:1px 5px;border-radius:4px;background:#eef3f8;color:#19324f;font-size:10.5px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre}
+.mat-count{font-size:11px;font-weight:650;color:#5b6f89;font-variant-numeric:tabular-nums;white-space:nowrap;padding-top:2px}
+.mat-count.is-over{color:#b3424a}
+.btn.small-btn.primary.mat-text-save{background:#00448a;border-color:#00448a;color:#fff}
+.btn.small-btn.primary.mat-text-save:hover{background:#00366f}
+
+/* Typed rules as read: paragraphs, headings, lists and links (shared by the reader and the editor's preview). */
+.mat-prose{font-size:14px;line-height:1.7;color:#22364f;overflow-wrap:anywhere}
+.mat-prose p,.mat-prose li{color:inherit}
+.mat-prose>*+*{margin-top:.75em}
+.mat-prose h3{margin-top:1.3em;font-size:16px;line-height:1.35;font-weight:700;color:#0b2147;letter-spacing:-.1px}
+.mat-prose h3:first-child{margin-top:0}
+.mat-prose ul,.mat-prose ol{padding-left:1.4em}
+.mat-prose li+li{margin-top:.3em}
+.mat-prose ul li::marker{color:#0072bc}
+.mat-prose ol li::marker{color:#0072bc;font-weight:700}
+.mat-prose a{color:#0063a4;text-decoration:underline;text-underline-offset:2px}
+
+/* Progress: a bar under the frame or the document's name; indeterminate while the file is prepared, checked or saved. */
+.mat-progress{display:flex;flex-direction:column;gap:5px;margin-top:6px}
+.mat-frame-box .mat-progress{position:absolute;left:6px;right:6px;bottom:6px;margin:0;padding:7px 8px;border-radius:7px;background:#ffffffe6;box-shadow:0 2px 10px #0f2a4a26}
+.mat-bar{height:6px;border-radius:3px;background:#dde8f3;overflow:hidden}
+.mat-bar>span{display:block;height:100%;width:var(--pct,0%);border-radius:inherit;background:linear-gradient(90deg,#0072bc,#00aeef);transition:width .2s ease-out}
+.mat-progress.is-busy .mat-bar>span{width:40%!important;animation:mat-busy 1.1s ease-in-out infinite}
+@keyframes mat-busy{0%{transform:translateX(-100%)}100%{transform:translateX(250%)}}
+.mat-progress-text{font-size:10px;font-weight:650;color:#345675;font-variant-numeric:tabular-nums}
+@media(prefers-reduced-motion:reduce){.mat-progress.is-busy .mat-bar>span{animation:none;width:100%!important;opacity:.5}}
+
+/* ---- Guest page: the large poster above the heading (phones) or beside it ---- */
+.guest-hero{display:grid;grid-template-columns:minmax(0,1fr);gap:20px;margin-bottom:26px}
+.guest-hero>.page-heading{margin-bottom:0}
+.mat-hero{--poster:#e9eff6;position:relative;display:block;width:100%;padding:0;border:0;border-radius:14px;overflow:hidden;background:var(--poster);box-shadow:0 2px 6px #0f2a4a14,0 18px 44px #0f2a4a29;cursor:zoom-in}
+.mat-hero img{display:block;width:100%;height:auto;max-height:min(72vh,720px);object-fit:contain}
+.mat-hero-zoom{position:absolute;right:12px;bottom:12px;display:inline-flex;align-items:center;gap:6px;padding:8px 12px;border-radius:999px;background:#0b1d36cc;color:#fff;font-size:11px;font-weight:650;-webkit-backdrop-filter:blur(4px);backdrop-filter:blur(4px)}
+.mat-hero-zoom .icon{width:14px;height:14px}
+.mat-hero:hover .mat-hero-zoom{background:#00448a}
+.mat-actions{display:flex;flex-wrap:wrap;gap:10px;margin-top:18px}
+.mat-actions .btn{gap:8px;text-decoration:none}
+.mat-actions .btn.secondary{color:#00448a}
+.mat-rules-btn .icon{color:#c2414b}
+@media(min-width:651px){
+ .guest-hero{grid-template-columns:300px minmax(0,1fr);gap:36px;align-items:center}
+ .guest-hero:has(.mat-hero.is-wide){grid-template-columns:minmax(0,440px) minmax(0,1fr)}
+}
+@media(max-width:650px){
+ .guest-hero{gap:18px;margin-bottom:22px}
+ .mat-hero{border-radius:12px}
+ .mat-actions .btn{flex:1 1 auto}
+}
+
+/* ---- Upcoming tournaments (home page) and "My starts" ---- */
+.mat-upcoming{width:36px;border-radius:5px;border-color:#ffffff2e;box-shadow:0 4px 10px #0007}
+.mat-row{width:64px;border-radius:7px}
+.ath-card-head.has-poster{display:grid;grid-template-columns:64px minmax(0,1fr) auto;align-items:start}
+.ath-open.has-poster{flex-wrap:nowrap;align-items:flex-start}
+.ath-open.has-poster .ath-open-main{flex:1 1 auto}
+.ath-rules-link{font-size:11px;font-weight:600;color:#0063a4;min-height:36px;text-decoration:none}
+.ath-rules-link .icon{width:15px;height:15px;color:#c2414b}
+.ath-rules-link:hover,.ath-rules-read:hover{text-decoration:underline}
+.ath-rules-read{display:inline-flex;align-items:center;gap:8px;margin:-12px 0 20px;font-size:12px;font-weight:650;color:#00448a;text-decoration:none}
+/* Typed rules open the reader: the same links drawn as buttons. */
+button.ath-rules-read,button.ath-rules-link,button.mat-rules-link{background:transparent;border:0;cursor:pointer;text-align:left}
+button.ath-rules-read{padding:0}
+.ath-rules-read .icon{width:16px;height:16px;color:#c2414b}
+@media(max-width:650px){
+ .ath-open.has-poster{flex-wrap:wrap}
+ .ath-open.has-poster .ath-open-main{flex:1 1 calc(100% - 82px)}
+ .ath-open.has-poster .ath-open-side{flex-basis:100%}
+ .ath-card-head.has-poster{grid-template-columns:56px minmax(0,1fr)}
+ .ath-card-head.has-poster .ath-marks{grid-column:1/-1}
+ .mat-row{width:56px}
+}
+
+/* ---- Full-screen preview ---- */
+.mat-viewer-open{overflow:hidden}
+.mat-viewer-root{position:fixed;inset:0;z-index:150}
+.mat-viewer{position:absolute;inset:0;display:grid;grid-template-columns:minmax(0,1fr);grid-template-rows:auto minmax(0,1fr) auto;background:#071327f2;color:#fff;outline:0;-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px)}
+.mat-viewer-bar{display:flex;align-items:center;gap:14px;padding:max(12px,env(safe-area-inset-top)) max(16px,env(safe-area-inset-right)) 10px max(20px,env(safe-area-inset-left))}
+.mat-viewer-bar h2{flex:1;min-width:0;font-size:15px;line-height:1.4;font-weight:650;color:#fff;letter-spacing:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.mat-viewer-close{flex:0 0 auto;width:44px;height:44px;display:grid;place-items:center;padding:0;border-radius:50%;background:#ffffff14;border:1px solid #ffffff2e;color:#fff;transition:background .18s}
+.mat-viewer-close:hover{background:#ffffff2b}
+.mat-viewer-close .icon{width:20px;height:20px}
+.mat-viewer-stage{position:relative;min-height:0;cursor:zoom-out}
+.mat-viewer-stage img{position:absolute;inset:0;margin:auto;width:auto;height:auto;max-width:calc(100% - 32px);max-height:calc(100% - 12px);object-fit:contain;border-radius:6px;background:var(--poster,#e9eff6);box-shadow:0 24px 70px #0009;cursor:default}
+.mat-viewer-actions{display:flex;justify-content:center;flex-wrap:wrap;gap:10px;padding:12px max(16px,env(safe-area-inset-right)) max(16px,env(safe-area-inset-bottom)) max(16px,env(safe-area-inset-left))}
+.btn.mat-viewer-btn{min-height:44px;gap:8px;white-space:normal;text-align:center;background:#ffffff14;border:1px solid #ffffff38;color:#fff;text-decoration:none}
+.btn.mat-viewer-btn:hover{background:#ffffff2b}
+.mat-viewer :focus-visible{outline:3px solid #4ac1ed;outline-offset:3px}
+@media(max-width:440px){.mat-viewer-actions .btn{flex:1 1 100%}}
+
+/* ---- Reader of typed rules: a sheet over the page, full screen on phones ---- */
+.mat-reader{display:grid;place-items:center;grid-template-columns:minmax(0,1fr);grid-template-rows:none;padding:24px;background:#071327cc}
+.mat-sheet{display:flex;flex-direction:column;width:min(760px,100%);max-height:calc(100dvh - 48px);background:#fff;color:#19324f;border-radius:14px;box-shadow:0 30px 80px #0008;overflow:hidden;outline:0}
+.mat-sheet-bar{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;padding:20px 22px 16px 28px;border-bottom:1px solid var(--line,#dfe7f0)}
+.mat-sheet-title{min-width:0}
+.mat-sheet-eyebrow{display:inline-flex;align-items:center;gap:6px;font-size:10px;font-weight:700;letter-spacing:1.4px;text-transform:uppercase;color:#0072bc}
+.mat-sheet-eyebrow .icon{width:14px;height:14px}
+.mat-sheet-bar h2{margin-top:4px;font-size:21px;line-height:1.3;color:#0b2147;overflow-wrap:anywhere}
+.mat-sheet .mat-sheet-close{background:#f1f5f9;border-color:#dbe4ee;color:#19324f}
+.mat-sheet .mat-sheet-close:hover{background:#e4ebf2}
+.mat-sheet-body{flex:1;min-height:0;overflow:auto;padding:24px 28px 30px;outline:0;overscroll-behavior:contain}
+.mat-sheet-body:focus-visible{box-shadow:inset 0 0 0 3px #0072bc55}
+.mat-sheet-body .mat-prose{font-size:15.5px;max-width:66ch}
+.mat-sheet-state{display:flex;flex-direction:column;align-items:flex-start;gap:12px;font-size:13px;color:#5b6f89}
+.mat-sheet :focus-visible{outline:3px solid #0072bc;outline-offset:3px}
+@media(max-width:650px){
+ .mat-reader{padding:0}
+ .mat-sheet{width:100%;height:100%;max-height:none;border-radius:0}
+ .mat-sheet-bar{padding:max(14px,env(safe-area-inset-top)) max(14px,env(safe-area-inset-right)) 14px max(18px,env(safe-area-inset-left))}
+ .mat-sheet-bar h2{font-size:19px}
+ .mat-sheet-body{padding:20px max(18px,env(safe-area-inset-right)) max(28px,env(safe-area-inset-bottom)) max(18px,env(safe-area-inset-left))}
+ .mat-sheet-body .mat-prose{font-size:16px}
+}
+
+/* ---- Phones ---- */
+@media(max-width:650px){
+ .mat-card{width:72px}
+ .mat-poster{grid-template-columns:112px minmax(0,1fr);gap:14px;padding:12px}
+ .mat-rules{padding:12px;gap:12px}
+}
+@media(max-width:440px){
+ .mat-poster{grid-template-columns:96px minmax(0,1fr);gap:12px}
+ .mat-buttons .btn{flex:1 1 auto}
+}
+@media (pointer:coarse){
+ .tournament-rules,.ath-rules-link,.ath-rules-read,.mat-actions .btn,.mat-buttons .btn,.mat-switch button,.mat-preview-toggle{min-height:44px}
+ .mat-thumb-zoom{opacity:1}
+ .mat-row .mat-thumb-zoom,.mat-upcoming .mat-thumb-zoom{display:none}
+}
+@media print{.mat-viewer-root,.mat-actions,.mat-section,.mat-thumb-zoom,.mat-hero-zoom{display:none!important}}

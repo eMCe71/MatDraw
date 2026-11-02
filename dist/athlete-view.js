@@ -6,9 +6,11 @@
  *  athleteView(db, user, today, {withdrawals, organizers, include}) = AthleteView::fromWorkspace: the inputs from a workspace
  *   (the demo keeps tombstones in db.withdrawals and has no organizer names unless given as {userId: {n}}).
  *  publicClubs(clubs) = the public-clubs route: verified clubs that are not merged, by name, at most 2000, plus the id of
- *   'unaffiliated'. */
+ *   'unaffiliated'.
+ *  Materials (PLAN-MATERIALY §2.1): the open tournaments and the tournaments of own entries (while available) carry the sparse
+ *   fields poster {v,w,h,color} and rules {v,size} of guest-view.js publicMaterials (the demo adds src). */
 import {resolveDraw} from './engine.js';
-import {categoryList} from './guest-view.js';
+import {categoryList,publicMaterials} from './guest-view.js';
 import {ADULT_AGE,UNAFFILIATED,ageAt,community,trusted,closedCreator,currentClub,resolveClub} from './workspace.js';
 
 export const RECENT_DAYS=30,ENTRY_LIMIT=100,OPEN_LIMIT=50,WITHDRAWN_LIMIT=100,CLUBS_LIMIT=2000;
@@ -59,7 +61,7 @@ export function projectAthleteView(profiles,tournaments,withdrawals,today,organi
     categories.push({event:p.event,code:p.code,title:p.title,subtitle:p.subtitle,type:p.type,state:p.state,athletes:p.athletes,drawn:isObj(d),position:p.bracket!==null&&isObj(d)?position(d,String(e.id),p.bracket):null,bracket:p.bracket});
    }
    out.entries.push({profileId:e.profileId,
-    tournament:available?{id:t.id,name:t.name,city:t.city,date:t.date,status:t.status,available:true,community:!!t.community,trusted:!!t.trusted}:{id:t.id,name:t.name,date:t.date,available:false},
+    tournament:available?{id:t.id,name:t.name,city:t.city,date:t.date,status:t.status,available:true,community:!!t.community,trusted:!!t.trusted,...publicMaterials(t.materials)}:{id:t.id,name:t.name,date:t.date,available:false},
     entry:{events:[...(e.events||[])],weight:e.weight??null,height:e.height??null,gradeType:e.gradeType??null,grade:e.grade??null,age:e.age??null,club:entryClub(e),presence:e.presence??'pending',actualWeight:e.actualWeight??null},
     canWithdraw:withdraw,canEdit:withdraw&&t.selfEntry===true&&t.date>=today&&(!!t.trusted||!minorOn(a,t.date)),categories});
   }
@@ -73,7 +75,7 @@ export function projectAthleteView(profiles,tournaments,withdrawals,today,organi
   const inside=new Set((t.entries||[]).map(e=>String(e.profileId??''))),keys=Object.keys(isObj(t.draws)?t.draws:{}).sort();
   const n=t.community?organizers?.[t.createdBy??'']?.n:null;
   out.open.push({id:t.id,name:t.name,city:t.city,date:t.date,community:!!t.community,trusted:!!t.trusted,entriesClosed:!!t.closed,organizer:typeof n==='string'&&n!==''?{n}:null,
-   profiles:profiles.filter(a=>!a.archived).map(a=>({id:a.id,entered:inside.has(a.id),blocked:!t.trusted&&minorOn(a,t.date)?'minor-untrusted':null})),drawn:keys});
+   profiles:profiles.filter(a=>!a.archived).map(a=>({id:a.id,entered:inside.has(a.id),blocked:!t.trusted&&minorOn(a,t.date)?'minor-untrusted':null})),drawn:keys,...publicMaterials(t.materials)});
  }
  return out;
 }
@@ -82,7 +84,7 @@ export function athleteView(db,user,today,{withdrawals=null,organizers={},includ
  const clubs=db.clubs||[],byId=new Map(db.tournaments.map(t=>[t.id,t]));
  const profiles=db.profiles.filter(a=>a.ownerId!=null&&a.ownerId===user.id).map(a=>{const c=resolveClub(clubs,a.clubId??null);return {...a,clubRow:c?{id:c.id,name:c.name,verified:c.verified!==false}:null};});
  const tournaments=db.tournaments.map(t=>({id:t.id,name:t.name,city:t.city,date:t.date,status:t.status,selfEntry:t.selfEntry===true,hiddenBy:t.hiddenBy??null,createdBy:t.createdBy??null,community:community(db,t),trusted:trusted(db,t),closed:closedCreator(db,t),
-  entries:t.entries.map(e=>({...e,currentClub:currentClub(clubs,e.clubId??null)})),draws:t.draws}));
+  entries:t.entries.map(e=>({...e,currentClub:currentClub(clubs,e.clubId??null)})),draws:t.draws,...(t.materials?{materials:t.materials}:{})}));
  const gone=[];for(const w of withdrawals??db.withdrawals??[]){const t=byId.get(w.tournamentId);if(t)gone.push({profileId:w.profileId,tournament:{id:t.id,name:t.name,date:t.date},by:w.by,at:Math.trunc(w.at)});}
  return projectAthleteView(profiles,tournaments,gone,today,organizers,include);
 }

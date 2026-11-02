@@ -15,7 +15,7 @@ const {registry}=await import('../dist/registry.js');
 const Me=await import('../dist/me.js');
 
 const USER=['id','clubId','email','role','active','caps'],CAPS=['organizer','organizerBlocked','organizerTrusted','athlete'];
-const FEATURES=['signup','avatars','chat','signupMode','selfEntry','rolesOpen'],TOP=['user','profile','access','billing','features','athletes'];
+const FEATURES=['signup','avatars','chat','signupMode','selfEntry','rolesOpen','materials'],TOP=['user','profile','access','billing','features','athletes'];
 const NO_CAPS={organizer:false,organizerBlocked:false,organizerTrusted:false,athlete:false};
 let ws=null;registry.provide('ui',{getWorkspace:()=>ws});
 const meOf=async id=>{const u=JSON.parse(localStorage.getItem(Client.dataKey)).users.find(x=>x.id===id);ws={user:{id:u.id,clubId:u.clubId,email:u.email,role:u.role,active:true}};return Me.loadMe({force:true});};
@@ -29,6 +29,7 @@ test('demo me: the server shapes of the role fields for staff, the organizer and
   assert.deepEqual(Object.keys(m).filter(k=>k!=='demo'),TOP,id);
   assert.deepEqual(Object.keys(m.user),USER,id);assert.deepEqual(Object.keys(m.user.caps),CAPS,id);
   assert.deepEqual(Object.keys(m.features),m.user.role==='admin'?[...FEATURES,'pendingOrganizers']:FEATURES,id);
+  assert.deepEqual(m.features.materials,{poster:4194304,rules:10485760},'PLAN-MATERIALY §2.2: the demo takes posters up to 4 MB and rules up to 10 MB');
   assert.equal(m.features.signupMode,'off');assert.equal(m.features.signup,false);assert.equal(m.features.selfEntry,true);assert.equal(m.features.rolesOpen,true);
   assert.ok(Array.isArray(m.athletes));
  }

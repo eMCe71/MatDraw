@@ -18,6 +18,7 @@ import SERVER_ATHLETES from './i18n/server-athletes-en.js';
 import ORGANIZER from './i18n/organizer-en.js';
 import ATHLETE from './i18n/athlete-en.js';
 import SETTINGS from './i18n/settings-en.js';
+import MATERIALS from './i18n/materials-en.js';
 
 const same=(a,b)=>a===b||(a&&b&&typeof a==='object'&&typeof b==='object'&&JSON.stringify(a)===JSON.stringify(b));
 /** Merges per-feature dictionaries, first one wins. A key repeated with a different value is not fatal (one phrase must not stop
@@ -31,7 +32,7 @@ export function mergeDictionaries(sources){
  return {dictionary,collisions};
 }
 export const DICTIONARY_SOURCES=[['i18n-en.js',BASE],['i18n/shell-en.js',SHELL],['i18n/accounts-en.js',ACCOUNTS],['i18n/chat-en.js',CHAT],['i18n/moderation-en.js',MODERATION],['i18n/members-en.js',MEMBERS],['i18n/billing-en.js',BILLING],['i18n/home-en.js',HOME],['i18n/pwa-en.js',PWA],
- ['i18n/server-domain-en.js',SERVER_DOMAIN],['i18n/server-settings-en.js',SERVER_SETTINGS],['i18n/server-accounts-en.js',SERVER_ACCOUNTS],['i18n/server-athletes-en.js',SERVER_ATHLETES],['i18n/organizer-en.js',ORGANIZER],['i18n/athlete-en.js',ATHLETE],['i18n/settings-en.js',SETTINGS]];
+ ['i18n/server-domain-en.js',SERVER_DOMAIN],['i18n/server-settings-en.js',SERVER_SETTINGS],['i18n/server-accounts-en.js',SERVER_ACCOUNTS],['i18n/server-athletes-en.js',SERVER_ATHLETES],['i18n/organizer-en.js',ORGANIZER],['i18n/athlete-en.js',ATHLETE],['i18n/settings-en.js',SETTINGS],['i18n/materials-en.js',MATERIALS]];
 const merged=mergeDictionaries(DICTIONARY_SOURCES);
 /** All English entries (i18n-en.js and dist/i18n/*-en.js). */
 export const DICTIONARY=merged.dictionary;
@@ -85,7 +86,8 @@ export const PL_FORMS={
  'Czat turnieju: {n} wiadomości':{one:'Czat turnieju: {n} wiadomość',few:'Czat turnieju: {n} wiadomości',many:'Czat turnieju: {n} wiadomości'},
  '{n} nieprzeczytanych':{one:'{n} nieprzeczytana',few:'{n} nieprzeczytane',many:'{n} nieprzeczytanych'},
  'Archiwum · {n} zakończone':{one:'Archiwum · {n} zakończony',few:'Archiwum · {n} zakończone',many:'Archiwum · {n} zakończonych'},
- 'Zostało {n} znaków':{one:'Został {n} znak',few:'Zostały {n} znaki',many:'Zostało {n} znaków'}
+ 'Zostało {n} znaków':{one:'Został {n} znak',few:'Zostały {n} znaki',many:'Zostało {n} znaków'},
+ 'Tekst, {n} znaków. Otwiera się w czytelnym oknie.':{one:'Tekst, {n} znak. Otwiera się w czytelnym oknie.',few:'Tekst, {n} znaki. Otwiera się w czytelnym oknie.',many:'Tekst, {n} znaków. Otwiera się w czytelnym oknie.'}
 };
 /** t('Polish text {n}',{n}) – Polish keys with a count use PL_FORMS; English entries may be a string, {one,other} (chosen by
  * params.n) or a function. */
