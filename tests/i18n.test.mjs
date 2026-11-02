@@ -67,7 +67,7 @@ test('lang-boot.js (early <html lang>) follows the same rule as i18n.js',()=>{
 test('the interface modules are found and the per-feature dictionaries merge without collisions',()=>{
  for(const file of ['dist/app.js','dist/architecture.js','dist/client.js','dist/me.js'])assert.ok(UI_MODULES.includes(file),file);
  for(const file of ['dist/registry.js','dist/engine.js','dist/i18n.js','dist/i18n-en.js'])assert.ok(!UI_MODULES.includes(file),file);
- assert.deepEqual(DICTIONARY_SOURCES.map(([name])=>name),['i18n-en.js',...['shell','accounts','chat','moderation','members','billing','home','pwa','server-domain','server-settings','server-accounts','server-athletes','organizer','athlete','settings'].map(f=>'i18n/'+f+'-en.js')]);
+ assert.deepEqual(DICTIONARY_SOURCES.map(([name])=>name),['i18n-en.js',...['shell','accounts','chat','moderation','members','billing','home','pwa','server-domain','server-settings','server-accounts','server-athletes','organizer','athlete','settings','materials'].map(f=>'i18n/'+f+'-en.js')]);
  // Every dictionary file of dist/i18n is registered (PLAN-REJESTRACJA-ROLE §10.6: wave 1 registers the empty ones of later slices).
  assert.deepEqual(list('dist/i18n').filter(f=>f.endsWith('-en.js')).map(f=>'i18n/'+f).sort(),DICTIONARY_SOURCES.map(([name])=>name).filter(n=>n.startsWith('i18n/')).sort());
  assert.deepEqual(collisions,[],'the same key with different English text in two dictionaries');

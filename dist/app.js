@@ -9,6 +9,7 @@ import {AD,ACCESS,accessFor} from './promo.js';
 import {registry,h,trustedHtml,SafeHtml,communityOnly,organizerUser,copyText} from './registry.js';
 import {purgeSession} from './me.js';
 import {pickerHtml,readPicker} from './club-picker.js';
+import * as Materials from './materials.js';
 import './chat-boot.js';import './moderation-boot.js';import './account-boot.js';import './members-boot.js';import './pwa.js';import './athlete-boot.js';import './settings-boot.js';
 const isDemo=Client.isDemo;
 const eventName=key=>ruleLabel(EVENTS[key]),roleName=role=>ROLES[role]?T(ROLES[role]):T('Członek'),statusName=status=>T(STATUSES[status]);
@@ -68,6 +69,9 @@ registry.provide('ui',{T,esc,
  shell:(content,title,subtitle='',actions='')=>trustedHtml(shell(String(safeHtml(content)),String(safeHtml(title)),String(safeHtml(subtitle)),String(safeHtml(actions)))),
  mascot:(pose,cls='')=>trustedHtml(mascot(Object.hasOwn(MASCOTS,pose)?pose:'avatar',esc(cls))),emptyMascot:()=>trustedHtml(emptyMascot()),
  render:()=>render(),commit:(...args)=>commit(...args),handleError:(error,form)=>handleError(error,form),getWorkspace:()=>workspace,getState:()=>state,switchTournament:id=>switchTournament(id),clubName:id=>clubName(id),
+ // Tournament materials (materials.js): the answer of an upload or a removal is applied like a command's; reauth runs a request with
+ // the organizer's password confirmation (401 reauth), as commit does.
+ applyWorkspace:res=>applyWorkspace(res),reauth:fn=>Client.withReauth(fn,askPassword),
  // Read-only bracket of a public category (GuestView/AthleteView: slots {initials,club}, results by slot); highlight = own slot index.
  bracket:(category,{highlight=null}={})=>trustedHtml(publicBracket(category,highlight))});
 function allCats(){return categories(state.athletes);}
@@ -250,7 +254,7 @@ function tournamentsPage(){
   // Trust: with the Administrator's confirmation required (§17 trustRequired) an unconfirmed organizer is marked; without it nobody is.
   const marks=[t.community&&!(org&&manager)?badge(T('Turniej społeczności'),'neutral'):'',t.community&&t.trusted===false?badge(T('Organizator niepotwierdzony'),'warning'):'',t.hidden?badge(T('Ukryty przez Administratora'),'warning'):'',t.selfEntry&&t.status==='open'?badge(T('Samodzielne zgłoszenia'),'teal'):''].join('');
   const share=manager&&t.status!=='draft'&&!t.hidden?`<button type="button" class="text-btn copy-link" data-action="copy-link" data-id="${esc(t.id)}">${icon('share')}<span>${T('Kopiuj link do zapisów')}</span></button>`:'';
-  return `<article class="tournament-card ${activeId===t.id?'current-tournament':''}"><div class="tournament-card-top"><span class="tournament-symbol">${icon('trophy')}</span>${badge(statusName(t.status),t.status==='open'?'teal':t.status==='finished'?'neutral':'warning')}</div><h2>${esc(t.name)}</h2><p>${formatDate(t.date)} <span>·</span> ${esc(t.city)}</p>${marks?'<div class="tournament-marks">'+marks+'</div>':''}${t.hidden&&manager&&user.role!=='admin'?`<p class="tournament-hidden-note">${icon('alert')}<span>${hiddenText(t)}</span></p>`:''}<div class="tournament-card-meta"><span>${icon('users')} ${user.role==='club'?T('{n} zgłoszeń klubu',{n:t.entries.length}):full?T('{n} zgłoszeń',{n:t.entries.length}):T('Twoje zgłoszenia: {n}',{n:t.entries.length})}</span>${full||user.role==='club'?`<span>${icon('bracket')} ${full?T('{n} drabinek',{n:Object.keys(t.draws).length}):T('Twoje zgłoszenia')}</span>`:''}</div><div class="tournament-card-actions">${button(T('Otwórz turniej')+' '+icon('arrow'),'open-tournament','primary',`data-id="${t.id}"`)}<span data-chat-tournament-link="${esc(t.id)}"></span>${manager?button(icon('settings'),'edit-tournament','secondary icon-only',`data-id="${t.id}" aria-label="${T('Ustawienia: {name}',{name:esc(t.name)})}"`):''}</div><div class="tournament-card-links">${share}<span class="tournament-admin-mount" data-tournament-admin="${esc(t.id)}"></span></div></article>`;
+  return `<article class="tournament-card ${activeId===t.id?'current-tournament':''}"><div class="tournament-card-top">${String(Materials.cardPoster(t,{manager}))}${badge(statusName(t.status),t.status==='open'?'teal':t.status==='finished'?'neutral':'warning')}</div><h2>${esc(t.name)}</h2><p>${formatDate(t.date)} <span>·</span> ${esc(t.city)}</p>${marks?'<div class="tournament-marks">'+marks+'</div>':''}${t.hidden&&manager&&user.role!=='admin'?`<p class="tournament-hidden-note">${icon('alert')}<span>${hiddenText(t)}</span></p>`:''}<div class="tournament-card-meta"><span>${icon('users')} ${user.role==='club'?T('{n} zgłoszeń klubu',{n:t.entries.length}):full?T('{n} zgłoszeń',{n:t.entries.length}):T('Twoje zgłoszenia: {n}',{n:t.entries.length})}</span>${full||user.role==='club'?`<span>${icon('bracket')} ${full?T('{n} drabinek',{n:Object.keys(t.draws).length}):T('Twoje zgłoszenia')}</span>`:''}${String(Materials.rulesLink(t,{cls:'tournament-rules',label:T('Regulamin')}))}</div><div class="tournament-card-actions">${button(T('Otwórz turniej')+' '+icon('arrow'),'open-tournament','primary',`data-id="${t.id}"`)}<span data-chat-tournament-link="${esc(t.id)}"></span>${manager?button(icon('settings'),'edit-tournament','secondary icon-only',`data-id="${t.id}" aria-label="${T('Ustawienia: {name}',{name:esc(t.name)})}"`):''}</div><div class="tournament-card-links">${share}<span class="tournament-admin-mount" data-tournament-admin="${esc(t.id)}"></span></div></article>`;
  };
  const grid=items=>`<div class="tournament-grid">${items.map(card).join('')}</div>`;
  const empty=`<section class="panel empty-state">${emptyMascot()}<h3>${T('Tu pojawią się turnieje.')}</h3><p>${user.role==='club'?T('Administrator lub Edytor musi najpierw otworzyć zapisy.'):org?T('Utwórz pierwszy turniej i udostępnij link do zapisów.'):T('Utwórz pierwszy turniej, a potem dodaj zgłoszenia z bazy zawodników.')}</p></section>`;
@@ -270,7 +274,8 @@ function tournamentForm(id){
  // An organizer's new tournament opens for entries, also from athletes themselves; staff keep a draft without self-entries (§10.4, R11).
  // A tournament hidden by the Administrator keeps its status (draft) until the Administrator restores it.
  const banner=hidden?`<div class="notice form-banner">${icon('alert')}<p>${user.role==='admin'?T('Turniej jest ukryty. Status wróci po przywróceniu turnieju.'):hiddenText(t)+' '+T('Status może zmienić tylko Administrator.')}</p></div>`:'';
- modal(id?T('Ustawienia turnieju'):T('Nowy turniej'),`<form id="tournament-form" data-id="${id||''}">${banner}<div class="form-grid"><label class="span-two">${T('Nazwa turnieju')}<input name="name" required maxlength="100" value="${esc(t.name)}" placeholder="${T('np. Puchar Wiosny 2027')}"></label><label>${T('Data zawodów')}<input name="date" type="date" required value="${t.date}" ${t.entries?.length?'readonly':''}></label><label>${T('Miasto')}<input name="city" required maxlength="100" value="${esc(t.city)}"></label><label>${T('Status')}<select name="status" ${hidden?'disabled':''}>${Object.keys(STATUSES).map(v=>`<option value="${v}" ${t.status===v?'selected':''}>${statusName(v)}</option>`).join('')}</select>${hidden?`<input type="hidden" name="status" value="${esc(t.status)}">`:''}</label><label>${T('Nazwa maty')}<input name="mat" maxlength="50" required value="${esc(t.mat)}"></label></div><p class="muted small form-note">${T('„Zapisy otwarte” pozwalają dodawać zawodników klubom i, gdy zaznaczysz pole poniżej, samym zawodnikom.')} ${T('Zakończony turniej zachowuje historię i wyniki.')}</p><label class="checkbox-label self-entry-field"><input type="checkbox" name="selfEntry" ${t.selfEntry?'checked':''}> <span><strong>${T('Zawodnicy mogą zgłaszać się sami')}</strong><small>${T('Osoba z kontem MatBravo zgłasza siebie albo swoje dziecko, dopóki zapisy są otwarte.')}</small></span></label>${t.entries?.length?'<p class="muted small form-note">'+T('Data jest zablokowana, ponieważ są już zgłoszenia.')+'</p>':''}<div class="form-error" role="alert"></div></form>`,button(T('Anuluj'),'close-modal')+'<button class="btn primary" form="tournament-form" type="submit">'+(id?T('Zapisz zmiany'):T('Utwórz turniej'))+'</button>');
+ modal(id?T('Ustawienia turnieju'):T('Nowy turniej'),`<form id="tournament-form" data-id="${id||''}">${banner}<div class="form-grid"><label class="span-two">${T('Nazwa turnieju')}<input name="name" required maxlength="100" value="${esc(t.name)}" placeholder="${T('np. Puchar Wiosny 2027')}"></label><label>${T('Data zawodów')}<input name="date" type="date" required value="${t.date}" ${t.entries?.length?'readonly':''}></label><label>${T('Miasto')}<input name="city" required maxlength="100" value="${esc(t.city)}"></label><label>${T('Status')}<select name="status" ${hidden?'disabled':''}>${Object.keys(STATUSES).map(v=>`<option value="${v}" ${t.status===v?'selected':''}>${statusName(v)}</option>`).join('')}</select>${hidden?`<input type="hidden" name="status" value="${esc(t.status)}">`:''}</label><label>${T('Nazwa maty')}<input name="mat" maxlength="50" required value="${esc(t.mat)}"></label></div><p class="muted small form-note">${T('„Zapisy otwarte” pozwalają dodawać zawodników klubom i, gdy zaznaczysz pole poniżej, samym zawodnikom.')} ${T('Zakończony turniej zachowuje historię i wyniki.')}</p><label class="checkbox-label self-entry-field"><input type="checkbox" name="selfEntry" ${t.selfEntry?'checked':''}> <span><strong>${T('Zawodnicy mogą zgłaszać się sami')}</strong><small>${T('Osoba z kontem MatBravo zgłasza siebie albo swoje dziecko, dopóki zapisy są otwarte.')}</small></span></label>${t.entries?.length?'<p class="muted small form-note">'+T('Data jest zablokowana, ponieważ są już zgłoszenia.')+'</p>':''}${String(Materials.sectionHtml(id?t:null))}<div class="form-error" role="alert"></div></form>`,button(T('Anuluj'),'close-modal')+'<button class="btn primary" form="tournament-form" type="submit">'+(id?T('Zapisz zmiany'):T('Utwórz turniej'))+'</button>');
+ Materials.mount(document.querySelector('#tournament-form'));
 }
 /** A record whose personal data were erased (Domain::forgetProfile keeps results under DELETED, without an owner or a birth date):
  * read-only, it can only be erased further. */
@@ -342,7 +347,7 @@ const longDate=date=>dateAt(date).toLocaleDateString(locale(),{weekday:'long',da
 function relativeDay(date){try{const days=Math.round((Date.parse(date+'T00:00:00Z')-Date.parse(warsawToday()+'T00:00:00Z'))/864e5);return days<=31?new Intl.RelativeTimeFormat(locale(),{numeric:'auto'}).format(days,'day'):new Intl.RelativeTimeFormat(locale(),{numeric:'always'}).format(Math.round(days/30.44),'month');}catch{return '';}}
 function upcomingItem(t,i){
  const d=dateAt(t.date),when=relativeDay(t.date);
- return `<li><button type="button" class="upcoming-item${i===0?' is-next':''}" data-action="open-upcoming" data-id="${esc(t.id)}" aria-describedby="upcoming-hint"><span class="upcoming-date" aria-hidden="true"><small>${esc(d.toLocaleDateString(locale(),{month:'short'}).replace('.',''))}</small><strong>${d.getDate()}</strong></span><span class="upcoming-text">${i===0?`<span class="upcoming-next">${T('Najbliższy')}${when?' · '+esc(when):''}</span>`:''}<strong class="upcoming-name">${esc(t.name)}</strong><span class="upcoming-meta"><span>${icon('pin')}${esc(t.city)}</span><time datetime="${esc(t.date)}">${esc(shortDate(t.date))}</time><span class="upcoming-chat" data-chat-count="${esc(t.id)}"></span></span></span>${icon('right','upcoming-arrow')}</button></li>`;
+ return `<li><button type="button" class="upcoming-item${i===0?' is-next':''}" data-action="open-upcoming" data-id="${esc(t.id)}" aria-describedby="upcoming-hint"><span class="upcoming-date" aria-hidden="true"><small>${esc(d.toLocaleDateString(locale(),{month:'short'}).replace('.',''))}</small><strong>${d.getDate()}</strong></span><span class="upcoming-text">${i===0?`<span class="upcoming-next">${T('Najbliższy')}${when?' · '+esc(when):''}</span>`:''}<strong class="upcoming-name">${esc(t.name)}</strong><span class="upcoming-meta"><span>${icon('pin')}${esc(t.city)}</span><time datetime="${esc(t.date)}">${esc(shortDate(t.date))}</time><span class="upcoming-chat" data-chat-count="${esc(t.id)}"></span></span></span>${String(Materials.thumb(t,{cls:'mat-upcoming',preview:false}))}${icon('right','upcoming-arrow')}</button></li>`;
 }
 function upcomingBody(){
  const items=upcoming.data?.tournaments;
@@ -450,7 +455,10 @@ const guestChatPanel=g=>`<div class="guest-chat" data-chat-mount="tournament" da
 function guestPage(){
  const g=guest,d=g?.data,t=d?.tournament||g?.known,preview=!!g?.memberPreview;
  if(g)g.tab=guestTabFromHash();// the URL is the single source of the tab (switchGuestTab writes it before it renders)
- const heading=t?`<div class="page-heading guest-heading"><div><div class="eyebrow">${T('PODGLĄD GOŚCIA · TYLKO DO ODCZYTU')}</div><h1 id="guest-title" tabindex="-1">${esc(t.name)}</h1><p class="guest-when"><span>${icon('calendar')}${esc(longDate(t.date))}</span><span>${icon('pin')}${esc(t.city)}</span></p></div><div class="heading-actions">${badge(statusName(t.status),t.status==='open'?'teal':t.status==='finished'?'neutral':'warning')}</div></div>`:`<h1 id="guest-title" class="sr-only" tabindex="-1">${T('Podgląd gościa')}</h1>`;
+ // Materials (PLAN-MATERIALY): the large poster above the heading on phones, beside it on wider screens; the rules and the poster's
+ // download under the date (materials.js; the list's summary already carries them while the preview loads).
+ const poster=t?String(Materials.guestPoster(t)):'',materials=t?String(Materials.guestActions(t)):'';
+ const heading=t?`${poster?'<section class="guest-hero">'+poster:''}<div class="page-heading guest-heading"><div><div class="eyebrow">${T('PODGLĄD GOŚCIA · TYLKO DO ODCZYTU')}</div><h1 id="guest-title" tabindex="-1">${esc(t.name)}</h1><p class="guest-when"><span>${icon('calendar')}${esc(longDate(t.date))}</span><span>${icon('pin')}${esc(t.city)}</span></p>${materials}</div><div class="heading-actions">${badge(statusName(t.status),t.status==='open'?'teal':t.status==='finished'?'neutral':'warning')}</div></div>${poster?'</section>':''}`:`<h1 id="guest-title" class="sr-only" tabindex="-1">${T('Podgląd gościa')}</h1>`;
  let content;
  // [data-athlete-cta]: the athlete module's call to action (enter / entered / add athlete data, §10.3), for guests and members.
  if(d){const s=d.summary;content=`<div class="stats guest-stats">${[['users',s.entries,T('Zgłoszenia')],['shield',s.clubs,T('Kluby')],['grid',s.categories,T('Kategorie')],['bracket',s.brackets,T('Drabinki')]].map(([i,n,label])=>`<div class="stat"><span class="stat-icon">${icon(i)}</span><div><strong>${Number(n)||0}</strong><span>${label}</span></div></div>`).join('')}</div><div class="athlete-cta-mount" data-athlete-cta data-tournament-id="${esc(g.id)}"></div>${preview?'':accessCard(d.tournament)}${guestCategories(d)}`;}
@@ -513,6 +521,9 @@ async function commit(type,payload,expected=Number(document.querySelector('.moda
  try{const res=await Client.withReauth(()=>Client.command(type,payload,expected),askPassword);workspace=res.workspace;syncState();return res.result;}
  finally{saving=false;}
 }
+/** The answer {workspace,result} of a write outside commit (an upload or a removal of tournament materials) is applied like a
+ * command's; an answer older than the workspace already shown (two sends finishing out of order) is not. */
+function applyWorkspace(res){if(res?.workspace&&!(Number(res.workspace.revision)<Number(workspace?.revision))){workspace=res.workspace;syncState();}return res?.result??null;}
 /** The workspace again; an organizer whose tool session went idle confirms the password first (§4.6). */
 const reload=()=>Client.withReauth(()=>Client.bootstrap(),askPassword);
 // ---- Password confirmation for the organizer's tools (R17, §4.6): a 401 {code:'reauth'} from bootstrap or command opens this dialog;
@@ -572,7 +583,7 @@ document.addEventListener('click',async event=>{
   else if(action==='forget-profile'){const a=workspace.profiles.find(p=>p.id===id);modal(T('Usunąć dane zawodnika?'),`<p>${a?.ownerId!=null?T('Usuniesz dane zawodnika {name} z konta, do którego należą. Konto zostaje, ale jego profil zawodnika zniknie. Zgłoszenia do turniejów, które jeszcze się nie odbyły, zostaną wycofane, a w zachowanych wynikach zostaną tylko inicjały. Tej operacji nie można cofnąć.',{name:'<strong>'+esc(a?.name)+'</strong>'}):erasedProfile(a)?T('W zachowanych wynikach tego rekordu zostaną tylko inicjały, a rekord zniknie, jeśli nie ma już wyników. Tej operacji nie można cofnąć.'):T('Usuniesz dane: {name}. Zgłoszenia do turniejów, które jeszcze się nie odbyły, zostaną wycofane, a w pozostałych zostaną tylko inicjały. Tej operacji nie można cofnąć.',{name:'<strong>'+esc(a?.name)+'</strong>'})}</p>`,button(T('Anuluj'),'close-modal')+button(T('Usuń dane zawodnika'),'confirm-forget-profile','primary',`data-id="${id}"`));}
   else if(action==='confirm-forget-profile'){await commit('profile.forget',{id});closeModal();render();toast(T('Dane zawodnika usunięte.'));}
   else if(action==='new-tournament')tournamentForm();
-  else if(action==='edit-tournament')tournamentForm(id);
+  else if(action==='edit-tournament'){tournamentForm(id);if(el.dataset.focus==='materials')Materials.focusSection();}
   else if(action==='open-tournament')switchTournament(id);
   else if(action==='new-profile')profileForm();
   else if(action==='edit-profile')profileForm(id);
@@ -634,13 +645,25 @@ document.addEventListener('submit',async event=>{
  const ids=['login-form','tournament-form','profile-form','entry-form','account-form','password-form','check-form','print-form'];
  if(!ids.includes(event.target.id))return;event.preventDefault();
  const form=event.target,f=new FormData(form),submit=event.submitter,revision=Number(form.dataset.revision||workspace?.revision);
- let type=null,payload=null,result=null;const save=async(t,p,rev=revision)=>{type=t;payload=p;return result=await commit(t,p,rev);};
+ let type=null,payload=null,result=null,keep=false;const save=async(t,p,rev=revision)=>{type=t;payload=p;return result=await commit(t,p,rev);};
  if(submit?.disabled)return;if(submit)submit.disabled=true;
  const errorBox=form.querySelector('.form-error');if(errorBox)errorBox.textContent='';
  try{
   if(form.id==='login-form'){workspace=await Client.login(f.get('email'),f.get('password'));navigate(registry.defaultPage(workspace.user.role,workspace.user));registry.emit('login',{user:workspace.user});return;}
   if(form.id==='print-form'){doPrint(f.get('scope'),f.get('format'));return;}
-  if(form.id==='tournament-form'){await save('tournament.save',{id:form.dataset.id||undefined,name:f.get('name'),city:f.get('city'),date:f.get('date'),status:f.get('status'),mat:f.get('mat'),selfEntry:f.has('selfEntry')});activeId=result.id;sessionStorage.setItem('matdraw.activeTournament',activeId);}
+  if(form.id==='tournament-form'){
+   // Materials (PLAN-MATERIALY): a send still running in this dialog ends first, so the save uses the revision it left; a new
+   // tournament's waiting files go out once it exists, the dialog staying open as its settings. When one fails the tournament stays
+   // and so does the dialog, with the message next to the file and a retry button.
+   await Materials.settled(form);const fresh=!form.dataset.id;
+   await save('tournament.save',{id:form.dataset.id||undefined,name:f.get('name'),city:f.get('city'),date:f.get('date'),status:f.get('status'),mat:f.get('mat'),selfEntry:f.has('selfEntry')},Number(form.dataset.revision||workspace?.revision));activeId=result.id;sessionStorage.setItem('matdraw.activeTournament',activeId);
+   if(fresh&&Materials.queued(form)){
+    form.dataset.id=result.id;for(const el of [form,form.closest('.modal')])if(el)el.dataset.revision=workspace.revision;
+    const heading=document.querySelector('#modal-title');if(heading)heading.textContent=T('Ustawienia turnieju');if(submit)submit.textContent=T('Zapisz zmiany');
+    render();keep=!await Materials.flush(form,result.id);
+    if(!form.isConnected){render();toast(keep?T('Turniej utworzony. Nie wszystkie materiały udało się wysłać.'):T('Zapisano zmiany.'));return;}
+   }
+  }
   else if(form.id==='profile-form'){
    // Club: {id}|{name}|{none:true} from the picker (Clubs::pick), the own club for a club representative.
    // Editing: a non-admin keeps the current club (the picker is read-only); "Niezrzeszony" again is {id:UNAFFILIATED}, which keeps the
@@ -664,6 +687,7 @@ document.addEventListener('submit',async event=>{
   }
   // Modules react while the form is still in the page (e.g. account billing fields); passwords are never passed on.
   const {password:_p,currentPassword:_c,...shared}=payload||{};registry.emit('saved',{form:form.id,type,payload:shared,result,element:form});
+  if(keep){toast(T('Turniej utworzony. Nie wszystkie materiały udało się wysłać.'));return;}
   closeModal();render();toast(result?.notice==='club-pending'?T('Klub zapiszemy po sprawdzeniu przez Administratora. Do tego czasu zawodnik jest „Niezrzeszony”.'):T('Zapisano zmiany.'));
  }catch(error){await handleError(error,form);}finally{if(submit?.isConnected){submit.disabled=false;if(!document.activeElement||document.activeElement===document.body)submit.focus();}}
 });

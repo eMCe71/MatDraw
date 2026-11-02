@@ -57,7 +57,7 @@ test('precache: files exist with the recorded SHA-256, nothing private or exclud
  assert.ok(bytes<LIMIT,`${bytes} bytes`);
  const urls=list.map(([u])=>u);
  for(const u of ['./index.html','./offline.html','./manifest.webmanifest','./manifest.en.webmanifest','./app.js','./runtime-config.js','./lang-boot.js','./styles.css','./brand/shortcut-chat-96.png','./fonts/manrope-latin.woff2'])assert.ok(urls.includes(u),u);
- for(const u of ['./sw.js','./version.json','./api/index.php','./.htaccess','./architecture.html','./promo/kyoruvo-storefront-1200.webp','./vendor/noble-hashes/sha2.js','./brand/og-image.jpg','./favicon.ico','./fonts/OFL-Manrope.txt'])assert.ok(!urls.includes(u),u);
+ for(const u of ['./sw.js','./version.json','./api/index.php','./.htaccess','./architecture.html','./promo/kyoruvo-storefront-1200.webp','./vendor/noble-hashes/sha2.js','./brand/og-image.jpg','./favicon.ico','./fonts/OFL-Manrope.txt','./demo/poster-demo.webp','./demo/regulamin-demo.pdf'])assert.ok(!urls.includes(u),u);
  assert.equal(new Set(urls).size,urls.length,'no duplicates');
  assert.match(readFileSync(path.join(release,'runtime-config.js'),'utf8'),/mode:'api'/,'precache hashed the final runtime-config.js');
 });

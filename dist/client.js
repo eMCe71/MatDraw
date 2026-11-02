@@ -34,6 +34,30 @@ async function call(params,{method='GET',body,contentType,signal}={}){
  if(result?.csrf)csrf=result.csrf;if(!response.ok)throw failure(result,response.status);return result;
 }
 async function api(route,method='GET',data){return call({route},{method,body:data});}
+/** Raw upload with a progress bar (PLAN-MATERIALY §2.2: poster-upload, rules-upload): POST of body (a Blob) with the headers of call()
+ * (Accept, X-MatBravo-Client, Content-Type of the file, X-CSRF-Token) through XMLHttpRequest, whose upload events fetch lacks.
+ * onProgress(fraction 0..1) while bytes go out; the answer and its errors are those of call() (DomainError with status, code, data;
+ * a new CSRF token is kept; 409 client_outdated is announced). A non-JSON answer keeps the HTTP status (413 from the web server). */
+export function upload(params,{body,contentType,onProgress,signal}={}){
+ if(isDemo)return Promise.reject(new Error('Ta funkcja jest niedostępna w wersji demonstracyjnej.'));
+ return new Promise((resolve,reject)=>{
+  const xhr=new XMLHttpRequest();xhr.open('POST',apiUrl(params));xhr.withCredentials=true;xhr.responseType='text';
+  for(const [k,v] of Object.entries({Accept:'application/json',...CLIENT_HEADER,'Content-Type':contentType||'application/octet-stream','X-CSRF-Token':csrf}))xhr.setRequestHeader(k,v);
+  if(typeof onProgress==='function')xhr.upload.addEventListener('progress',event=>{if(event.lengthComputable&&event.total>0)onProgress(Math.min(1,event.loaded/event.total));});
+  const stop=()=>xhr.abort();if(signal){if(signal.aborted){reject(new DOMException('Aborted','AbortError'));return;}signal.addEventListener('abort',stop,{once:true});}
+  const done=fn=>{signal?.removeEventListener?.('abort',stop);fn();};
+  xhr.addEventListener('error',()=>done(()=>reject(new Error('Brak połączenia z serwerem. Zapis nie został potwierdzony.'))));
+  xhr.addEventListener('abort',()=>done(()=>reject(new DOMException('Aborted','AbortError'))));
+  xhr.addEventListener('load',()=>done(()=>{
+   if(xhr.status===204){resolve(null);return;}
+   let result;try{result=JSON.parse(xhr.responseText);}catch{reject(xhr.status===413?new DomainError('Plik jest za duży.',413):new DomainError('Serwer nie zwrócił odpowiedzi MatBravo. Sprawdź konfigurację PHP.',xhr.status||0));return;}
+   if(result?.csrf)csrf=result.csrf;
+   if(xhr.status<200||xhr.status>299){reject(failure(result,xhr.status));return;}
+   resolve(result);
+  }));
+  xhr.send(body);
+ });
+}
 /** Session request for feature routes (plan §8.4). route is a route name or a params object with route (GET query: ids, cursors).
  * JSON body by default; contentType sends body as raw bytes (avatar upload). 204 gives null. The demo has no server. */
 export async function request(route,{method='GET',body,contentType,signal}={}){
@@ -169,11 +193,14 @@ async function publicApi(params){const {status,data}=await publicFetch(params);i
  * §10.7) and no payments; amounts are the defaults of config.php; roles: the demo has the member roles, and rolesOpen: its members may take them. */
 const DEMO_PUBLIC_CONFIG=()=>({signup:false,signupMode:'off',billing:false,amounts:{pln:899,usd:299},avatars:false,support:null,roles:true,rolesOpen:true});
 const NO_CAPS={organizer:false,organizerBlocked:false,organizerTrusted:false,athlete:false};
+/** Largest poster and rules document of the demo in bytes (me.features.materials, the server's defaults, PLAN-MATERIALY §2.2). */
+export const DEMO_MATERIALS=Object.freeze({poster:4194304,rules:10485760});
 /** Demo only: the role fields of me for demo account userId (§8.1, §8.2, the shapes of the me route), from this browser's
  * demo data: caps {organizer, organizerBlocked, organizerTrusted, athlete} (as Actors::build; all false for staff),
  * athletes [{profileId,name,relation,archived}] of the account (by id), signupMode 'off' (no sign-up in the demo, §10.7), rolesOpen true
  * (the demo members may still take roles, so the demo shows the Role tab and the athlete forms),
- * selfEntry true (self entries run on the demo data, §10.7) and, for the Administrator only, pendingOrganizers: active
+ * selfEntry true (self entries run on the demo data, §10.7), materials {poster, rules}: the largest poster and rules document in bytes
+ * (PLAN-MATERIALY §2.2, the server's defaults) and, for the Administrator only, pendingOrganizers: active
  * organizers not blocked and not confirmed, 0 while the confirmation is not required (db.flags.trustRequired=false, §17). */
 export function demoAccount(userId){
  if(!isDemo)throw new Error('Ta funkcja jest niedostępna w wersji demonstracyjnej.');
@@ -181,7 +208,7 @@ export function demoAccount(userId){
  const owned=member?db.profiles.filter(p=>p.ownerId===userId).sort((a,b)=>a.id<b.id?-1:a.id>b.id?1:0):[];
  const caps=member?{organizer:organizer(u),organizerBlocked:u.organizerBlockedAt!=null,organizerTrusted:u.organizerTrustedAt!=null,athlete:owned.some(p=>!p.archived)}:{...NO_CAPS};
  const athletes=owned.map(p=>({profileId:p.id,name:typeof p.name==='string'?p.name:'',relation:['self','guardian'].includes(p.relation)?p.relation:null,archived:!!p.archived}));
- const features={signupMode:'off',selfEntry:true,rolesOpen:true};
+ const features={signupMode:'off',selfEntry:true,rolesOpen:true,materials:{...DEMO_MATERIALS}};
  if(u?.role==='admin')features.pendingOrganizers=db.users.filter(x=>x.role==='member'&&x.active&&organizer(x)&&!trustedOrganizer(db,x.id)).length;
  return {caps,athletes,features};
 }
@@ -192,6 +219,13 @@ export async function publicGet(params,options={}){
  return publicFetch(params,options);
 }
 const demoTournaments=()=>{read();return db?.tournaments||[];};
+/** Demo only: the typed rules of tournament id (PLAN-MATERIALY §4: the views carry only {v,size,type}; the API serves the text on the
+ * material route, the demo reads it from this browser's data: materials.rules.t, or text as the demo command's meta names it). */
+export function demoRulesText(id){
+ if(!isDemo)throw new Error('Ta funkcja jest niedostępna w wersji demonstracyjnej.');
+ const r=demoTournaments().find(t=>t?.id===id)?.materials?.rules;
+ return typeof r?.t==='string'?r.t:typeof r?.text==='string'?r.text:null;
+}
 export async function upcoming(){
  if(!isDemo)return publicApi({route:'public'});
  return JSON.parse(JSON.stringify(guestUpcoming(demoTournaments(),warsawToday())));
