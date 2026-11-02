@@ -354,3 +354,7 @@
 /* Erased athlete records (Domain::forgetProfile): the tournaments that keep their results, read-only (final review F1) */
 .erased-kept{display:block;margin-top:3px;font-size:11px;line-height:1.5;color:#5b6d84;overflow-wrap:anywhere}
 .erased-list{margin:0 0 6px;padding-left:18px;font-size:13px;line-height:1.7;color:#29496b}
+/* Phones: a tournament card never widens the page (at 320 px "Otwórz turniej", the chat link and the settings button did not fit
+   in one row and pushed the card 22px past the screen); the buttons wrap to a second row instead. */
+@media(max-width:650px){.tournament-grid{grid-template-columns:minmax(0,1fr)}.tournament-card-actions{flex-wrap:wrap}.tournament-card-actions>.primary{flex:1 1 auto}}
+@media(max-width:440px){.tournament-card-actions>.primary{flex:1 1 100%}}

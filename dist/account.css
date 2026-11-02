@@ -273,3 +273,6 @@ section.acct-block{display:grid;gap:12px}
 /* A problem of one field of the athlete form (final review F4): next to the field, tied by aria-describedby */
 .acct-field-error{display:block;margin-top:5px;font-size:12px;line-height:1.5;color:#b35a51;font-weight:500;letter-spacing:0;text-transform:none}
 [data-acct-athlete] .field-label input[aria-invalid="true"],[data-acct-athlete] .field-label select[aria-invalid="true"]{border-color:#b35a51}
+/* Phones: no account tab hides behind the screen edge (the iPhone screenshot cut "Bezpieczeństwo" in a sideways-scrolling strip);
+   the tabs wrap as a segmented control, the selected one raised on a white chip. */
+@media(max-width:440px){.acct-tabs{flex-wrap:wrap;overflow:visible;gap:6px;padding:4px;background:#eef3f9;border:0;border-radius:12px}.acct-tab{flex:1 1 auto;min-height:44px;margin:0;padding:0 12px;border:0;border-radius:9px;font-size:14px}.acct-tab[aria-selected="true"],.acct-tab[aria-selected="true"]:hover:not(:disabled){background:#fff;color:#00448a;box-shadow:0 1px 3px #10244726}}
