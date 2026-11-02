@@ -62,6 +62,8 @@ export default {
  'Teraz regulamin jest tekstem. Dodany plik PDF go zastąpi.':'The rules are a text now. An added PDF file replaces it.',
  'Tekst, {n} znaków. Otwiera się w czytelnym oknie.':{one:'Text, {n} character. Opens in a reading view.',other:'Text, {n} characters. Opens in a reading view.'},
  'Wpisz treść regulaminu.':'Type the text of the rules.',
+ // The rules-text route's refusal of an empty text (PLAN-MATERIALY §4), shown in the rules row; no other dictionary carries it.
+ 'Wpisz treść regulaminu albo usuń regulamin.':'Type the text of the rules or remove the rules.',
  'Regulamin może mieć najwyżej {max} znaków (teraz {n}).':'The rules can have at most {max} characters (now {n}).',
  'Wczytywanie regulaminu…':'Loading the rules…',
  'Nie udało się wczytać regulaminu. Sprawdź połączenie i spróbuj ponownie.':'The rules could not be loaded. Check the connection and try again.',

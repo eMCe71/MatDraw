@@ -379,11 +379,16 @@ test('PHP build: the Administrator adds a JPEG and a PDF in the dialog; a guest 
    await page.click('[data-action="material-rules-mode"][data-mode="text"]');await page.fill('[data-mat-text]','## Zgłoszenia\n- Do końca miesiąca\n- Przez MatBravo');
    await page.click('[data-action="material-text-save"]');await page.waitForSelector('[data-action="material-text-edit"]',{timeout:30000});
    const rules=(await admin.load()).tournaments.find(t=>t.id===id).rules;assert.equal(rules.type,'text');assert.ok(!('text' in rules),'the text is not in the workspace');
-   await g.reload();await g.click('.promo [data-action="close-modal"]');await g.waitForSelector('.mat-actions [data-action="material-rules"]');
-   await g.click('.mat-actions [data-action="material-rules"]');await g.waitForSelector('.mat-reader .mat-prose li');
-   assert.deepEqual(await g.$$eval('.mat-reader .mat-prose li',els=>els.map(e=>e.textContent)),['Do końca miesiąca','Przez MatBravo']);
-   const res=await g.request.get(new URL(`api/index.php?route=material&t=${encodeURIComponent(id)}&k=rules&v=${rules.v}`,app).href);
+   // Another guest (a fresh browser cache: the public routes may be cached for 60 s) reads the text in the reader.
+   const later=await browser.newContext({viewport:{width:393,height:852},locale:'pl-PL'});await later.addInitScript(()=>{try{localStorage.setItem('matdraw.language','pl');}catch{}});
+   const g2=await later.newPage();g2.on('pageerror',e=>errors.push(e.message));
+   await g2.goto(app+'#guest?t='+encodeURIComponent(id));await g2.click('.promo [data-action="close-modal"]');await g2.waitForSelector('.mat-actions [data-action="material-rules"]');
+   await g2.click('.mat-actions [data-action="material-rules"]');await g2.waitForSelector('.mat-reader .mat-prose li');
+   assert.deepEqual(await g2.$$eval('.mat-reader .mat-prose li',els=>els.map(e=>e.textContent)),['Do końca miesiąca','Przez MatBravo']);
+   assert.equal(await g2.evaluate(()=>document.documentElement.scrollWidth-document.documentElement.clientWidth),0,'the reader fits 393 px');
+   const res=await g2.request.get(new URL(`api/index.php?route=material&t=${encodeURIComponent(id)}&k=rules&v=${rules.v}`,app).href);
    assert.equal(res.status(),200);assert.match(res.headers()['content-type'],/^text\/plain; charset=utf-8/i);
+   await later.close();
   }
   await guest.close();await ctx.close();
  }finally{await browser.close();fixture('reset-limits');}
