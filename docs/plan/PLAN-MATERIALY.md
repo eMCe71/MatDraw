@@ -93,3 +93,24 @@ Nie należy do `ORGANIZER_TYPES` (tylko trasy materiałów). Demo: `src` w meta 
 - **frontend**: `dist/materials.js`, UI w oknie turnieju, karty, strona gościa, lista nadchodzących, „Moje starty”, okno zgłoszenia,
   podgląd pełnoekranowy, demo (pliki `dist/demo/poster-demo.webp` 1240×1754 i `dist/demo/regulamin-demo.pdf`), i18n EN, testy
   przeglądarkowe (demo; część na wersji PHP pisana pod kontrakt i uruchamiana po scaleniu), telefony bez poziomego przewijania.
+
+## 4. Zmiana kontraktu (właściciel, w trakcie pracy): regulamin jako PDF **albo** tekst
+
+Organizator wybiera rodzaj regulaminu: **PDF** albo **tekst** wpisany w polu. Turniej ma najwyżej jeden regulamin; zapis
+jednego rodzaju zastępuje drugi.
+- Wewnętrznie: `materials.rules` = `{"f":"<32 hex>.pdf","b":int,"at":int}` (PDF) **albo** `{"t":"<tekst>","at":int}` (tekst).
+- Na zewnątrz: `rules: {v:'<12 hex>', size:int, type:'pdf'|'text'}`; `size` = bajty PDF albo liczba znaków tekstu; `v` =
+  12 hex SHA-256 pliku albo tekstu. Tekstu **nie ma** w `publicData`/`GuestView`/`AthleteView` (rozmiar odpowiedzi); demo
+  (`workspace.js`) trzyma go w `rules.text`.
+- Nowa trasa `rules-text`: POST, `session`, JSON `{t, text}` → `{workspace, result:{rules:{v,size,type:'text'}}}`; tekst po
+  `Text::clean` z zachowaniem nowych linii (CRLF → LF, najwyżej 2 puste linie z rzędu), 1–20 000 znaków; pusty = błąd
+  („Wpisz treść regulaminu albo usuń regulamin.”). Te same uprawnienia i limity co `rules-upload` (`material-upload`).
+- `material` z `k=rules` dla tekstu: `text/plain; charset=utf-8`, `inline`, `nosniff`, `Content-Security-Policy: default-src
+  'none'; sandbox`, te same zasady dostępu i pamięci podręcznej.
+- `tournament.material` z `kind:'rules'` przyjmuje meta PDF albo tekstu (ścisła walidacja); zwraca `previous` (plik PDF do
+  usunięcia albo null).
+- Frontend: w sekcji „Materiały” przełącznik **PDF / Tekst**; tekst w polu (16 px na telefonie) z licznikiem znaków, prostą
+  ściągą formatowania i podglądem. Wyświetlanie (bez HTML od użytkownika, tylko węzły z escapowaniem): pusta linia = nowy
+  akapit, `## ` = nagłówek, `- ` lub `• ` = punkt listy, `1. ` = lista numerowana, adresy `https://…` jako linki
+  (`rel="noopener noreferrer nofollow ugc"`, nowa karta). „Regulamin” otwiera czytelny dialog (na telefonie pełny ekran);
+  tekst pobierany z trasy `material` (w demo z `rules.text`). PDF otwiera się jak wcześniej.
