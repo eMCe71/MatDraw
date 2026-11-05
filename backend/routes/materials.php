@@ -7,8 +7,10 @@
 //                    {workspace, result:{rules:{v,size,type:'pdf'}}}                        (shared with poster-upload)
 //   rules-text       POST session {t, text}: the typed rules (Materials::text, 1–20 000 characters; nothing left: 422 'Wpisz
 //                    treść regulaminu albo usuń regulamin.'): {workspace, result:{rules:{v,size,type:'text'}}}   (shared)
-//   material-delete  POST session {t, kind:'poster'|'rules'}: {workspace, result:{}}       material-delete 60/h per account
-//   material         GET peek, user optional ?t, k=poster|rules, s=sm|lg (poster only), v: the file or the text, or one 404
+//   invite-save      POST session {t, style, fields}: the organizer's invitation (Materials::inviteMeta; PLAN-MATERIALY §6):
+//                    {workspace, result:{invite:{v,style}}}                                  material-upload 30/h per account
+//   material-delete  POST session {t, kind:'poster'|'rules'|'invite'}: {workspace, result:{}}       material-delete 60/h per account
+//   material         GET peek, user optional ?t, k=poster|rules|invite, s=sm|lg (poster only), v: the file or the text, or one 404
 //                    for every refusal
 // Saving rules of one kind replaces the other (one rules item per tournament; a replaced PDF goes after the commit).
 // Writes run tournament.material through Domain::execute under the workspace lock for whoever manages the tournament: a
@@ -26,6 +28,7 @@ return [
   'handler'=>fn(RouteContext $ctx):array=>Materials::upload($ctx,'rules')],
  // JSON of at most TEXT_MAX characters, each escaped to at most 6 bytes, and the other fields.
  'rules-text'=>['method'=>'POST','auth'=>'session','max'=>Materials::TEXT_MAX*6+1024,'handler'=>fn(RouteContext $ctx):array=>Materials::saveText($ctx)],
+ 'invite-save'=>['method'=>'POST','auth'=>'session','max'=>32768,'handler'=>fn(RouteContext $ctx):array=>Materials::saveInvite($ctx)],
  'material-delete'=>['method'=>'POST','auth'=>'session','max'=>1024,'handler'=>fn(RouteContext $ctx):array=>Materials::delete($ctx)],
  // Guests get the same 404 as everyone who may not read the file (user optional, never 401), see Materials::serve.
  'material'=>['method'=>'GET','auth'=>'peek','user'=>'optional','handler'=>fn(RouteContext $ctx)=>Materials::serve($ctx)],

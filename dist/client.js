@@ -226,6 +226,13 @@ export function demoRulesText(id){
  const r=demoTournaments().find(t=>t?.id===id)?.materials?.rules;
  return typeof r?.t==='string'?r.t:typeof r?.text==='string'?r.text:null;
 }
+/** Demo only: the organizer's invitation of tournament id as the material route serves it ({style, fields}, PLAN-MATERIALY §6), from
+ * this browser's data; null without one. */
+export function demoInvite(id){
+ if(!isDemo)throw new Error('Ta funkcja jest niedostępna w wersji demonstracyjnej.');
+ const i=demoTournaments().find(t=>t?.id===id)?.materials?.invite;
+ return i&&typeof i.s==='string'&&i.d&&typeof i.d==='object'?{style:i.s,fields:{...i.d}}:null;
+}
 export async function upcoming(){
  if(!isDemo)return publicApi({route:'public'});
  return JSON.parse(JSON.stringify(guestUpcoming(demoTournaments(),warsawToday())));

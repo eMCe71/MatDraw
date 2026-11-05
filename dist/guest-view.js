@@ -18,6 +18,7 @@
  * on. v is the first 12 characters of f (its hash), of the text's SHA-256, or a hash of a demo src (as the demo workspace); size is
  * the PDF's bytes or the text's characters. Neither f nor the text ever leaves: the demo reads typed rules from its own data. */
 import {categories,resolveDraw} from './engine.js';
+import {inviteCheck,inviteJson} from './invite-data.js';
 
 export const UPCOMING_LIMIT=6;
 const STATUSES=['open','closed','finished'];
@@ -44,7 +45,8 @@ export function rulesText(raw){
 }
 /** The stored meta of kind when v is exactly valid, else null (Materials::meta). */
 function materialMeta(kind,v){
- if(!isObj(v)||!['poster','rules'].includes(kind))return null;
+ if(!isObj(v)||!['poster','rules','invite'].includes(kind))return null;
+ if(kind==='invite')return inviteCheck(v,false);
  if(kind==='rules'&&has(v,'t')){const t=v.t,n=typeof t==='string'?[...t].length:0;return keysAre(v,['t','at'])&&typeof t==='string'&&rulesText(t)===t&&n>=1&&n<=RULES_TEXT_MAX&&intIn(v.at,0,MATERIAL_AT)?{t,at:v.at}:null;}
  const demo=!has(v,'f')&&has(v,'src'),key=demo?'src':'f',file=v[key];
  if(typeof file!=='string'||(demo?file.length>DEMO_SRC_LENGTH[kind]||!DEMO_SRC[kind].test(file):!MATERIAL_FILE[kind].test(file)))return null;
@@ -80,9 +82,10 @@ export function sha256Hex(text){
 /** The public fields of a tournament's materials (sparse: {} without any): poster {v,w,h,color[,src]}, rules {v,size,type[,src]}. */
 export function publicMaterials(m){
  const out={};if(!isObj(m))return out;
- const p=materialMeta('poster',m.poster),r=materialMeta('rules',m.rules);
+ const p=materialMeta('poster',m.poster),r=materialMeta('rules',m.rules),i=materialMeta('invite',m.invite);
  if(p)out.poster={v:p.f?p.f.slice(0,12):demoVersion(p.src),w:p.w,h:p.h,color:p.c,...(p.src?{src:p.src}:{})};
  if(r)out.rules=has(r,'t')?{v:sha256Hex(r.t).slice(0,12),size:[...r.t].length,type:'text'}:{v:r.f?r.f.slice(0,12):demoVersion(r.src),size:r.b,type:'pdf',...(r.src?{src:r.src}:{})};
+ if(i)out.invite={v:sha256Hex(inviteJson(i)).slice(0,12),style:i.s};
  return out;
 }
 /** Today's date (YYYY-MM-DD) in Europe/Warsaw, the time zone of the tournaments and of the PHP server. */

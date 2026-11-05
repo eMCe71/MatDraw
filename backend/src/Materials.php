@@ -39,9 +39,17 @@ use PDO;
  * the poster only), the tournament and the stored item with v, then the reader: public (not a draft, not hidden, a member
  * creator neither blocked as organizer nor deactivated) or a viewer who manages it; If-None-Match → 304; then the file or text.
  * sweep() runs in the accounts-cleanup job like Avatars::sweep.
+ * Organizer's invitation (PLAN-MATERIALY §6): invite {s:<style>, d:{<field>:<text>, …}, at}: one of INVITE_STYLES and 1–13 fields of
+ * INVITE_FIELDS (key => [max characters, multiline]), each a fixed point of inviteField() of 1–max characters, in the order of
+ * INVITE_FIELDS; no file. Its view is invite {v, style} (v = 12 hex of SHA-256 of inviteJson()); the fields never leave through
+ * the views: the material route serves {style, fields} as JSON (k=invite). Written by invite-save {t, style, fields} with the
+ * limits and rights of rules-text.
  */
 final class Materials {
- public const KINDS=['poster','rules'];
+ public const KINDS=['poster','rules','invite'];
+ /** Fields of the organizer's invitation: key => [max characters, multiline] (Bogdan's template; the order of the stored fields). */
+ public const INVITE_FIELDS=['event'=>[120,false],'venue'=>[160,false],'street'=>[120,false],'dates'=>[80,false],'except'=>[300,false],'special'=>[800,true],'women'=>[500,true],'men'=>[500,true],'open'=>[80,false],'close'=>[80,false],'note'=>[500,true],'closing'=>[60,false],'sign'=>[160,false]];
+ public const INVITE_STYLES=['classic','gala','sport'];
  public const POSTER_MAX=4194304,RULES_MAX=10485760,POST_MARGIN=65536,TEXT_MAX=20000;
  public const MIN_SIDE=200,MAX_SIDE=4096,MAX_PIXELS=12000000,LG=2000,SM_W=480,SM_H=720,MAX_AT=9999999999;
  /** Tournament ids (the shape of every route's ids). */
@@ -87,6 +95,7 @@ final class Materials {
   $int=static fn(mixed $x,int $min,int $max):bool=>is_int($x)&&$x>=$min&&$x<=$max;
   if($kind==='poster')return $keys===['at','c','f','h','w']&&is_string($v['f'])&&preg_match('/^[0-9a-f]{32}\.(?:webp|jpg)$/D',$v['f'])&&$int($v['w'],1,self::MAX_SIDE)&&$int($v['h'],1,self::MAX_SIDE)
    &&is_string($v['c'])&&preg_match('/^#[0-9a-f]{6}$/D',$v['c'])&&$int($v['at'],0,self::MAX_AT)?['f'=>$v['f'],'w'=>$v['w'],'h'=>$v['h'],'c'=>$v['c'],'at'=>$v['at']]:null;
+  if($kind==='invite')return self::inviteCheck($v,$keys,$strict);
   if($kind!=='rules')return null;
   if($keys===['at','b','f'])return is_string($v['f'])&&preg_match('/^[0-9a-f]{32}\.pdf$/D',$v['f'])&&$int($v['b'],1,self::RULES_MAX)&&$int($v['at'],0,self::MAX_AT)?['f'=>$v['f'],'b'=>$v['b'],'at'=>$v['at']]:null;
   return $keys===['at','t']&&is_string($v['t'])&&($strict?self::text($v['t'])===$v['t']:mb_check_encoding($v['t'],'UTF-8')&&!preg_match('/\r|(?!\n)\p{Cc}|(?!\x{200D})\p{Cf}/u',$v['t']))&&self::chars($v['t'])>=1&&self::chars($v['t'])<=self::TEXT_MAX&&$int($v['at'],0,self::MAX_AT)?['t'=>$v['t'],'at'=>$v['at']]:null;
@@ -98,6 +107,7 @@ final class Materials {
   if(!is_array($m))return [];$out=[];
   if($p=self::meta('poster',$m['poster']??null,false))$out['poster']=['v'=>substr($p['f'],0,12),'w'=>$p['w'],'h'=>$p['h'],'color'=>$p['c']];
   if($r=self::meta('rules',$m['rules']??null,false))$out['rules']=isset($r['f'])?['v'=>substr($r['f'],0,12),'size'=>$r['b'],'type'=>'pdf']:['v'=>substr(hash('sha256',$r['t']),0,12),'size'=>self::chars($r['t']),'type'=>'text'];
+  if($i=self::meta('invite',$m['invite']??null,false))$out['invite']=['v'=>substr(hash('sha256',self::inviteJson($i)),0,12),'style'=>$i['s']];
   return $out;
  }
  /**
@@ -114,6 +124,46 @@ final class Materials {
   $lines=[];$empty=0;
   foreach(explode("\n",$s) as $line){if(Text::trim($line)===''){if(++$empty>Text::MAX_EMPTY_RUN)continue;$lines[]='';}else{$empty=0;$lines[]=$line;}}
   return Text::trim(implode("\n",$lines));
+ }
+ /**
+  * One field of the organizer's invitation as stored: text() (multiline fields), and for single-line fields every run of line breaks
+  * becomes one space. Unknown key or not a string: null; may give ''.
+  */
+ public static function inviteField(string $key,mixed $raw):?string {
+  if(!isset(self::INVITE_FIELDS[$key]))return null;$t=self::text($raw);if($t===null)return null;
+  return self::INVITE_FIELDS[$key][1]?$t:(string)preg_replace('/\n+/',' ',$t);
+ }
+ /** The strict (writes) or cheap (views, $strict false) check of stored invite meta with sorted $keys; the meta in canonical order or null. */
+ private static function inviteCheck(array $v,array $keys,bool $strict):?array {
+  if($keys!==['at','d','s']||!is_string($v['s'])||!in_array($v['s'],self::INVITE_STYLES,true)||!is_array($v['d'])||$v['d']===[]||!is_int($v['at'])||$v['at']<0||$v['at']>self::MAX_AT)return null;
+  $d=[];
+  foreach($v['d'] as $k=>$x){
+   if(!is_string($k)||!isset(self::INVITE_FIELDS[$k])||!is_string($x))return null;[$max,$multi]=self::INVITE_FIELDS[$k];
+   $ok=$strict?self::inviteField($k,$x)===$x:mb_check_encoding($x,'UTF-8')&&!preg_match('/\r|(?!\n)\p{Cc}|(?!\x{200D})\p{Cf}/u',$x)&&($multi||!str_contains($x,"\n"));
+   $n=$ok?self::chars($x):0;if(!$ok||$n<1||$n>$max)return null;
+  }
+  foreach(self::INVITE_FIELDS as $k=>$_)if(isset($v['d'][$k]))$d[$k]=$v['d'][$k];
+  return ['s'=>$v['s'],'d'=>$d,'at'=>$v['at']];
+ }
+ /** The JSON text whose SHA-256 is the version of an invite (style and fields, never at): what dist/workspace.js hashes too. */
+ public static function inviteJson(array $i):string{return json_encode(['s'=>$i['s'],'d'=>$i['d']],JSON_THROW_ON_ERROR|JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES|JSON_UNESCAPED_LINE_TERMINATORS);}
+ /**
+  * The stored meta {s, d, at} of an invitation sent to invite-save: $style one of INVITE_STYLES (422), $fields an object of known
+  * keys with string values (400 otherwise); every field cleaned by inviteField(), empty ones left out, 422 above its maximum or
+  * when none is left.
+  */
+ public static function inviteMeta(mixed $style,mixed $fields):array {
+  if(!is_string($style)||!in_array($style,self::INVITE_STYLES,true))throw new AppError('Wybierz szablon zaproszenia.');
+  if(!is_array($fields)||($fields!==[]&&array_is_list($fields)))throw new AppError('Niepoprawna operacja.',400);
+  $d=[];
+  foreach($fields as $k=>$x){
+   $t=is_string($k)?self::inviteField($k,$x):null;if($t===null)throw new AppError('Niepoprawna operacja.',400);
+   if($t==='')continue;if(self::chars($t)>self::INVITE_FIELDS[$k][0])throw new AppError('Jedno z pól zaproszenia jest za długie.');
+   $d[$k]=$t;
+  }
+  if(!$d)throw new AppError('Wypełnij co najmniej jedno pole zaproszenia.');
+  $out=[];foreach(self::INVITE_FIELDS as $k=>$_)if(isset($d[$k]))$out[$k]=$d[$k];
+  return ['s'=>$style,'d'=>$out,'at'=>time()];
  }
  /** The tournaments.materials column as an array, or null (NULL, empty or unreadable). */
  public static function decode(mixed $v):?array {
@@ -285,6 +335,15 @@ final class Materials {
   $out=self::commit($ctx,$actor,$id,'rules',$meta);
   return ['workspace'=>$out['workspace'],'result'=>['rules'=>$out['view']]];
  }
+ /** invite-save {t, style, fields}: the organizer's invitation (inviteMeta); limits and rights of rules-text. Returns {workspace, result:{invite: view}}. */
+ public static function saveInvite(RouteContext $ctx):array {
+  $c=$ctx->config;$pdo=$ctx->pdo();$u=$ctx->user();
+  $id=self::tournamentId($ctx->input('t'));
+  Members::limit($pdo,$c,'material-upload',$u['id'],30,3600);
+  $actor=self::writer($ctx,$id,true);$meta=self::inviteMeta($ctx->input('style'),$ctx->input('fields'));
+  $out=self::commit($ctx,$actor,$id,'invite',$meta);
+  return ['workspace'=>$out['workspace'],'result'=>['invite'=>$out['view']]];
+ }
  /** material-delete {t, kind}: 60 per hour per account. Returns {workspace, result:{}}. */
  public static function delete(RouteContext $ctx):array {
   $c=$ctx->config;$pdo=$ctx->pdo();$u=$ctx->user();
@@ -320,6 +379,12 @@ final class Materials {
   $match=array_map('trim',explode(',',(string)($_SERVER['HTTP_IF_NONE_MATCH']??'')));
   if(in_array($etag,$match,true)||in_array('W/'.$etag,$match,true)){header_remove('Content-Type');foreach($headers as $line)header($line);http_response_code(304);exit;}
   $sandbox="Content-Security-Policy: default-src 'none'; sandbox";
+  if($k==='invite'){
+   // The organizer's invitation: JSON {style, fields} (the client escapes every field), in a sandbox.
+   $body=json_encode(['style'=>$meta['s'],'fields'=>$meta['d']],JSON_THROW_ON_ERROR|JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);
+   foreach([...$headers,'Content-Type: application/json; charset=utf-8',$sandbox,'Content-Length: '.strlen($body)] as $line)header($line);
+   http_response_code(200);echo $body;exit;
+  }
   if(isset($meta['t'])){
    // A typed text: plain text, never HTML, in a sandbox.
    foreach([...$headers,'Content-Type: text/plain; charset=utf-8','Content-Disposition: inline; filename="'.self::fileName((string)$t['name'],'txt').'"',$sandbox,'Content-Length: '.strlen($meta['t'])] as $line)header($line);

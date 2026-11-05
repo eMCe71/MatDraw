@@ -79,7 +79,7 @@ test('limits: min(4 MB / 10 MB, post_max_size − 64 KB), 0 or -1 without a boun
  assert.deepEqual(at('1M').limits,{poster:983040,rules:983040});
  const tiny=at('32K');assert.deepEqual([tiny.limits,tiny.routes['poster-upload'][3],tiny.routes['rules-upload'][3]],[{poster:0,rules:0},1,1],'nothing fits: 0, and the routes still have a valid maximum');
  assert.deepEqual(at('8M',off).limits,{poster:0,rules:0},'no writable uploads directory');
- assert.deepEqual([POSTER_MAX,RULES_MAX,MATERIAL_KINDS],[4194304,10485760,['poster','rules']]);
+ assert.deepEqual([POSTER_MAX,RULES_MAX,MATERIAL_KINDS],[4194304,10485760,['poster','rules','invite']]);
 });
 test('directories: <uploads>/materials/<h[0..1]>/<h> with h = 32 hex of SHA-256 of the tournament id; other ids get none',{skip},()=>{
  const ids=['t-autumn-2026','0123456789abcdef0123456789abcdef','A_b-1','../etc','a/b','',' x','x'.repeat(41),'zażółć'];
@@ -160,7 +160,10 @@ test('account deletion (Domain::forgetMember) drops the materials of every tourn
 });
 test('demo seed and commands: t-autumn-2026 has the demo poster and rules; tournament.material sets a data URL, removes, refuses others',()=>{
  let db=initialWorkspace();const t=db.tournaments.find(x=>x.id==='t-autumn-2026');
- assert.deepEqual(t.materials,{poster:{src:'./demo/poster-demo.webp',w:1240,h:1754,c:'#4c4e59',at:1793484000},rules:{src:'./demo/regulamin-demo.pdf',b:41049,at:1793484000}});
+ const {invite,...files}=t.materials;
+ assert.deepEqual(files,{poster:{src:'./demo/poster-demo.webp',w:1240,h:1754,c:'#4c4e59',at:1793484000},rules:{src:'./demo/regulamin-demo.pdf',b:41049,at:1793484000}});
+ // The demo's organizer invitation (PLAN-MATERIALY §6) is stored exactly as the server's strict check keeps it.
+ assert.deepEqual(materialMeta('invite',invite),invite);assert.equal(invite.s,'classic');assert.equal(invite.d.event,'Puchar Jesieni 2026');
  // The seed matches the real demo files: their byte size and the GD average colour Materials::poster would compute.
  assert.equal(statSync(new URL('../dist/demo/regulamin-demo.pdf',import.meta.url)).size,41049);
  assert.ok(db.tournaments.filter(x=>x.id!=='t-autumn-2026').every(x=>!('materials' in x)));
@@ -176,6 +179,8 @@ test('demo seed and commands: t-autumn-2026 has the demo poster and rules; tourn
   ['demo-admin',{id:'t-autumn-2026',kind:'poster',value:{src:'https://evil.example/p.webp',w:1,h:1,c:'#000000',at:1}},400],['demo-admin',{id:'t-autumn-2026',kind:'poster',value:{src,w:1,h:1,c:'#000000',at:1,onload:'x'}},400]])
   assert.throws(()=>execute(db,actor,'tournament.material',p),e=>e.status===status,actor+' '+JSON.stringify(p).slice(0,60));
  db=execute(db,'demo-admin','tournament.material',{id:'t-autumn-2026',kind:'poster',value:null}).db;db=execute(db,'demo-admin','tournament.material',{id:'t-autumn-2026',kind:'rules',value:null}).db;
+ assert.deepEqual(Object.keys(db.tournaments.find(x=>x.id==='t-autumn-2026').materials),['invite'],'the invitation stays');
+ db=execute(db,'demo-admin','tournament.material',{id:'t-autumn-2026',kind:'invite',value:null}).db;
  assert.ok(!('materials' in db.tournaments.find(x=>x.id==='t-autumn-2026')));
  const own=execute(db,'demo-organizer','tournament.save',{name:'Turniej z plakatem',city:'Opole',date:'2027-06-01',mat:'Mata 1',status:'draft'});db=own.db;
  db=execute(db,'demo-organizer','tournament.material',{id:own.result.id,kind:'rules',value:{src:'./demo/regulamin-demo.pdf',b:48000,at:3}}).db;

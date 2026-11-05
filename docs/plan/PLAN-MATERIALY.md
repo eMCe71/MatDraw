@@ -131,3 +131,30 @@ Cztery drobne, wszystkie poprawione z testami, które bez poprawki nie przechodz
 Do sprawdzenia po wdrożeniu (niezweryfikowane lokalnie): czy `Header always set Content-Security-Policy` z `.htaccess` nie
 nadpisuje na LiteSpeed nagłówka `default-src 'none'; sandbox`, który PHP ustawia dla obrazów i tekstu (ten sam wzór mają
 zdjęcia profilowe; `nosniff` i typy inne niż HTML chronią niezależnie). Sprawdzenie: `curl -sI` na adres plakatu.
+
+## 6. Zaproszenie od Organizatora (2026-11-05)
+
+Prośba: Mistrz Bogdan chce na stronie z plakatem „eleganckie wizualnie zaproszenie od Organizatora, do wypełnienia”, według
+jego wzoru (Zapraszamy na… / które odbędą się w… przy ulicy… w dniach… / zasady wg Regulaminu (do pobrania) / kategorie
+(z wyłączeniem…) / Techniki Specjalne w kolejności / Testy siły: Kobiety, Mężczyźni / terminy zgłoszeń / uwaga dla klubów /
+ZAPRASZAMY!). Trzeci rodzaj materiału turnieju, bez pliku.
+
+- **Dane:** `materials.invite` = `{"s":"classic|gala|sport","d":{<pole>:<tekst>,…},"at":int}`. Pola (`Materials::INVITE_FIELDS`,
+  lustro `dist/invite-data.js`): `event` 120, `venue` 160, `street` 120, `dates` 80, `except` 300, `special` 800 (wiele linii),
+  `women` 500 (wiele linii), `men` 500 (wiele linii), `open` 80, `close` 80, `note` 500 (wiele linii), `closing` 60, `sign` 160.
+  Każde pole czyszczone jak tekst regulaminu (`Materials::text`), w polach jednowierszowych łamania linii → spacja; puste pola
+  pomijane, co najmniej jedno wymagane, kolejność kanoniczna. Bez migracji (ta sama kolumna `materials`).
+- **Na zewnątrz:** rzadkie `invite: {v, style}` (v = 12 hex SHA-256 z `Materials::inviteJson`), treść nigdy w widokach; trasa
+  `material` z `k=invite` oddaje JSON `{style, fields}` (`application/json`, sandbox, te same zasady dostępu i pamięci podręcznej).
+  Demo dokłada `fields` do widoku i ma przykładowe zaproszenie przy `t-autumn-2026`.
+- **Zapis:** `invite-save` POST session `{t, style, fields}` → `{workspace, result:{invite}}` (uprawnienia i limity `rules-text`);
+  usuwanie: `material-delete` z `kind:'invite'`. Błędy 422: „Wybierz szablon zaproszenia.”, „Wypełnij co najmniej jedno pole
+  zaproszenia.”, „Jedno z pól zaproszenia jest za długie.”; inne klucze lub typy 400.
+- **UI (`dist/invite.js`):** w sekcji „Materiały” wiersz „Zaproszenie od Organizatora” (Utwórz / Edytuj / Usuń z potwierdzeniem;
+  przy nowym turnieju po jego utworzeniu). Edytor na pełnym ekranie: wybór stylu (Klasyczny, Gala, Sportowy), pola wzoru Bogdana
+  wstępnie wypełnione (nazwa i data turnieju, uwaga dla klubów, „ZAPRASZAMY!”) i podgląd na żywo obok (na telefonie przełącznik
+  Edycja/Podgląd); zamknięcie z niezapisanymi zmianami pyta. Link „do pobrania stąd” prowadzi do regulaminu z sekcji Materiały
+  (jest tylko, gdy regulamin jest dodany). Strona turnieju (gość i podgląd członka): karta pod plakatem i nagłówkiem.
+- **Testy:** `tests/invite.test.mjs` (parytet PHP/JS czyszczenia, ścisłej walidacji i `v`, domena demo, szablon karty z
+  escapowaniem, przeglądarka: tworzenie w demo, style, niezapisane zmiany, strona gościa na 393 px). Testy HTTP trasy
+  `invite-save` na prawdziwej bazie: do dopisania przy najbliższym przebiegu `scripts/test-http.sh` (lokalnie nie było MariaDB).

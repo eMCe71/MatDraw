@@ -1,6 +1,7 @@
 import {EVENTS,initialState,validateAthlete,eligibility,categories,makeDraw,signature,saveWinner,clearWinner} from './engine.js';
 import {cleanText,clubKey} from './profile-data.js';
 import {initials,warsawToday} from './guest-view.js';
+import {inviteCheck,inviteJson} from './invite-data.js';
 /* Workspace rules of the browser demo: mirror of backend/src/Domain.php and backend/src/Clubs.php (plan §5–§7 of
  * PLAN-REJESTRACJA-ROLE). tests/roles-parity.test.mjs runs the same commands through both and compares statuses, messages of
  * the new paths and the normalised state; Domain::forgetMember and Domain::retain are PHP only. Members of the demo live in
@@ -27,7 +28,7 @@ const NONE_KEYS=['niezrzeszony','niezrzeszona','brak','bezklubu','none'];
 const TOURNAMENT_SCOPE=['entry.remove','checkin.save','draw.create','result.save','result.clear','tournament.hide'];
 // Tournament materials (PLAN-MATERIALY §2, §4): mirror of backend/src/Materials.php (meta, view, text) and Domain::materialsPublic.
 // The rules are a PDF ({f,b,at}) or a typed text ({t,at}, the same shape in the demo).
-export const MATERIAL_KINDS=['poster','rules'],POSTER_MAX=4194304,RULES_MAX=10485760,RULES_TEXT_MAX=20000;
+export const MATERIAL_KINDS=['poster','rules','invite'],POSTER_MAX=4194304,RULES_MAX=10485760,RULES_TEXT_MAX=20000;
 const MATERIAL_SIDE=4096,MATERIAL_AT=9999999999;
 const ILL_FORMED=/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
 const trimText=s=>s.replace(/^[\s\p{Z}]+|[\s\p{Z}]+$/gu,'');
@@ -74,6 +75,7 @@ const keysAre=(o,keys)=>Object.keys(o).sort().join()===[...keys].sort().join();
 /** strict false (views): a typed text only has to be free of what rulesText removes, like Materials::meta (writes stay strict). */
 export function materialMeta(kind,v,strict=true){
  if(!isObj(v)||!MATERIAL_KINDS.includes(kind))return null;
+ if(kind==='invite')return inviteCheck(v,strict);// the organizer's invitation {s,d,at} (dist/invite-data.js)
  if(kind==='rules'&&has(v,'t')){const t=v.t,n=typeof t==='string'?[...t].length:0;return keysAre(v,['t','at'])&&typeof t==='string'&&(strict?rulesText(t)===t:!/\r|(?!\n)\p{Cc}|(?!\u200D)\p{Cf}/u.test(t)&&t.isWellFormed?.()!==false)&&n>=1&&n<=RULES_TEXT_MAX&&intIn(v.at,0,MATERIAL_AT)?{t,at:v.at}:null;}
  const demo=!has(v,'f')&&has(v,'src'),key=demo?'src':'f',file=v[key];
  if(typeof file!=='string'||(demo?file.length>DEMO_SRC_LENGTH[kind]||!DEMO_SRC[kind].test(file):!MATERIAL_FILE[kind].test(file)))return null;
@@ -92,9 +94,10 @@ function demoVersion(src){
  */
 export function materialsView(m){
  const out={};if(!isObj(m))return out;
- const p=materialMeta('poster',m.poster,false),r=materialMeta('rules',m.rules,false);
+ const p=materialMeta('poster',m.poster,false),r=materialMeta('rules',m.rules,false),i=materialMeta('invite',m.invite,false);
  if(p)out.poster={v:p.f?p.f.slice(0,12):demoVersion(p.src),w:p.w,h:p.h,color:p.c,...(p.src?{src:p.src}:{})};
  if(r)out.rules=has(r,'t')?{v:sha256(r.t).slice(0,12),size:[...r.t].length,type:'text',text:r.t}:{v:r.f?r.f.slice(0,12):demoVersion(r.src),size:r.b,type:'pdf',...(r.src?{src:r.src}:{})};
+ if(i)out.invite={v:sha256(inviteJson(i)).slice(0,12),style:i.s,fields:{...i.d}};// the demo adds the fields (no material route there)
  return out;
 }
 /** Log lines that end with an athlete's name, as Domain::NAMED; audit() marks each with the athlete's profileId. */
@@ -294,7 +297,9 @@ export function initialWorkspace(legacy){
  clubs.push({id:UNAFFILIATED,name:clubs.some(c=>clubKey(c.name)==='niezrzeszony')?'Niezrzeszony (bez klubu)':'Niezrzeszony',verified:true});
  profiles.push({id:'demo-athlete-child',name:'Zuzanna Demo',clubId:clubs[Math.min(1,clubs.length-1)].id,sex:'F',birthDate:'2012-03-08',weight:42,height:152,gradeType:'cup',grade:7,events:['forms'],champion:false,createdBy:'demo-athlete',createdAt:1793484000,archived:false,ownerId:'demo-athlete',relation:'guardian',guardianDeclaredAt:1793484000});
  // The demo poster and rules document (PLAN-MATERIALY §3: files of dist/demo, src instead of the server's f).
- const materials={poster:{src:'./demo/poster-demo.webp',w:1240,h:1754,c:'#4c4e59',at:1793484000},rules:{src:'./demo/regulamin-demo.pdf',b:41049,at:1793484000}};
+ const materials={poster:{src:'./demo/poster-demo.webp',w:1240,h:1754,c:'#4c4e59',at:1793484000},rules:{src:'./demo/regulamin-demo.pdf',b:41049,at:1793484000},
+  // The organizer's invitation of the demo (PLAN-MATERIALY §6): Bogdan's template filled in.
+  invite:{s:'classic',d:{event:'Puchar Jesieni 2026',venue:'Hali Sportowej Arena Ursynów',street:'Pileckiego 122 w Warszawie',dates:'14 listopada 2026',special:'Twimyo Nopi Ap Chagi\nTwimyo Dollyo Chagi\nTwimyo Yop Chagi',women:'Pompki na kolanach – 30 s\nPrzysiady – 30 s',men:'Pompki – 30 s\nPodciąganie na drążku',open:'1 października 2026',close:'7 listopada 2026, godz. 23:59',note:'Prosimy o zwracanie uwagi na informacje przesyłane do Klubów przez Organizatora!',closing:'ZAPRASZAMY!'},at:1793484000}};
  const t={...old.tournament,id:'t-autumn-2026',status:'open',createdBy:'demo-admin',selfEntry:false,entries,draws:old.draws||{},activity:old.activity||[],materials};
  const second={id:'t-winter-2027',name:'Puchar Zimy 2027',city:'Kraków',date:'2027-02-20',mat:'Mata 1',status:'open',createdBy:'demo-editor',selfEntry:true,entries:[],draws:{},activity:[]};
  // A further published date and an unpublished draft: the login screen's public list shows the first, never the draft.

@@ -8,7 +8,7 @@ const read=file=>readFileSync(new URL('../dist/'+file,import.meta.url),'utf8');
 // New modules (plan §5.9): registry, me, chat* (with chat-admin), moderation-boot, account*, members-boot, admin-members, avatar-crop, pwa;
 // PLAN-REJESTRACJA-ROLE §10.6: athlete* (athlete-boot, athlete-flow, athlete-data, athlete-form, athlete-view), club-picker, settings-boot,
 // admin-settings and admin-clubs, in scope by name before they exist; PLAN-MATERIALY: materials.js (posters, rules, the rules reader).
-const SCOPE=/^(?:registry|me|moderation-boot|members-boot|admin-members|avatar-crop|pwa|club-picker|settings-boot|admin-settings|admin-clubs|materials)\.js$|^(?:chat|account|athlete)[\w-]*\.js$/;
+const SCOPE=/^(?:registry|me|moderation-boot|members-boot|admin-members|avatar-crop|pwa|club-picker|settings-boot|admin-settings|admin-clubs|materials|invite|invite-data)\.js$|^(?:chat|account|athlete)[\w-]*\.js$/;
 const MODULES=readdirSync(new URL('../dist/',import.meta.url)).filter(f=>SCOPE.test(f)).sort();
 const RULES=[
  ['innerHTML',/\binnerHTML\b/],
