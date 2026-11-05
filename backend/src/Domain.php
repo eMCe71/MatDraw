@@ -19,7 +19,8 @@ class AppError extends \RuntimeException{public function __construct(string $mes
  * execute() stamps every changed tournament and profile (rev) and staff accounts or existing clubs (staffRev).
  * Log lines naming an athlete carry its profileId (audit()), so forgetting a profile rewrites only lines about it and
  * never another tenant's tournament for a namesake; publicData() shows text and time only.
- * Materials (PLAN-MATERIALY §2.4, §4): a tournament may hold materials {poster?, rules? (a PDF or a text)} (Materials::meta);
+ * Materials (PLAN-MATERIALY §2.4, §4, §6): a tournament may hold materials {poster?, rules? (a PDF or a text), invite? (the organizer's
+ * invitation)} (Materials::meta);
  * tournament.material {id, kind, value: meta|null} sets or removes one for whoever manages the tournament (404 as tour(), else
  * 403 as tournament.save; 400 for another kind or value) and returns {kind, previous: the replaced file (a poster or a PDF) or
  * null}; only the routes

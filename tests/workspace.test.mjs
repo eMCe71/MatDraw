@@ -76,8 +76,9 @@ test('guest preview: allowed fields only, athletes reduced to initials and club,
  const db=drawnWorkspace(),t=db.tournaments[0],view=guestTournament(db.tournaments,t.id,TODAY);
  assert.deepEqual(Object.keys(view).sort(),['categories','summary','tournament']);
  // The demo tournament has a poster and rules (src: the demo's own files); a sparse field the server's shape test (php.test.mjs) pins.
- const {poster,rules,...summary}=view.tournament;assert.deepEqual(summary,{id:t.id,name:t.name,date:t.date,city:t.city,status:t.status});
- for(const [m,keys] of [[poster,['color','h','src','v','w']],[rules,['size','src','type','v']]])if(m)assert.deepEqual(Object.keys(m).sort(),keys);
+ // The organizer's invitation (PLAN-MATERIALY §6) adds invite {v,style}: never its fields (the material route serves them).
+ const {poster,rules,invite,...summary}=view.tournament;assert.deepEqual(summary,{id:t.id,name:t.name,date:t.date,city:t.city,status:t.status});
+ for(const [m,keys] of [[poster,['color','h','src','v','w']],[rules,['size','src','type','v']],[invite,['style','v']]])if(m)assert.deepEqual(Object.keys(m).sort(),keys);
  assert.deepEqual(view.summary,{entries:35,clubs:6,categories:8,brackets:4});
  const codes=categories(t.entries).items.map(c=>c.code);assert.deepEqual(view.categories.map(c=>c.code),codes,'same codes as the signed-in view');
  for(const c of view.categories){

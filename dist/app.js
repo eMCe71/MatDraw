@@ -10,6 +10,7 @@ import {registry,h,trustedHtml,SafeHtml,communityOnly,organizerUser,copyText} fr
 import {purgeSession} from './me.js';
 import {pickerHtml,readPicker} from './club-picker.js';
 import * as Materials from './materials.js';
+import * as Invite from './invite.js';
 import './chat-boot.js';import './moderation-boot.js';import './account-boot.js';import './members-boot.js';import './pwa.js';import './athlete-boot.js';import './settings-boot.js';
 const isDemo=Client.isDemo;
 const eventName=key=>ruleLabel(EVENTS[key]),roleName=role=>ROLES[role]?T(ROLES[role]):T('Członek'),statusName=status=>T(STATUSES[status]);
@@ -458,6 +459,8 @@ function guestPage(){
  // Materials (PLAN-MATERIALY): the large poster above the heading on phones, beside it on wider screens; the rules and the poster's
  // download under the date (materials.js; the list's summary already carries them while the preview loads).
  const poster=t?String(Materials.guestPoster(t)):'',materials=t?String(Materials.guestActions(t)):'';
+ // The organizer's invitation (PLAN-MATERIALY §6, invite.js) under the poster and the heading; invite.js fills it after painting.
+ const invitation=t?String(Invite.guest(t)):'';
  const heading=t?`${poster?'<section class="guest-hero">'+poster:''}<div class="page-heading guest-heading"><div><div class="eyebrow">${T('PODGLĄD GOŚCIA · TYLKO DO ODCZYTU')}</div><h1 id="guest-title" tabindex="-1">${esc(t.name)}</h1><p class="guest-when"><span>${icon('calendar')}${esc(longDate(t.date))}</span><span>${icon('pin')}${esc(t.city)}</span></p>${materials}</div><div class="heading-actions">${badge(statusName(t.status),t.status==='open'?'teal':t.status==='finished'?'neutral':'warning')}</div></div>${poster?'</section>':''}`:`<h1 id="guest-title" class="sr-only" tabindex="-1">${T('Podgląd gościa')}</h1>`;
  let content;
  // [data-athlete-cta]: the athlete module's call to action (enter / entered / add athlete data, §10.3), for guests and members.
@@ -466,7 +469,7 @@ function guestPage(){
  else content=`<div class="guest-loading" role="status"><span class="guest-spinner" aria-hidden="true"></span>${T('Wczytywanie podglądu…')}</div>`;
  const tabbed=!!g&&g.status!=='error';
  if(tabbed)content=guestTabs(g)+`<div role="tabpanel" id="guest-panel-cats" class="guest-panel" aria-labelledby="guest-tab-cats"${g.tab==='cats'?'':' hidden'}>${g.tab==='cats'?content:''}</div><div role="tabpanel" id="guest-panel-chat" class="guest-panel" aria-labelledby="guest-tab-chat"${g.tab==='chat'?'':' hidden'}>${g.tab==='chat'?guestChatPanel(g):''}</div>`;
- return `<div class="guest-shell"><header class="guest-bar"><div class="guest-bar-inner"><button type="button" class="brand guest-brand" data-action="guest-login" aria-label="${preview?T('MatBravo — wróć'):T('MatBravo — wróć do logowania')}"><picture><source media="(max-width:650px)" srcset="./brand/matbravo-mark-white.svg" width="84" height="62">${logo}</picture></button><span class="guest-pill">${icon('eye')}<span>${T('Podgląd gościa')}</span></span><div class="guest-bar-actions">${langSwitch()}${preview?`<button type="button" class="btn guest-login" data-page="${esc(registry.defaultPage(workspace?.user?.role))}">${icon('left')}<span>${T('Wróć')}</span></button>`:`<button type="button" class="btn guest-login" data-action="guest-login">${icon('lock')}<span>${T('Zaloguj się')}</span></button>`}</div></div></header><main id="main" class="guest-main">${heading}${content}</main>${footer()}</div>`;
+ return `<div class="guest-shell"><header class="guest-bar"><div class="guest-bar-inner"><button type="button" class="brand guest-brand" data-action="guest-login" aria-label="${preview?T('MatBravo — wróć'):T('MatBravo — wróć do logowania')}"><picture><source media="(max-width:650px)" srcset="./brand/matbravo-mark-white.svg" width="84" height="62">${logo}</picture></button><span class="guest-pill">${icon('eye')}<span>${T('Podgląd gościa')}</span></span><div class="guest-bar-actions">${langSwitch()}${preview?`<button type="button" class="btn guest-login" data-page="${esc(registry.defaultPage(workspace?.user?.role))}">${icon('left')}<span>${T('Wróć')}</span></button>`:`<button type="button" class="btn guest-login" data-action="guest-login">${icon('lock')}<span>${T('Zaloguj się')}</span></button>`}</div></div></header><main id="main" class="guest-main">${heading}${invitation}${content}</main>${footer()}</div>`;
 }
 /** Read-only page: no forms and no write actions; the click handler accepts only the public actions below without a session. */
 function renderGuest(){

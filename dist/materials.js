@@ -254,8 +254,8 @@ export function messageOf(error){
  return translateMessage(String(error?.message||''))||T('Nie udało się zapisać materiału. Spróbuj ponownie.');
 }
 /** The answer {workspace,result} of a write (API route or demo command), applied like a command's answer. */
-function applied(res){ui()?.applyWorkspace?.(res);return res?.result??null;}
-const reauth=fn=>ui()?.reauth?ui().reauth(fn):fn();
+export function applied(res){ui()?.applyWorkspace?.(res);return res?.result??null;}
+export const reauth=fn=>ui()?.reauth?ui().reauth(fn):fn();
 const demoCommand=(id,kind,value)=>{const ws=ui()?.getWorkspace?.();return Client.command('tournament.material',{id,kind,value},Number(ws?.revision)||0);};
 /** Sends a prepared poster ({blob,...}), a checked PDF (File) or typed rules ({type:'text',text}) for tournament id. onProgress(0..1)
  * while bytes go out. */
@@ -325,20 +325,21 @@ export function guestActions(t){
 // ---- Dialogs over the page: the poster preview and the rules reader ----
 let viewer=null;
 /** Shows a modal layer (role dialog, aria-modal, labelled by its heading) with a focus trap; Escape, the close button and a click on
- * the backdrop close it; everything else in the page is inert meanwhile. */
-function openLayer(content,{opener,id,action,focus='.mat-viewer-close'}){
+ * the backdrop close it, unless guard() answers false (the invitation editor with unsaved changes); everything else in the page is
+ * inert meanwhile. Exported for dist/invite.js. */
+export function openLayer(content,{opener,id,action,focus='.mat-viewer-close',guard=null}){
  closeLayer(false);
  const root=document.createElement('div');root.className='mat-viewer-root';setHtml(root,content);
  const background=[...document.querySelectorAll('body > *')].filter(el=>!el.inert);
  document.body.append(root);document.body.classList.add('mat-viewer-open');for(const el of background)el.inert=true;
- const dialog=root.querySelector('[role="dialog"]');viewer={root,dialog,opener,background,id:String(id),action};
+ const dialog=root.querySelector('[role="dialog"]');viewer={root,dialog,opener,background,id:String(id),action,guard};const may=()=>!viewer?.guard||viewer.guard()!==false;
  root.addEventListener('keydown',event=>{
-  if(event.key==='Escape'){event.preventDefault();event.stopPropagation();closeLayer();return;}
+  if(event.key==='Escape'){event.preventDefault();event.stopPropagation();if(may())closeLayer();return;}
   if(event.key==='Tab'){event.stopPropagation();registry.trapTab(event,dialog);}
  });
  root.addEventListener('click',event=>{
   const hit=event.target.closest?.('[data-mat-viewer]'),act=hit?.dataset.matViewer;
-  if(act==='close'||act==='backdrop'&&hit===event.target){event.preventDefault();closeLayer();}
+  if(act==='close'||act==='backdrop'&&hit===event.target){event.preventDefault();if(may())closeLayer();}
  });
  root.querySelector(focus)?.focus({preventScroll:true});
  return root;
@@ -474,7 +475,7 @@ function progressHtml(kind,op){
 export const available=()=>Client.isDemo||!getMe()||!!limits();
 function sectionBody(t){
  const lim=limits();
- return h`<section class="mat-section" id="tournament-materials" data-materials aria-labelledby="mat-title" tabindex="-1"><div class="mat-head"><h3 id="mat-title">${T('Materiały')}</h3><p>${T('Plakat i regulamin zobaczą goście, zawodnicy i kluby na stronie turnieju.')}</p></div>${ctl.notice?h`<div class="notice mat-notice" role="alert">${icon('alert')}<p>${ctl.notice}</p></div>`:''}<div class="mat-grid">${posterBlock(t||{},lim)}${rulesBlock(t||{},lim)}</div></section>`;
+ return h`<section class="mat-section" id="tournament-materials" data-materials aria-labelledby="mat-title" tabindex="-1"><div class="mat-head"><h3 id="mat-title">${T('Materiały')}</h3><p>${T('Plakat, regulamin i zaproszenie zobaczą goście, zawodnicy i kluby na stronie turnieju.')}</p></div>${ctl.notice?h`<div class="notice mat-notice" role="alert">${icon('alert')}<p>${ctl.notice}</p></div>`:''}<div class="mat-grid">${posterBlock(t||{},lim)}${rulesBlock(t||{},lim)}${registry.use('invite')?.block?.(t||{},ctl.id)??''}</div></section>`;
 }
 /** The "Materials" section (SafeHtml) of a tournament dialog that opens now for t (null: a new tournament); '' when the server has
  * none. A dialog opened again while a send of the same tournament still runs keeps showing that send. */
@@ -499,6 +500,11 @@ function repaint(c=ctl){
  const twin=registry.keepFocus(section,next,{fallback:place=>place?.querySelector('[data-action="material-pick"],[data-action="material-remove"],[data-action="material-text-edit"],.mat-label')});
  if(caret&&twin?.matches?.('[data-mat-text]'))try{twin.setSelectionRange(caret[0],caret[1]);}catch{}
 }
+/** For dist/invite.js: draws the section again (its invitation row changed state). */
+export function repaintSection(){repaint();}
+/** For dist/invite.js, after the invitation was saved or removed: the dialog follows the new revision, the page is drawn again and
+ * message is read out in the dialog (or shown as a toast when no dialog is open). */
+export function written(message){if(ctl)afterWrite(ctl,message);else{ui()?.render?.();ui()?.toast?.(message);}}
 /** Scrolls the section into view and focuses its first control (the card's "Add poster" tile opens the dialog here). */
 export function focusSection(){
  const s=document.querySelector('#tournament-materials');if(!s)return;

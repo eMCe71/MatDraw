@@ -14,6 +14,7 @@
 //  limits   {config}: posterMax, rulesMax, limits, bodyLimit, the poster-upload and rules-upload max of the route registry.
 //  dir      {config, ids}: Materials::dir for each id.
 //  fit      {cases:[[w,h,maxW,maxH]]}: Materials::fit.
+//  inviteField, inviteMeta: the organizer's invitation (see the jobs).
 declare(strict_types=1);
 require dirname(__DIR__).'/backend/bootstrap.php';
 use MatDraw\{AppError,Config,Materials,Routes};
@@ -65,5 +66,8 @@ $out=match($in['job']){
   'routes'=>array_map(fn($n)=>[$routes[$n]['method'],$routes[$n]['auth'],$routes[$n]['user'],$routes[$n]['max']??null,$routes[$n]['types']??null],['poster-upload'=>'poster-upload','rules-upload'=>'rules-upload','rules-text'=>'rules-text','material-delete'=>'material-delete','material'=>'material'])];})(),
  'dir'=>(function()use($in,$cfg){$c=$cfg();return array_map(fn($id)=>Materials::dir($c,(string)$id),$in['ids']);})(),
  'fit'=>array_map(fn($x)=>Materials::fit(...$x),$in['cases']),
+ // The organizer's invitation (PLAN-MATERIALY §6): inviteField {cases:[[key, raw]]}, inviteMeta {cases:[[style, fields]]} (meta without at, or error and status), inviteJson {cases:[meta]}.
+ 'inviteField'=>array_map(fn($x)=>Materials::inviteField((string)$x[0],$x[1]),$in['cases']),
+ 'inviteMeta'=>array_map(fn($x)=>attempt(function()use($x){$m=Materials::inviteMeta($x[0],$x[1]);unset($m['at']);return $m;}),$in['cases']),
 };
 echo json_encode($out,JSON_THROW_ON_ERROR|JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES);
