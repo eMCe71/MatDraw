@@ -82,6 +82,8 @@ test('mascots: a figure and a chooser tile per sport, WebP of the declared size,
   const m=s.mascot;assert.ok(m,s.id);
   for(const [src,w,h,max] of [[m.src,m.w,m.h,60000],[m.tile,m.tw,m.th,20000]]){
    assert.match(src,/^\.\/brand\/sports\/[\w.-]+\.webp$/,s.id);
+   // A new drawing gets a new name: browsers keep images for 7 days and the service worker keeps the ones seen.
+   assert.match(src,/-v\d+(?:-tile)?\.webp$/,src+' carries the version of the drawing in its name');
    const file='dist/'+src.slice(2);assert.ok(existsSync(new URL('../'+file,import.meta.url)),file);
    const buf=read(file);assert.deepEqual(webpSize(buf),[w,h],file);assert.ok(buf.length<=max,file+' '+buf.length+' bytes');
    assert.ok(DENY.some(r=>r.test(src.slice(2))),file+' stays out of the precache');
