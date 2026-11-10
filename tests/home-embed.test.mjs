@@ -40,7 +40,7 @@ test('tournaments page and guest preview carry the chat mount points',()=>{
  assert.ok(app.includes('class="btn guest-login" data-page="home"'),'member preview has a Wróć button back to the home page');
 });
 test('the grid covers the plan\'s breakpoints and the print stylesheet hides the home page',()=>{
- for(const s of ['minmax(330px,410px) minmax(460px,1fr) clamp(330px,25vw,420px)','"events chat auth" "events chat foot"','minmax(410px,1fr) minmax(560px,800px) minmax(420px,1fr)','"events auth" "chat auth" "chat foot"','"events auth" "chat chat" "foot foot"','"events" "chat" "auth" "foot"','"auth" "events" "chat" "foot"','"chooser auth" "chooser foot"','min-height:560px;max-height:900px','height:calc(100dvh - 112px)','--mascot-h:220px'])assert.ok(css.includes(s),s);
+ for(const s of ['minmax(330px,410px) minmax(460px,1fr) clamp(330px,25vw,420px)','"events chat auth" "events chat foot"','minmax(410px,1fr) minmax(560px,800px) minmax(420px,1fr)','"events auth" "chat auth" "chat foot"','"events auth" "chat chat" "foot foot"','"events" "chat" "auth" "foot"','"auth" "events" "chat" "foot"','"chooser auth" "chooser foot"','min-height:560px;max-height:900px','height:calc(100dvh - 112px)','--mascot-h:232px'])assert.ok(css.includes(s),s);
  assert.match(css,/@media print\{\.home,/);
  assert.deepEqual([...new Set([...css.matchAll(/@media\s*\(\s*max-width:\s*(\d+)px/g)].map(m=>+m[1]))].filter(w=>![440,650,760,800,1000,1180,1199,1650].includes(w)),[],'plan 8.7: no new breakpoint (760 and 1180 predate the slice)');
  assert.match(readFileSync(root+'styles.css','utf8'),/@media print\{[^@]*#app,[^}]*display:none!important/,'the app shell (home page, guest preview) is never part of a printout: prints go through #print-root');

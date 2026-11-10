@@ -18,17 +18,19 @@
 /* Decorative character images (alt="", aria-hidden): never interactive, never in the print-out. */
 .mascot{display:block;width:auto;max-width:none;pointer-events:none;user-select:none}
 
-/* Home page: Matbravo, dressed for the chosen martial art, waves from behind the "Upcoming tournaments" card (the card hides his legs). Subtle breathing loop
-   (kit motion: 6.4 s, scale 1.006/1.008, 0.16 deg) with the pivot at his feet below the cropped image; pause button;
-   static under prefers-reduced-motion. --mascot-h is the height of the cropped image (head to mid-thigh). */
-.upcoming-stage{--mascot-h:256px;position:relative;width:100%;padding-top:calc(var(--mascot-h) * .78)}
+/* Home page: Matbravo, dressed for the chosen martial art and in its pose (the owner's illustrations), stands on the "Upcoming
+   tournaments" card: the whole figure shows, the feet on the card's top edge with a soft shadow under them, so a kick or a raised
+   knee is never cut. Subtle breathing loop (kit motion: 6.4 s, scale 1.006/1.008, 0.16 deg) pivoting at the feet; the pause button
+   stands next to them; static under prefers-reduced-motion. --mascot-h is the height of the whole figure. */
+.upcoming-stage{--mascot-h:256px;position:relative;width:100%;padding-top:calc(var(--mascot-h) - 2px)}
 .upcoming-stage>.upcoming-card{position:relative;z-index:1}
-.login-mascot{position:absolute;top:0;right:46px;height:var(--mascot-h)}
-.login-mascot:before{content:'';position:absolute;left:50%;top:calc(var(--mascot-h) * .2);width:calc(var(--mascot-h) * .86);aspect-ratio:1;transform:translateX(-50%);border-radius:50%;background:radial-gradient(circle,#4ac1ed38 0%,#00aeef1a 45%,transparent 70%)}
-.login-mascot-img{position:relative;height:100%;transform-origin:50% 139%;animation:mb-breathe var(--mb-motion) ease-in-out infinite;will-change:transform}
+.login-mascot{position:absolute;top:0;right:46px;z-index:2;height:var(--mascot-h);pointer-events:none}
+.login-mascot:before{content:'';position:absolute;left:50%;top:calc(var(--mascot-h) * .08);width:calc(var(--mascot-h) * .76);aspect-ratio:1;transform:translateX(-50%);border-radius:50%;background:radial-gradient(circle,#4ac1ed38 0%,#00aeef1a 45%,transparent 70%)}
+.login-mascot:after{content:'';position:absolute;left:12%;right:12%;bottom:-6px;height:14px;border-radius:50%;background:radial-gradient(closest-side,#030b1a99,#030b1a00)}
+.login-mascot-img{position:relative;z-index:1;height:100%;transform-origin:50% 100%;animation:mb-breathe var(--mb-motion) ease-in-out infinite;will-change:transform}
 .login-mascot.is-paused .login-mascot-img{animation-play-state:paused}
 @keyframes mb-breathe{0%,100%{transform:none}50%{transform:scale(1.006,1.008) rotate(-.16deg)}}
-.motion-toggle{position:absolute;right:6px;top:calc(var(--mascot-h) * .78 - 44px);z-index:2;width:32px;height:32px;padding:0;border-radius:50%;display:grid;place-items:center;background:#ffffff12;border:1px solid #ffffff2e;color:#b7cfe9;transition:background .18s,color .18s}
+.motion-toggle{position:absolute;right:2px;top:calc(var(--mascot-h) - 40px);z-index:2;width:32px;height:32px;padding:0;border-radius:50%;display:grid;place-items:center;background:#ffffff12;border:1px solid #ffffff2e;color:#b7cfe9;transition:background .18s,color .18s}
 .motion-toggle:hover{background:#ffffff24;color:#fff}
 .motion-toggle:focus-visible{outline:2px solid #4ac1ed;outline-offset:2px}
 .motion-toggle .icon{width:14px;height:14px}

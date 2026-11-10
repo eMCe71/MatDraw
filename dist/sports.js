@@ -13,21 +13,22 @@
  * its Polish conversations stay; the 'taekwondo' (world) and 'general' channels of the old split are retired: their rows and
  * messages stay in the database, nobody sees them (Chat::visibleFor), the moderation panel still reaches their messages.
  *
- * mascot: the MatBravo character dressed for the sport (owner's idea and illustrations, 2026-11-10): src (w × h) stands above the
- * tournament list, tile (tw × th) on the sport's tile of the chooser. Framed like brand/matbravo-welcome.webp (head to mid-thigh, the
- * top 80% of the owner's 670 × 980 PNG). The files in dist/brand/sports are not precached (scripts/build-pwa.mjs DENY): only the
- * chosen sport's figure is fetched; taekwondo keeps the precached default figure (white dobok, blue belt). */
+ * mascot: the MatBravo character dressed for the sport in its characteristic pose (owner's idea and illustrations, second set of
+ * 2026-11-10: side kick, front-stance block, tight guard, ready to grip, straight punch, grappling stance, knee block, asymmetric
+ * guard): src (w × h) stands on the tournament list, tile (tw × th) on the sport's tile of the chooser. Always the whole figure, the
+ * owner's full 670 × 980 canvas scaled (feet on the bottom edge): a crop would cut the kicks and stances. The files in dist/brand/sports
+ * are not precached (scripts/build-pwa.mjs DENY): only the chosen sport's figure is fetched, the service worker keeps the ones seen. */
 
 export const DEFAULT_SPORT='taekwondo';
 export const SPORTS=[
- {id:'taekwondo',label:'Taekwondo',federations:[['uitf','UITF','ITF Union'],['itf','ITF','International Taekwon-Do Federation'],['wt','WT','World Taekwondo']],mascot:{src:'./brand/matbravo-welcome.webp',w:333,h:488,tile:'./brand/sports/matbravo-taekwondo-tile.webp',tw:164,th:240}},
- {id:'karate',label:'Karate',federations:[['wkf','WKF','World Karate Federation'],['kyokushin','Kyokushin','Kyokushin (IKO, KWF)'],['itkf','ITKF','International Traditional Karate Federation']],mascot:{src:'./brand/sports/matbravo-karate.webp',w:417,h:488,tile:'./brand/sports/matbravo-karate-tile.webp',tw:205,th:240}},
- {id:'boxing',label:'Boks',federations:[['worldboxing','World Boxing','World Boxing'],['iba','IBA','International Boxing Association']],mascot:{src:'./brand/sports/matbravo-boxing.webp',w:417,h:488,tile:'./brand/sports/matbravo-boxing-tile.webp',tw:205,th:240}},
- {id:'judo',label:'Judo',federations:[['ijf','IJF','International Judo Federation']],mascot:{src:'./brand/sports/matbravo-judo.webp',w:417,h:488,tile:'./brand/sports/matbravo-judo-tile.webp',tw:205,th:240}},
- {id:'kickboxing',label:'Kickboxing',federations:[['wako','WAKO','World Association of Kickboxing Organizations']],mascot:{src:'./brand/sports/matbravo-kickboxing.webp',w:417,h:488,tile:'./brand/sports/matbravo-kickboxing-tile.webp',tw:205,th:240}},
- {id:'bjj',label:'Jiu-Jitsu',federations:[['ibjjf','IBJJF','International Brazilian Jiu-Jitsu Federation']],mascot:{src:'./brand/sports/matbravo-bjj.webp',w:417,h:488,tile:'./brand/sports/matbravo-bjj-tile.webp',tw:205,th:240}},
- {id:'muaythai',label:'Muay Thai',federations:[['ifma','IFMA','International Federation of Muaythai Associations'],['wmc','WMC','World Muaythai Council']],mascot:{src:'./brand/sports/matbravo-muaythai.webp',w:417,h:488,tile:'./brand/sports/matbravo-muaythai-tile.webp',tw:205,th:240}},
- {id:'mma',label:'MMA',federations:[['immaf','IMMAF','International Mixed Martial Arts Federation'],['almma','ALMMA','Amatorska Liga MMA']],mascot:{src:'./brand/sports/matbravo-mma.webp',w:417,h:488,tile:'./brand/sports/matbravo-mma-tile.webp',tw:205,th:240}}
+ {id:'taekwondo',label:'Taekwondo',federations:[['uitf','UITF','ITF Union'],['itf','ITF','International Taekwon-Do Federation'],['wt','WT','World Taekwondo']],mascot:{src:'./brand/sports/matbravo-taekwondo.webp',w:335,h:490,tile:'./brand/sports/matbravo-taekwondo-tile.webp',tw:241,th:352}},
+ {id:'karate',label:'Karate',federations:[['wkf','WKF','World Karate Federation'],['kyokushin','Kyokushin','Kyokushin (IKO, KWF)'],['itkf','ITKF','International Traditional Karate Federation']],mascot:{src:'./brand/sports/matbravo-karate.webp',w:335,h:490,tile:'./brand/sports/matbravo-karate-tile.webp',tw:241,th:352}},
+ {id:'boxing',label:'Boks',federations:[['worldboxing','World Boxing','World Boxing'],['iba','IBA','International Boxing Association']],mascot:{src:'./brand/sports/matbravo-boxing.webp',w:335,h:490,tile:'./brand/sports/matbravo-boxing-tile.webp',tw:241,th:352}},
+ {id:'judo',label:'Judo',federations:[['ijf','IJF','International Judo Federation']],mascot:{src:'./brand/sports/matbravo-judo.webp',w:335,h:490,tile:'./brand/sports/matbravo-judo-tile.webp',tw:241,th:352}},
+ {id:'kickboxing',label:'Kickboxing',federations:[['wako','WAKO','World Association of Kickboxing Organizations']],mascot:{src:'./brand/sports/matbravo-kickboxing.webp',w:335,h:490,tile:'./brand/sports/matbravo-kickboxing-tile.webp',tw:241,th:352}},
+ {id:'bjj',label:'Jiu-Jitsu',federations:[['ibjjf','IBJJF','International Brazilian Jiu-Jitsu Federation']],mascot:{src:'./brand/sports/matbravo-bjj.webp',w:335,h:490,tile:'./brand/sports/matbravo-bjj-tile.webp',tw:241,th:352}},
+ {id:'muaythai',label:'Muay Thai',federations:[['ifma','IFMA','International Federation of Muaythai Associations'],['wmc','WMC','World Muaythai Council']],mascot:{src:'./brand/sports/matbravo-muaythai.webp',w:335,h:490,tile:'./brand/sports/matbravo-muaythai-tile.webp',tw:241,th:352}},
+ {id:'mma',label:'MMA',federations:[['immaf','IMMAF','International Mixed Martial Arts Federation'],['almma','ALMMA','Amatorska Liga MMA']],mascot:{src:'./brand/sports/matbravo-mma.webp',w:335,h:490,tile:'./brand/sports/matbravo-mma-tile.webp',tw:241,th:352}}
 ];
 export const SPORT_IDS=SPORTS.map(s=>s.id);
 /** Slugs of the channels of the old PL/world split that the catalogue no longer lists. */

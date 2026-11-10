@@ -81,14 +81,16 @@ test('mascots: a figure and a chooser tile per sport, WebP of the declared size,
  for(const s of SPORTS){
   const m=s.mascot;assert.ok(m,s.id);
   for(const [src,w,h,max] of [[m.src,m.w,m.h,60000],[m.tile,m.tw,m.th,20000]]){
-   assert.match(src,/^\.\/brand\/(?:sports\/)?[\w.-]+\.webp$/,s.id);
+   assert.match(src,/^\.\/brand\/sports\/[\w.-]+\.webp$/,s.id);
    const file='dist/'+src.slice(2);assert.ok(existsSync(new URL('../'+file,import.meta.url)),file);
    const buf=read(file);assert.deepEqual(webpSize(buf),[w,h],file);assert.ok(buf.length<=max,file+' '+buf.length+' bytes');
-   if(src.startsWith('./brand/sports/'))assert.ok(DENY.some(r=>r.test(src.slice(2))),file+' stays out of the precache');
+   assert.ok(DENY.some(r=>r.test(src.slice(2))),file+' stays out of the precache');
+   // The whole figure: the owner's 670 x 980 canvas scaled, never a crop (a kick or a raised knee must not be cut).
+   assert.ok(Math.abs(w/h-670/980)<0.005,file+' keeps the proportions of the whole canvas');
   }
-  assert.equal(m.h,488,'every figure has the height of the default one: '+s.id);
+  // One height for every sport, so switching sports keeps the feet line and the size of the head.
+  assert.deepEqual([m.h,m.th],[490,352],s.id);
  }
- assert.equal(SPORTS[0].mascot.src,'./brand/matbravo-welcome.webp','taekwondo keeps the precached default figure');
 });
 
 // tournament.save (Domain::execute / workspace.js execute): the sport and the federation are checked against the catalogue, kept
