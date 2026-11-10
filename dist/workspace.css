@@ -40,8 +40,8 @@
 .home-main:focus{outline:none}
 .home-events{grid-area:events;padding:30px 24px 40px clamp(20px,2.6vw,40px);min-width:0}
 .home-events:focus{outline:none}
-.home-events .upcoming-stage{--mascot-h:220px}
-.home-events .login-mascot{right:20px}
+.home-events .upcoming-stage{--mascot-h:232px}
+.home-events .login-mascot{right:44px}
 .home-centre{grid-area:chat;padding:30px 22px 30px 4px;display:flex;min-width:0}
 .home-chat{flex:1;align-self:flex-start;position:sticky;top:88px;height:calc(100dvh - 112px);min-height:560px;max-height:900px}
 .home .login-form-panel{grid-area:auth;justify-content:flex-start;padding:42px 34px 8px}
@@ -83,7 +83,8 @@
 .sport-tile-count{position:relative;z-index:1;font-size:11.5px;font-weight:700;color:var(--sport-tint);margin-top:6px;max-width:62%}
 .sport-tile-arrow{position:relative;z-index:1;margin-top:auto;width:30px;height:30px;padding:7px;border-radius:50%;background:#ffffff14;color:#fff;transition:background .18s,color .18s}
 .sport-tile:hover .sport-tile-arrow{background:var(--sport-tint);color:#0b1d3a}
-.sport-tile-figure{position:absolute;right:-4px;bottom:0;height:156px;width:auto;pointer-events:none;user-select:none}
+/* The whole figure on the floor of the tile (feet on its bottom edge), clear of the rounded corner and of the text at the top left. */
+.sport-tile-figure{position:absolute;right:8px;bottom:0;height:176px;width:auto;pointer-events:none;user-select:none}
 .chooser-note{font-size:12px;color:#8fb0d3;margin-top:18px}
 /* Signed in: the account card instead of the sign-in form (who, the global menu with its badges, account and sign-out). */
 .home-account-who{display:flex;align-items:center;gap:12px;margin:12px 0 18px}
@@ -245,8 +246,8 @@ button.home-account-link{width:100%;border:0;background:none;font-family:inherit
  .home-main:has(>.home-centre[hidden]){grid-template-columns:minmax(0,1fr);grid-template-areas:"events" "auth" "foot"}
  .home.known-device .home-main:has(>.home-centre[hidden]){grid-template-areas:"auth" "events" "foot"}
  .home-events{padding:16px 14px 8px}
- .home-events .upcoming-stage{--mascot-h:180px;max-width:none}
- .home-events .login-mascot{right:30px}
+ .home-events .upcoming-stage{--mascot-h:188px;max-width:none}
+ .home-events .login-mascot{right:42px}
  .upcoming-card{max-width:none}
  .upcoming-head{padding:18px 16px 15px}
  .fed-chips{padding:12px 12px 6px}
@@ -271,7 +272,7 @@ button.home-account-link{width:100%;border:0;background:none;font-family:inherit
  .sport-tile-name{font-size:17px}
  .sport-tile-feds{max-width:none}
  .sport-tile-count{max-width:none}
- .sport-tile-figure{height:122px}
+ .sport-tile-figure{right:6px;height:136px}
  .login-eyebrow{font-size:9px}
  .login-jump{display:inline-flex;align-items:center;gap:6px;min-height:36px;padding:6px 12px;background:#00aeef;border-color:#00aeef;color:#06243f;font-weight:700}
  .login-jump .icon{width:15px;height:15px}
@@ -293,7 +294,7 @@ button.home-account-link{width:100%;border:0;background:none;font-family:inherit
  .chooser-grid{gap:8px}
  .sport-tile{min-height:184px;padding:12px 12px 10px}
  .sport-tile-name{font-size:16px}
- .sport-tile-figure{height:108px}
+ .sport-tile-figure{height:124px}
  .guest-tab{padding:0 8px;gap:6px;font-size:12px}
 }
 /* Sponsor pop-up (content in promo.js). Inline SVG only: the CSP allows no external images or fonts. */
