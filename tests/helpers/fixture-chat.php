@@ -1,6 +1,7 @@
 <?php
 // Test-only fixture jobs of the chat-backend slice (loaded by tests/helpers/fixture.php; CLI, test database only).
-//   chat-channel {slug | tournamentId}                 the channel row (a tournament channel is created when missing)
+//   chat-channel {slug | tournamentId}                 the channel row (a tournament channel and a lobby channel of Sports::LOBBY
+//                                                      are created when missing, as Chat::lists does)
 //   chat-messages {channelId, userId, n, body?, createdMs?, stepMs?, state?}   n messages written as chat-send would
 //                                                      (next rev each, msg_count, last_message_id), without any limit
 //   chat-message {id}                                  one chat_messages row
@@ -14,14 +15,15 @@
 //   chat-table {table, hide}                           renames chat_channels away and back (switch before the database)
 //   chat-tournament-status {tournamentId, status}     sets a tournament's status directly (e.g. back to a draft)
 declare(strict_types=1);
-use MatDraw\{Chat,ChatSettings,Jobs};
+use MatDraw\{Chat,ChatSettings,Jobs,Sports};
 /** One row of $sql or null. */
 function fixture_chat_one(PDO $pdo,string $sql,array $params):?array{$q=$pdo->prepare($sql);$q->execute($params);$r=$q->fetch(PDO::FETCH_ASSOC);$q->closeCursor();return $r?:null;}
 function fixture_chat_all(PDO $pdo,string $sql,array $params=[]):array{$q=$pdo->prepare($sql);$q->execute($params);return $q->fetchAll(PDO::FETCH_ASSOC);}
 return [
  'chat-channel'=>function(PDO $pdo,array $p):array{
   if(isset($p['tournamentId']))return Chat::tournamentChannel($pdo,(string)$p['tournamentId'],time());
-  return fixture_chat_one($pdo,'SELECT * FROM chat_channels WHERE slug=?',[(string)($p['slug']??'')])??throw new RuntimeException('chat-channel: no such slug');
+  $slug=(string)($p['slug']??'');if(isset(Sports::LOBBY[$slug]))Chat::lobbyChannel($pdo,$slug,time());
+  return fixture_chat_one($pdo,'SELECT * FROM chat_channels WHERE slug=?',[$slug])??throw new RuntimeException('chat-channel: no such slug');
  },
  'chat-messages'=>function(PDO $pdo,array $p):array{
   $ch=(int)($p['channelId']??0);$user=(string)($p['userId']??'');$n=max(1,(int)($p['n']??1));$state=(string)($p['state']??'visible');

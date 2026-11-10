@@ -33,7 +33,7 @@ test('PHP build in a browser: organizer tools, guest offer (F2), entry window af
  };
  const noOverflow=async(page,what)=>assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth-document.documentElement.clientWidth),0,'horizontal overflow: '+what);
  const noCsp=async page=>assert.deepEqual(await page.evaluate(()=>window.__csp),[]);
- const login=async(page,email,password)=>{fixture('reset-limits');await page.goto(app);await page.fill('#login-form input[name="email"]',email);await page.fill('#login-form input[name="password"]',password);await page.click('#login-form button[type="submit"]');await page.waitForSelector('.app-shell',{timeout:20000});};
+ const login=async(page,email,password)=>{fixture('reset-limits');await page.goto(app);await page.fill('#login-form input[name="email"]',email);await page.fill('#login-form input[name="password"]',password);await page.click('#login-form button[type="submit"]');await page.waitForSelector('#home-account',{timeout:20000});};// signing in keeps the home page (owner 2026-11-10)
  const focused=page=>page.evaluate(()=>{const a=document.activeElement;return {tag:a?.tagName,form:a?.closest('form')?.dataset.setForm||null,mem:a?.dataset.memAct||null,row:a?.parentElement?.closest('[data-mem-id]')?.dataset.memId||null,clb:a?.dataset.clbAct||null,clbId:a?.dataset.clbId||null,filter:a?.dataset.clbFilter||null};});
  /** Sign-up through the three or four steps; athlete: {club:'none'|'new'} adds the athlete step ("Siebie", an adult). */
  const signup=async(page,{hash='#signup',organizer=false,athlete=null}={})=>{

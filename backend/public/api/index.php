@@ -1,6 +1,6 @@
 <?php
 declare(strict_types=1);
-use MatDraw\{Access,Accounts,Actors,ApiError,AppError,Auth,Domain,GuestView,MemberTx,Members,RateLimit,Repository,Routes,Settings};
+use MatDraw\{Access,Accounts,Actors,ApiError,AppError,Auth,Domain,GuestView,MemberTx,Members,RateLimit,Repository,Routes,Settings,Sports};
 ini_set('display_errors','0');ini_set('log_errors','1');
 // In the release: public/api/index.php and backend/ are siblings of public/.
 require dirname(__DIR__,2).'/backend/bootstrap.php';
@@ -15,7 +15,13 @@ function respond_public(array $config,string $route):never{
   if(($_SERVER['REQUEST_METHOD']??'')!=='GET'){header('Allow: GET');throw new AppError('Niedozwolona metoda.',405);}
   $today=date('Y-m-d');// Europe/Warsaw, set by matdraw_config().
   $pdo=matdraw_database($config);$repo=new Repository($pdo);$flags=Settings::flags(Settings::effective($pdo,$config));
-  if($route==='public')$out=GuestView::upcoming($repo->guestTournaments($today,null,$flags),$today);
+  if($route==='public'){
+   // Home page per martial art: sport=<id> (and fed=<federation of that sport>) lists that sport's tournaments (Sports); without
+   // sport the nearest of every sport, as before (cached app shells of older releases ask without it).
+   $sport=$_GET['sport']??null;$fed=$_GET['fed']??null;
+   if($sport!==null&&!Sports::valid($sport)||$fed!==null&&!(Sports::valid($sport)&&Sports::federationValid($sport,$fed)))throw new AppError('Niepoprawne zapytanie.',400);
+   $out=GuestView::upcoming($repo->guestTournaments($today,null,$flags),$today,$sport===null?GuestView::LIMIT:GuestView::SPORT_LIMIT,$sport,$fed);
+  }
   else{
    $id=$_GET['id']??null;if(!is_string($id)||!preg_match('/^[A-Za-z0-9_-]{1,40}$/D',$id))throw new AppError('Turniej nie jest dostępny.',404);
    $out=GuestView::tournament($repo->guestTournaments($today,$id,$flags),$id,$today);if(!$out)throw new AppError('Turniej nie jest dostępny.',404);

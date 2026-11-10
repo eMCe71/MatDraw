@@ -46,7 +46,7 @@ test('combined creation and registration rolls back on invalid event; club is se
 });
 
 // Public guest projection (login screen list and read-only preview) – dist/guest-view.js mirrors backend/src/GuestView.php.
-import {guestUpcoming,guestTournament,initials,warsawToday,UPCOMING_LIMIT} from '../dist/guest-view.js';
+import {guestUpcoming,guestTournament,initials,warsawToday,UPCOMING_LIMIT,SPORT_LIMIT} from '../dist/guest-view.js';
 import {categories,resolveDraw} from '../dist/engine.js';
 const TODAY='2026-10-31';
 const tour=(id,date,status,name=id)=>({id,name,city:'Miasto',date,status,mat:'Mata 2',createdBy:'demo-admin',entries:[],draws:{},activity:[{text:'Utworzono turniej.',time:'2026-10-01T10:00:00Z'}]});
@@ -63,13 +63,17 @@ function assertNoPersonalData(json,entries){
  for(const field of FORBIDDEN)assert.ok(!json.includes(field),'public data contains '+field);
  for(const e of entries){assert.ok(!json.includes(e.name),'full name in public data: '+e.name);for(const part of e.name.split(/\s+/))if(part.length>2)assert.ok(!wordIn(json,part),'name part in public data: '+part);}
 }
-test('public list: only published tournaments dated today or later, nearest first, at most 6, five fields each',()=>{
+test('public list: only published tournaments dated today or later, nearest first, at most 6, five fields and the sport each; counts per sport',()=>{
  const list=[tour('past','2026-10-30','open'),tour('today','2026-10-31','finished'),tour('draft','2026-11-01','draft'),tour('b','2026-11-02','closed','B'),tour('a','2026-11-02','open','A'),tour('odd','2026-11-02','archived'),...[3,4,5,6,7].map(d=>tour('later'+d,'2026-12-0'+d,'open'))];
  const out=guestUpcoming(list,TODAY);
- assert.equal(UPCOMING_LIMIT,6);assert.deepEqual(Object.keys(out),['tournaments']);
+ assert.equal(UPCOMING_LIMIT,6);assert.deepEqual(Object.keys(out),['tournaments','sports']);
  assert.deepEqual(out.tournaments.map(t=>t.id),['today','a','b','later3','later4','later5']);
- for(const t of out.tournaments)assert.deepEqual(Object.keys(t).sort(),['city','date','id','name','status']);
- assert.deepEqual(guestUpcoming(seed().tournaments,TODAY).tournaments.map(t=>t.id),['t-autumn-2026','t-gp-gdansk-2026','t-winter-2027'],'demo: the draft is never listed');
+ for(const t of out.tournaments)assert.deepEqual(Object.keys(t).sort(),['city','date','id','name','sport','status'],'stored without a sport: taekwondo, no federation');
+ assert.deepEqual(out.sports,{taekwondo:8},'every listed tournament counts, not only the six shown');
+ assert.deepEqual(guestUpcoming(seed().tournaments,TODAY).tournaments.map(t=>t.id),['t-autumn-2026','t-gp-gdansk-2026','t-karate-2026','t-bjj-2026','t-boxing-2027','t-mma-2027'],'demo: the nearest of every sport');
+ const tkd=guestUpcoming(seed().tournaments,TODAY,SPORT_LIMIT,'taekwondo');
+ assert.deepEqual([tkd.tournaments.map(t=>[t.id,t.federation]),tkd.federations],[[['t-autumn-2026','itf'],['t-gp-gdansk-2026','wt'],['t-winter-2027','uitf']],{itf:1,wt:1,uitf:1}],'demo Taekwondo: the draft is never listed');
+ assert.deepEqual(guestUpcoming(seed().tournaments,TODAY,SPORT_LIMIT,'judo'),{tournaments:[],sports:{taekwondo:3,karate:2,bjj:1,boxing:1,mma:1,muaythai:1},federations:{}},'demo judo: the empty state');
  assert.deepEqual(guestUpcoming(list,'2027-01-01').tournaments,[]);
 });
 test('guest preview: allowed fields only, athletes reduced to initials and club, drafts and past dates unavailable',()=>{
@@ -77,7 +81,7 @@ test('guest preview: allowed fields only, athletes reduced to initials and club,
  assert.deepEqual(Object.keys(view).sort(),['categories','summary','tournament']);
  // The demo tournament has a poster and rules (src: the demo's own files); a sparse field the server's shape test (php.test.mjs) pins.
  // The organizer's invitation (PLAN-MATERIALY §6) adds invite {v,style}: never its fields (the material route serves them).
- const {poster,rules,invite,...summary}=view.tournament;assert.deepEqual(summary,{id:t.id,name:t.name,date:t.date,city:t.city,status:t.status});
+ const {poster,rules,invite,...summary}=view.tournament;assert.deepEqual(summary,{id:t.id,name:t.name,date:t.date,city:t.city,status:t.status,sport:'taekwondo',federation:'itf'});
  for(const [m,keys] of [[poster,['color','h','src','v','w']],[rules,['size','src','type','v']],[invite,['style','v']]])if(m)assert.deepEqual(Object.keys(m).sort(),keys);
  assert.deepEqual(view.summary,{entries:35,clubs:6,categories:8,brackets:4});
  const codes=categories(t.entries).items.map(c=>c.code);assert.deepEqual(view.categories.map(c=>c.code),codes,'same codes as the signed-in view');
@@ -114,7 +118,10 @@ test('initialWorkspace: unaffiliated club, verified clubs, staffRev, demo organi
  const db=seed();
  assert.equal(db.staffRev,1);assert.equal(db.revision,1);
  assert.deepEqual(db.clubs.at(-1),{id:'unaffiliated',name:'Niezrzeszony',verified:true});assert.ok(db.clubs.every(c=>c.verified===true));
- assert.deepEqual(db.tournaments.map(t=>[t.id,t.selfEntry]),[['t-autumn-2026',false],['t-winter-2027',true],['t-gp-gdansk-2026',false],['t-spring-2027',false]]);
+ assert.deepEqual(db.tournaments.map(t=>[t.id,t.selfEntry]),[['t-autumn-2026',false],['t-winter-2027',true],['t-gp-gdansk-2026',false],['t-spring-2027',false],['t-karate-2026',false],['t-kyokushin-2027',false],['t-bjj-2026',false],['t-boxing-2027',false],['t-mma-2027',false],['t-muaythai-2027',false]]);
+ // Home page per martial art: the taekwondo tournaments of the demo have a federation; the others are fictional, without entries.
+ assert.deepEqual(db.tournaments.map(t=>t.sport+(t.federation?'/'+t.federation:'')),['taekwondo/itf','taekwondo/uitf','taekwondo/wt','taekwondo/itf','karate/wkf','karate/kyokushin','bjj/ibjjf','boxing/worldboxing','mma/immaf','muaythai/ifma']);
+ assert.ok(db.tournaments.slice(4).every(t=>t.status==='open'&&!t.entries.length&&t.createdBy==='demo-editor'));
  const org=db.users.find(u=>u.id==='demo-organizer'),ath=db.users.find(u=>u.id==='demo-athlete');
  assert.deepEqual([org.role,org.organizer,org.organizerTrustedAt,ath.role,ath.organizer],['member',true,null,'member',false]);
  const kid=db.profiles.find(p=>p.ownerId==='demo-athlete');assert.equal(db.profiles.filter(p=>p.ownerId==='demo-athlete').length,1,'one athlete profile per account (§17)');

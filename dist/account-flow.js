@@ -842,7 +842,7 @@ function wire(){
  document.addEventListener('click',onClick);document.addEventListener('keydown',onKey);
  // A finished return screen stays while the plan page is re-rendered (language) and is dropped once another page is shown.
  registry.on('painted',({view,page,memberPreview=false}={})=>{
-  if(view==='app'&&page!=='billing'){S.payment='';if(S.ret&&!S.ret.running)S.ret=null;if(page!=='signup')S.portal='';}
+  if((view==='app'||view==='home')&&page!=='billing'){S.payment='';if(S.ret&&!S.ret.running)S.ret=null;if(page!=='signup')S.portal='';}
   // Shared devices (plan §8.3 point 8): the typed e-mail, password and profile of a sign-up that was left (Back, logo, another hash)
   // are forgotten, and so is an unsaved profile draft once another page is shown (a language re-render keeps the same page).
   if(!(view==='public'&&page==='signup'))S.signup=newSignup();

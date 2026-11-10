@@ -12,8 +12,8 @@ if($input['job']==='classify'){
  require_once dirname(__DIR__).'/backend/src/SampleAthletes.php';
  $out=['clubs'=>\MatDraw\SampleAthletes::clubNames(),'athletes'=>\MatDraw\SampleAthletes::generate($input['count'],$input['date'],$input['seed'])];
 }elseif($input['job']==='guest'){
- // Public projection: upcoming list, one preview per requested id (null when not public) and initials.
- $out=['upcoming'=>GuestView::upcoming($input['tournaments'],$input['today'],$input['limit']??GuestView::LIMIT),'tournaments'=>[],'initials'=>array_map([GuestView::class,'initials'],$input['names']??[])];
+ // Public projection: upcoming list (of one sport and federation when asked), one preview per requested id (null when not public) and initials.
+ $out=['upcoming'=>GuestView::upcoming($input['tournaments'],$input['today'],$input['limit']??GuestView::LIMIT,$input['sport']??null,$input['fed']??null),'tournaments'=>[],'initials'=>array_map([GuestView::class,'initials'],$input['names']??[])];
  foreach($input['ids']??[] as $id)$out['tournaments'][]=GuestView::tournament($input['tournaments'],$id,$input['today']);
 }elseif($input['job']==='draws'){
  $out=[];for($n=3;$n<=64;$n++){$a=[];for($i=0;$i<$n;$i++)$a[]=['id'=>'a'.$i,'club'=>'c'.($i%5),'champion'=>$i===0];$d=Rules::makeDraw($a);$matches=0;while(true){$ready=[];foreach(Rules::resolve($d) as $r)foreach($r as $m)if($m['ready'])$ready[]=$m;if(!$ready)break;foreach($ready as $m){Rules::result($d,$m['id'],$m['a']);$matches++;}}$finished=Rules::resolve($d);$out[]=['n'=>$n,'unique'=>count(array_unique(array_filter($d['slots']))),'matches'=>$matches,'winner'=>end($finished)[0]['winner']];}

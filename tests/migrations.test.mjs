@@ -122,3 +122,17 @@ test('0009 matches PLAN-MATERIALY §2.1, §4: only tournaments.materials MEDIUMT
  // Repository writes the column with explicit names (persist), so code before 0009 never touches it and code after it reads it.
  assert.match(readFileSync('backend/src/Repository.php','utf8'),/'materials'=>is_array\(\$t\['materials'\]\?\?null\)&&\$t\['materials'\]!==\[\]\?self::json\(\$t\['materials'\]\):null/);
 });
+
+test('0010 (home page per martial art): tournaments.sport with the taekwondo default and tournaments.federation NULL through addColumn, no floor, no rows of existing tables',()=>{
+ const m=parsed.find(x=>x.id===10);assert.ok(m,'0010_sports.php');assert.equal(m.name,'0010_sports.php');assert.equal(m.destructive,false);
+ assert.match(m.code,/'name'\s*=>\s*'sports'/);
+ assert.ok(m.code.includes(`$m->addColumn('tournaments','sport',"VARCHAR(20) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT 'taekwondo'");`),'every existing tournament is taekwondo (instant ADD COLUMN with a DEFAULT)');
+ assert.ok(m.code.includes(`$m->addColumn('tournaments','federation','VARCHAR(20) CHARACTER SET ascii COLLATE ascii_bin NULL');`),'no federation for existing tournaments');
+ assert.equal((m.code.match(/\$m->/g)||[]).length,2,'nothing else');
+ assert.ok(!/'floor'\s*=>/.test(m.code),'the previous release reads and writes tournaments with explicit columns: no floor');
+ assert.ok(!/\b(INSERT|UPDATE|DELETE|REPLACE|ALTER|CREATE)\b/i.test(m.code),'no statement of its own: the chat channels per sport are created by Chat::lists, not inserted here');
+ // The code reads and writes both columns by name and checks them against Sports (an unknown value reads as taekwondo / none).
+ const repo=readFileSync('backend/src/Repository.php','utf8');
+ assert.match(repo,/'sport'=>Sports::of\(\$t\),'federation'=>Sports::federationOf\(\$t\)/);
+ assert.ok((repo.match(/t\.sport,t\.federation|,sport,federation,/g)||[]).length>=2,'the guest and the member queries select both columns');
+});

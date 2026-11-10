@@ -1,14 +1,13 @@
 // English entries of the chat feature (Polish key -> English). Filled by the feature owner; merged in i18n.js (first wins).
-// chat-backend: server messages of backend/src/Chat*.php and backend/routes/chat.php, and the names, scopes and
-// descriptions of the global channels (MatDraw\Chat::LOBBY, plan §5.1; wording from research 05 §19.1–19.4).
+// chat-backend: server messages of backend/src/Chat*.php and backend/routes/chat.php, and the names and descriptions of the
+// global channels (a general channel per martial art and one per federation: dist/sports.js; 'Świat' names the retired world
+// channels in the moderation panel).
 export default {
  // Global channels
  'Ogólny':'General',
+ 'Wszystkie federacje i kluby':'All federations and clubs',
+ 'Kanały: {sport}':'Channels: {sport}',
  'Świat':'World',
- 'Polska':'Poland',
- 'Rozmowy po polsku':'Conversation in Polish',
- 'Dowolny język — najlepiej angielski':'Any language — English works best',
- 'Wszystko o sztukach walki i MatBravo':'Everything about martial arts and MatBravo',
  // Reading and sending
  'Niepoprawne zapytanie czatu.':'Invalid chat request.',
  'Uzupełnij profil, aby pisać na czacie.':'Complete your profile to post in the chat.',

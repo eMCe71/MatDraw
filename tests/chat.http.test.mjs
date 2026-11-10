@@ -1,5 +1,6 @@
-// Chat over real PHP and MariaDB/MySQL (plan §11, chat-backend; run through scripts/test-http.sh): channel lists (four
-// global channels in a fixed order, public cache, tournaments by visibility, lazy channels), the guest projection
+// Chat over real PHP and MariaDB/MySQL (plan §11, chat-backend; run through scripts/test-http.sh): channel lists (the global
+// channels per martial art in the catalogue's order, the retired PL/world ones hidden, public cache, tournaments by visibility,
+// lazy channels), the guest projection
 // (exact keys, no personal data in the raw JSON, no cookie, public max-age=2), the member projection (people, private
 // no-store), polling (204 also with h, COUNT only after knownLast changed, cursor, tombstones, more, cfg on a new settings
 // version, e reports into chat_health once per reporter, status and minute, history), sending (idempotent cid, limits
@@ -14,6 +15,7 @@ import {randomBytes} from 'node:crypto';
 import {existsSync,unlinkSync,writeFileSync} from 'node:fs';
 import path from 'node:path';
 import {Client,base,fixture} from './helpers/http-client.mjs';
+import {LOBBY,RETIRED} from '../dist/sports.js';
 const shared=process.env.MATDRAW_TEST_SHARED_DIR;const skip=!base||!shared;
 const ADMIN=['admin@test.example','AdminForTests2026!'],PASSWORD='MemberPassword2026!',DAY=86_400_000;
 const CLIENT=['on','t','ms','idle','bg','boost','safety','notice'],FIELDS=['id','r','t','g','c','b'],TOMB=['id','r','t','g','x'];
@@ -48,7 +50,8 @@ before(async()=>{
  U.muted=member('czat.muted@test.example');
  for(const k of Object.keys(U))C[k]=await signIn(U[k].email);
  admin=await signIn(...ADMIN);
- general=fixture('chat-channel',{slug:'general'});karate=fixture('chat-channel',{slug:'karate'});
+ // Taekwondo's general channel (the old 'taekwondo-pl' row) and Karate's: both seeded by 0003 and kept by the lobby per sport.
+ general=fixture('chat-channel',{slug:'taekwondo-pl'});karate=fixture('chat-channel',{slug:'karate'});
  T.future=fixture('tournament',{name:'Puchar Czatu 2031',date:'2031-05-10'}).id;
  T.draft=fixture('tournament',{name:'Szkic czatu',date:'2031-06-01',status:'draft'}).id;
  T.grace=fixture('tournament',{name:'Wczorajszy turniej',date:shift(TODAY,-1),status:'finished'}).id;
@@ -62,15 +65,18 @@ after(()=>{
  for(const u of Object.values(U))fixture('chat-mute',{userId:u.id,remove:true});
 });
 
-test('public-chat-channels: four global channels in a fixed order, public cache 30 s, no cookie; guests see upcoming tournaments only',{skip},async()=>{
+test('public-chat-channels: the channels per martial art in the catalogue\'s order, public cache 30 s, no cookie; guests see upcoming tournaments only',{skip},async()=>{
  const r=await get('public-chat-channels');
  assert.equal(r.status,200);assert.equal(r.headers.get('cache-control'),'public, max-age=30');assert.equal(r.headers.get('set-cookie'),null);
  assert.deepEqual(Object.keys(r.data),['cv','cfg','lobby','tournaments']);assert.deepEqual(Object.keys(r.data.cfg),CLIENT);
- assert.deepEqual(r.data.lobby.map(l=>[l.slug,l.scope,l.st]),[['taekwondo-pl','pl','open'],['taekwondo','world','open'],['karate','world','open'],['general','world','open']]);
- for(const l of r.data.lobby){assert.deepEqual(Object.keys(l),['id','slug','scope','last','count','st']);assert.equal(typeof l.id,'number');}
+ // dist/sports.js LOBBY: per sport the general channel, then one per federation; the retired PL/world channels are not listed.
+ assert.deepEqual(r.data.lobby.map(l=>[l.slug,l.sport,l.fed,l.st]),LOBBY.map(c=>[c.slug,c.sport,c.fed,'open']));
+ for(const l of r.data.lobby){assert.deepEqual(Object.keys(l),['id','slug','sport','fed','last','count','st']);assert.ok(typeof l.id==='number'||l.id===null&&l.count===0&&l.last===0,l.slug);}
+ assert.ok(!r.data.lobby.some(l=>RETIRED.includes(l.slug)));
+ assert.deepEqual(['taekwondo-pl','karate'].map(s=>r.data.lobby.find(l=>l.slug===s).id),[Number(general.id),Number(karate.id)],'the rows seeded by 0003 keep their ids');
  const ids=r.data.tournaments.map(t=>t.tournamentId);
  for(const id of [T.draft,T.grace,T.archive,T.emptyArchive])assert.ok(!ids.includes(id),'guests see neither drafts nor past tournaments');
- assert.deepEqual(r.data.tournaments.find(t=>t.tournamentId===T.future),{id:null,tournamentId:T.future,title:'Puchar Czatu 2031',date:'2031-05-10',city:'Warszawa',st:'open',last:0,count:0},'no channel yet: nothing is written by a public GET');
+ assert.deepEqual(r.data.tournaments.find(t=>t.tournamentId===T.future),{id:null,tournamentId:T.future,title:'Puchar Czatu 2031',date:'2031-05-10',city:'Warszawa',sport:'taekwondo',fed:null,st:'open',last:0,count:0},'no channel yet: nothing is written by a public GET');
  const withCookie=await get('public-chat-channels',{},C.m1.cookie);
  assert.equal(withCookie.headers.get('set-cookie'),null);assert.deepEqual(withCookie.data,r.data,'public routes ignore cookies');
  const post=await fetch(base+'?route=public-chat-channels',{method:'POST',headers:{'X-MatBravo-Client':'1'}});assert.equal(post.status,405);assert.equal(post.headers.get('allow'),'GET');
@@ -79,6 +85,9 @@ test('public-chat-channels: four global channels in a fixed order, public cache 
 test('chat-channels (signed in): creates missing channels, adds the grace day and the used archive; 401 without a session',{skip},async()=>{
  const r=await get('chat-channels',{},C.m2.cookie);
  assert.equal(r.status,200,JSON.stringify(r.data));assert.equal(r.headers.get('cache-control'),'private, no-store');assert.equal(r.headers.get('set-cookie'),null);
+ // Every channel of the lobby exists after a signed-in read (Chat::lobbyChannel); guests then get their ids too.
+ assert.deepEqual(r.data.lobby.map(l=>l.slug),LOBBY.map(c=>c.slug));assert.ok(r.data.lobby.every(l=>Number.isInteger(l.id)&&l.st==='open'));
+ assert.deepEqual((await get('public-chat-channels')).data.lobby.map(l=>l.id),r.data.lobby.map(l=>l.id));
  const by=Object.fromEntries(r.data.tournaments.map(t=>[t.tournamentId,t]));
  assert.equal(typeof by[T.future].id,'number');assert.equal(by[T.future].st,'open');assert.equal(by[T.grace].st,'open');assert.equal(typeof by[T.grace].id,'number');
  assert.ok(!(T.draft in by),'never a draft');assert.ok(!(T.archive in by)&&!(T.emptyArchive in by),'an archive that was never written is not listed');
@@ -121,6 +130,18 @@ test('chat-feed: full access gets people with private, no-store; signed in witho
  assert.ok(!n.text.includes(U.m1.publicId)&&!n.text.includes('Zygfryda'));
  error(await get('chat-feed',{ch:`${general.id}:0`}),401,'Zaloguj się ponownie.');
  error(await get('chat-feed',{ch:`${general.id}:0`},'matdraw_session=AAAAAAAAAAAAAAAAAAAAAAAAAAAA'),401,'Zaloguj się ponownie.');
+});
+
+test('the channels of the old PL/world split are retired: nobody reads or writes them, their rows and messages stay',{skip},async()=>{
+ const old=fixture('chat-channel',{slug:'general'}),world=fixture('chat-channel',{slug:'taekwondo'});
+ fixture('chat-messages',{channelId:old.id,userId:U.m2.id,n:1,body:'Stara rozmowa'});
+ for(const ch of [old,world]){
+  // Polling answers 'gone' (as for any channel that is no longer visible), with no message; sending is a 404.
+  for(const r of [await get('public-chat',{ch:`${ch.id}:0`}),await get('chat-feed',{ch:`${ch.id}:0`},C.m2.cookie)]){assert.equal(r.status,200,ch.slug+' '+r.text);assert.deepEqual(r.data.ch[ch.id],{st:'gone'},ch.slug);}
+  assert.equal((await send(C.m2,ch.id,'Halo?')).status,404,ch.slug);
+ }
+ for(const r of [await get('public-chat-channels'),await get('chat-channels',{},C.m2.cookie)])assert.ok(!r.data.lobby.some(l=>RETIRED.includes(l.slug)));
+ assert.equal(Number(fixture('chat-channel',{slug:'general'}).msg_count),Number(old.msg_count)+1,'the rows and messages stay (the moderation panel reaches them)');
 });
 
 test('polling: 204 without changes (also with h), COUNT only after knownLast changed, cursor, tombstone, more, cfg, e, history',{skip},async()=>{
@@ -180,13 +201,13 @@ test('polling: 204 without changes (also with h), COUNT only after knownLast cha
 });
 
 test('sending: repeated cid, limits with Retry-After, profile, temporary password, mute (also in me), payment, archive, switches',{skip},async()=>{
- const before=Number(fixture('chat-channel',{slug:'general'}).msg_count),key=cid();
+ const before=Number(fixture('chat-channel',{slug:'taekwondo-pl'}).msg_count),key=cid();
  const a=await C.m1.req('chat-send',{ch:general.id,cid:key,b:'Raz'}),b=await C.m1.req('chat-send',{ch:general.id,cid:key,b:'Raz'});
  assert.equal(a.status,200);assert.equal(b.status,200);assert.deepEqual(b.data,a.data,'the stored message again');
  const k0=Number(fixture('chat-channel',{slug:'karate'}).msg_count);
  error(await C.m1.req('chat-send',{ch:karate.id,cid:key,b:'Raz'}),400,'Niepoprawny formularz.');// a cid is single-use: never a confirmation from another channel
  assert.equal(Number(fixture('chat-channel',{slug:'karate'}).msg_count),k0);
- assert.equal(Number(fixture('chat-channel',{slug:'general'}).msg_count),before+1);
+ assert.equal(Number(fixture('chat-channel',{slug:'taekwondo-pl'}).msg_count),before+1);
  fixture('chat-settings',{set:{send:{gap:2}}});
  assert.equal((await send(C.m4,general.id,'pierwsza')).status,200);
  let r=await send(C.m4,general.id,'za szybko');error(r,429,'Wysyłasz wiadomości zbyt szybko. Spróbuj za chwilę.');
@@ -321,7 +342,7 @@ test('Admin: report queue with context and mutes, restore, dismiss, mute/unmute,
  let r=await get('admin-chat-reports',{},admin.cookie);
  assert.equal(r.status,200,JSON.stringify(r.data));assert.equal(r.headers.get('cache-control'),'private, no-store');assert.deepEqual(Object.keys(r.data),['total','page','items']);
  const item=r.data.items.find(i=>i.message.id===T.hidden);
- assert.deepEqual([item.message.state,item.message.body,item.message.channel.slug,item.author.email,item.author.username,item.reports.count],['hidden_review','Kupię tanio, pisz na priv','general',U.m1.email,'zygfryda_b',3]);
+ assert.deepEqual([item.message.state,item.message.body,item.message.channel.slug,item.author.email,item.author.username,item.reports.count],['hidden_review','Kupię tanio, pisz na priv','taekwondo-pl',U.m1.email,'zygfryda_b',3]);
  assert.deepEqual(item.reports.reasons,{spam:1,harassment:1,child_data:1});assert.equal(item.reports.items[0].comment,'<b>reklama</b>');assert.equal(item.muted,null);
  assert.ok(r.data.total>=1);error(await get('admin-chat-reports',{status:'weird'},admin.cookie),400);
  const ctx=(await get('admin-chat-reports',{context:String(T.hidden)},admin.cookie)).data;
@@ -344,11 +365,11 @@ test('Admin: report queue with context and mutes, restore, dismiss, mute/unmute,
  error(await admin.req('admin-chat-action',{action:'mute',userId:U.m4.id,duration:'2h'}),422,'Wybierz czas wyciszenia.');
  error(await admin.req('admin-chat-action',{action:'mute',userId:'nobody',duration:'1h'}),404,'Konto nie istnieje.');
  error(await admin.req('admin-chat-action',{action:'explode'}),400,'Nieznana operacja moderacji.');
- const cur=Number(fixture('chat-channel',{slug:'general'}).rev);
+ const cur=Number(fixture('chat-channel',{slug:'taekwondo-pl'}).rev);
  assert.equal((await admin.req('admin-chat-action',{action:'channel',channelId:Number(general.id),status:'readonly'})).status,200);
  r=await get('chat-feed',{ch:`${general.id}:${cur}`},C.m2.cookie);assert.deepEqual([r.data.ch[general.id].st,r.data.ch[general.id].rev,r.data.ch[general.id].m],['closed',cur+1,[]],'pollers learn the new state');
  error(await send(C.m1,general.id,'x'),409,'Ten czat jest tylko do odczytu.');
- assert.equal((await get('public-chat-channels')).data.lobby.find(l=>l.slug==='general').st,'closed');
+ assert.equal((await get('public-chat-channels')).data.lobby.find(l=>l.slug==='taekwondo-pl').st,'closed');
  error(await admin.req('admin-chat-action',{action:'channel',channelId:Number(general.id),status:'gone'}),422,'Niepoprawny status kanału.');
  assert.equal((await admin.req('admin-chat-action',{action:'channel',channelId:Number(general.id),status:'open'})).status,200);
  const future=fixture('chat-channel',{tournamentId:T.future});
@@ -416,12 +437,12 @@ test('retention removes old messages, old copies, expired mutes, old reports and
  assert.equal(fixture('chat-mute-row',{userId:U.m5.id}),null);assert.notEqual(fixture('chat-mute-row',{userId:U.m3.id}),null,'a running mute stays');
  assert.ok(!fixture('chat-health').some(x=>x.hour_at===oldHour));
  fixture('chat-mute',{userId:U.m3.id,remove:true});
- const g0=fixture('chat-channel',{slug:'general'}),k0=fixture('chat-channel',{slug:'karate'});
+ const g0=fixture('chat-channel',{slug:'taekwondo-pl'}),k0=fixture('chat-channel',{slug:'karate'});
  const g=fixture('chat-messages',{channelId:general.id,userId:U.m5.id,n:2}),k=fixture('chat-messages',{channelId:karate.id,userId:U.m5.id,n:1});
  const h=fixture('chat-messages',{channelId:karate.id,userId:U.m5.id,n:1,state:'hidden_review',body:'ukryta'});
  const r5=fixture('chat-messages',{channelId:R.id,userId:U.m5.id,n:3});assert.equal(count(),13);
  assert.equal(fixture('chat-tombstone',{userId:U.m5.id}),7);assert.equal(fixture('chat-tombstone',{userId:U.m5.id}),0,'nothing left to change');
- const g1=fixture('chat-channel',{slug:'general'}),k1=fixture('chat-channel',{slug:'karate'});
+ const g1=fixture('chat-channel',{slug:'taekwondo-pl'}),k1=fixture('chat-channel',{slug:'karate'});
  assert.deepEqual([Number(g1.msg_count)-Number(g0.msg_count),Number(k1.msg_count)-Number(k0.msg_count)],[0,0],'visible ones counted out again (hidden ones were not counted)');
  assert.equal(count(),10,'13 − 3 with two-digit counts');
  for(const x of [...g.messages,...k.messages,...h.messages,...r5.messages]){const row=fixture('chat-message',{id:x.id});assert.deepEqual([row.state,row.body],['deleted_author','']);assert.ok(Number(row.rev)>x.rev);}

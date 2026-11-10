@@ -1,8 +1,10 @@
 /* Public (guest) read-only projection: mirror of backend/src/GuestView.php, used by the browser demo adapter.
  * Every field a guest can see is listed here; tests/php.test.mjs checks that both implementations agree.
- *  - guestUpcoming():   id, name, date, city, status of tournaments that are not drafts and are dated today or later
- *                       (Europe/Warsaw), nearest first, at most UPCOMING_LIMIT.
- *  - guestTournament(): the same five tournament fields, aggregate counts, categories (code, event, labels, size,
+ *  - guestUpcoming():   id, name, date, city, status, sport (and the sparse federation) of tournaments that are not drafts and
+ *                       are dated today or later (Europe/Warsaw), nearest first: at most UPCOMING_LIMIT of every sport, or with
+ *                       sport at most SPORT_LIMIT of that sport (of one federation with fed); counts sports {id: n} and, with
+ *                       sport, federations {id: n} (GuestView::upcoming).
+ *  - guestTournament(): the same tournament fields, aggregate counts, categories (code, event, labels, size,
  *                       state) and saved brackets in which every athlete is reduced to initials ("J. K.") and club.
  * Never: full names, birth dates, ages, weights, heights, grades of athletes, check-in, champion flags, e-mails,
  * accounts, entry/profile/club/user ids, creators, mats, activity, revisions, draft or past tournaments.
@@ -19,8 +21,9 @@
  * the PDF's bytes or the text's characters. Neither f nor the text ever leaves: the demo reads typed rules from its own data. */
 import {categories,resolveDraw} from './engine.js';
 import {inviteCheck,inviteJson} from './invite-data.js';
+import {tournamentSport,tournamentFederation} from './sports.js';
 
-export const UPCOMING_LIMIT=6;
+export const UPCOMING_LIMIT=6,SPORT_LIMIT=12;
 const STATUSES=['open','closed','finished'];
 const isObj=v=>!!v&&typeof v==='object'&&!Array.isArray(v);
 // Mirror of Materials::meta and Materials::text (the backend's materialMeta and rulesText in dist/workspace.js).
@@ -95,12 +98,15 @@ export function warsawToday(now=new Date()){
 }
 export const isPublic=(t,today)=>!!t&&STATUSES.includes(t.status)&&typeof t.date==='string'&&t.date>=today;
 const compare=(a,b)=>a<b?-1:a>b?1:0;
-const summary=(t,detail=false)=>({id:String(t.id),name:String(t.name),date:String(t.date),city:String(t.city),status:String(t.status),...(t.community?{community:true,trusted:!!t.trusted}:{}),...(detail&&String(t.status)==='open'&&t.selfEntry===true?{selfEntry:true}:{}),...publicMaterials(t.materials)});
+const summary=(t,detail=false)=>({id:String(t.id),name:String(t.name),date:String(t.date),city:String(t.city),status:String(t.status),sport:tournamentSport(t),...(tournamentFederation(t)?{federation:tournamentFederation(t)}:{}),...(t.community?{community:true,trusted:!!t.trusted}:{}),...(detail&&String(t.status)==='open'&&t.selfEntry===true?{selfEntry:true}:{}),...publicMaterials(t.materials)});
 const listed=t=>!t.community||!!t.trusted;
 
-export function guestUpcoming(tournaments,today,limit=UPCOMING_LIMIT){
+export function guestUpcoming(tournaments,today,limit=UPCOMING_LIMIT,sport=null,fed=null){
  const list=(tournaments||[]).filter(t=>isPublic(t,today)&&listed(t)).sort((a,b)=>compare(a.date,b.date)||compare(String(a.name),String(b.name))||compare(String(a.id),String(b.id)));
- return {tournaments:list.slice(0,limit).map(t=>summary(t))};
+ const sports={},feds={};
+ for(const t of list){const s=tournamentSport(t),f=tournamentFederation(t);sports[s]=(sports[s]||0)+1;if(s===sport&&f)feds[f]=(feds[f]||0)+1;}
+ const shown=sport===null?list:list.filter(t=>tournamentSport(t)===sport&&(fed===null||tournamentFederation(t)===fed));
+ return {tournaments:shown.slice(0,limit).map(t=>summary(t)),sports,...(sport===null?{}:{federations:feds})};
 }
 
 /** "Jan Kowalski" → "J. K."; first given name + last surname; a hyphenated surname keeps both parts ("K.-N."). */

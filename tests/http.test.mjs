@@ -3,6 +3,7 @@
 import test,{before} from 'node:test';
 import assert from 'node:assert/strict';
 import {Client,base,fixture} from './helpers/http-client.mjs';
+import {SPORT_IDS,federationsOf} from '../dist/sports.js';
 before(()=>fixture('reset-limits'));
 test('real PHP/MySQL: sessions, role isolation, multiple tournaments, atomicity and concurrency',{skip:!base},async()=>{
  const admin=new Client(),rep=new Client(),editor=new Client(),other=new Client();
@@ -52,6 +53,9 @@ test('real PHP/MySQL: public guest routes are GET-only, cookie-free, read-only a
  const athlete={clubId:admin.data.user.clubId,birthDate:'1998-05-05',sex:'F',weight:60,height:168,gradeType:'dan',grade:1,events:['forms'],champion:false};
  for(const name of ['Zofia Żak-Nowicka','Łucja Ostrowska','Anna Maria Kowalczyk'])await admin.cmd('profile.save',{...athlete,name,registration:{...athlete,tournamentId:open}});
  await admin.cmd('draw.create',{tournamentId:open,categoryId:'forms|senior|F|dan|1 Dan'});
+ // Karate, weeks ahead (the lists without a sport, the 6 nearest, that other files check keep their own tournaments).
+ const karate=await make('Publiczne karate',day(40),'open'),wkf=await admin.cmd('tournament.save',{name:'Publiczne karate WKF',city:'Gdańsk',date:day(41),mat:'Mata 3',status:'open',sport:'karate',federation:'wkf'});
+ await admin.cmd('tournament.save',{id:karate,name:'Publiczne karate',city:'Gdańsk',date:day(40),mat:'Mata 3',status:'open',sport:'karate',federation:null});
  const revision=admin.data.revision;
  const pub=async(query,init={})=>{const r=await fetch(base+'?'+query,init);return {status:r.status,data:await r.json(),headers:r.headers};};
  const list=await pub('route=public');
@@ -59,11 +63,14 @@ test('real PHP/MySQL: public guest routes are GET-only, cookie-free, read-only a
  const ids=list.data.tournaments.map(t=>t.id),dates=list.data.tournaments.map(t=>t.date);
  assert.ok(ids.includes(open)&&ids.indexOf(open)<ids.indexOf(closed),JSON.stringify(ids));assert.ok(!ids.includes(draft)&&!ids.includes(past));
  assert.ok(ids.length<=6);assert.deepEqual([...dates].sort(),dates);assert.ok(dates.every(d=>d>=day(0)));
- // Five fields, plus the sparse poster {v,w,h,color} and rules {v,size,type} of a tournament with materials (PLAN-MATERIALY §2.1).
- for(const {poster,rules,...t} of list.data.tournaments){assert.deepEqual(Object.keys(t).sort(),['city','date','id','name','status']);if(poster)assert.deepEqual(Object.keys(poster),['v','w','h','color']);if(rules)assert.deepEqual(Object.keys(rules),['v','size','type']);}
+ // Six fields (the martial art since migration 0010), plus the sparse federation, poster {v,w,h,color} and rules {v,size,type}
+ // of a tournament with materials (PLAN-MATERIALY §2.1), and the community flags of an organizer's tournament.
+ for(const {poster,rules,federation,community,trusted,...t} of list.data.tournaments){assert.deepEqual(Object.keys(t).sort(),['city','date','id','name','sport','status']);assert.ok(SPORT_IDS.includes(t.sport),t.sport);if(federation!==undefined)assert.ok(federationsOf(t.sport).some(f=>f[0]===federation),federation);if(community!==undefined)assert.deepEqual([community,typeof trusted],[true,'boolean']);if(poster)assert.deepEqual(Object.keys(poster),['v','w','h','color']);if(rules)assert.deepEqual(Object.keys(rules),['v','size','type']);}
+ assert.equal(list.data.tournaments.find(t=>t.id===open).sport,'taekwondo','a tournament saved without a sport is taekwondo');
+ assert.ok(list.data.sports.taekwondo>=1,JSON.stringify(list.data.sports));assert.equal(list.data.federations,undefined,'federations only with a sport');
  const view=await pub('route=public-tournament&id='+open);
  assert.equal(view.status,200,JSON.stringify(view.data));assert.equal(view.headers.get('set-cookie'),null);
- assert.deepEqual(view.data.tournament,{id:open,name:'Publiczny otwarty',date:day(1),city:'Gdańsk',status:'open'});
+ assert.deepEqual(view.data.tournament,{id:open,name:'Publiczny otwarty',date:day(1),city:'Gdańsk',status:'open',sport:'taekwondo'});
  assert.deepEqual(view.data.summary,{entries:3,clubs:1,categories:1,brackets:1});
  const [category]=view.data.categories;assert.equal(category.code,'UF-01');assert.equal(category.state,'drawn');assert.equal(category.athletes,3);
  const slots=category.bracket.slots.filter(Boolean);
@@ -71,6 +78,15 @@ test('real PHP/MySQL: public guest routes are GET-only, cookie-free, read-only a
  const json=JSON.stringify(view.data)+JSON.stringify(list.data);
  for(const word of ['Zofia','Nowicka','Łucja','Ostrowska','Anna','Kowalczyk','1998','birthDate','weight','height','presence','champion','email','passwordHash','clubId','createdBy','Mata 3','activity','revision'])assert.ok(!json.includes(word),word);
  for(const id of [draft,past,'missing','../x']){const r=await pub('route=public-tournament&id='+encodeURIComponent(id));assert.equal(r.status,404);assert.equal(r.data.error,'Turniej nie jest dostępny.');assert.equal(r.headers.get('set-cookie'),null);}
+ // The home page per martial art: sport (and one federation of it) filters, the counts stay; anything else is a 400.
+ const bySport=await pub('route=public&sport=karate');assert.equal(bySport.status,200,JSON.stringify(bySport.data));
+ assert.ok(bySport.data.tournaments.every(t=>t.sport==='karate'),'only karate');assert.ok(!bySport.data.tournaments.some(t=>t.id===open));
+ const kar=bySport.data.tournaments.filter(t=>[karate,wkf.id].includes(t.id));assert.deepEqual(kar.map(t=>[t.id,t.federation]),[[karate,undefined],[wkf.id,'wkf']]);
+ assert.ok(bySport.data.sports.karate>=2&&bySport.data.sports.taekwondo>=1);assert.ok(bySport.data.federations.wkf>=1,JSON.stringify(bySport.data.federations));
+ const byFed=await pub('route=public&sport=karate&fed=wkf');assert.equal(byFed.status,200);
+ assert.ok(byFed.data.tournaments.some(t=>t.id===wkf.id)&&byFed.data.tournaments.every(t=>t.federation==='wkf'),'only WKF');
+ assert.ok(byFed.data.sports.karate>=2,'the counts of every sport stay with a federation');
+ for(const q of ['sport=curling','sport=karate&fed=itf','fed=wkf','sport[]=karate','sport=karate&fed[]=wkf','sport=']){const r=await pub('route=public&'+q);assert.equal(r.status,400,q);assert.equal(r.data.error,'Niepoprawne zapytanie.',q);assert.equal(r.headers.get('set-cookie'),null);}
  const post=await pub('route=public',{method:'POST',headers:{'Content-Type':'application/json'},body:'{}'});assert.equal(post.status,405);assert.equal(post.headers.get('allow'),'GET');
  await admin.load();assert.equal(admin.data.revision,revision,'public routes never write');
 });

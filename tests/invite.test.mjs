@@ -114,7 +114,8 @@ test('static demo: create an invitation in the dialog, pick a style, unsaved cha
    const phone=!!options.isMobile,ctx=await browser.newContext({...options,locale:'pl-PL',serviceWorkers:'block'});
    await ctx.addInitScript(()=>{try{localStorage.setItem('matdraw.language','pl');}catch{}});
    const page=await ctx.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));page.on('console',m=>{if(m.type()==='error')errors.push(m.text());});page.on('dialog',d=>{errors.push('dialog '+d.message());d.dismiss();});
-   await page.goto(url);await page.click('[data-action="demo-login"][data-role="admin"]');await page.waitForSelector('.app-shell');
+   // Signing in keeps the home page (owner 2026-11-10): the account card's "Turnieje" opens the tournaments.
+   await page.goto(url);await page.click('[data-action="demo-login"][data-role="admin"]');await page.click('#home-account [data-page="tournaments"]');await page.waitForSelector('.app-shell');
    await page.click('main .tournament-card-actions [data-action="edit-tournament"][data-id="t-winter-2027"]');await page.waitForSelector('#tournament-form .mat-invite');
    assert.match(await page.textContent('.mat-invite'),/Utwórz zaproszenie/);
    await page.click('.mat-invite [data-action="invite-edit"]');await page.waitForSelector('.inv-editor[role="dialog"]');

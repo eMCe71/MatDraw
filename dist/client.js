@@ -1,6 +1,6 @@
 import {CONFIG} from './runtime-config.js';
 import {initialWorkspace,execute,publicWorkspace,organizer,trustedOrganizer,DomainError,UNAFFILIATED} from './workspace.js';
-import {guestUpcoming,guestTournament,warsawToday} from './guest-view.js';
+import {guestUpcoming,guestTournament,warsawToday,UPCOMING_LIMIT,SPORT_LIMIT} from './guest-view.js';
 import {athleteView,publicClubs} from './athlete-view.js';
 import {emit} from './registry.js';
 const KEY='matdraw.workspace.v2',SESSION='matdraw.session.v2';
@@ -233,9 +233,10 @@ export function demoInvite(id){
  const i=demoTournaments().find(t=>t?.id===id)?.materials?.invite;
  return i&&typeof i.s==='string'&&i.d&&typeof i.d==='object'?{style:i.s,fields:{...i.d}}:null;
 }
-export async function upcoming(){
- if(!isDemo)return publicApi({route:'public'});
- return JSON.parse(JSON.stringify(guestUpcoming(demoTournaments(),warsawToday())));
+/** The public list of the home page: the nearest of every sport, or with sport (and fed) of one martial art (GuestView::upcoming). */
+export async function upcoming({sport=null,fed=null}={}){
+ if(!isDemo)return publicApi({route:'public',...(sport?{sport}:{}),...(sport&&fed?{fed}:{})});
+ return JSON.parse(JSON.stringify(guestUpcoming(demoTournaments(),warsawToday(),sport?SPORT_LIMIT:UPCOMING_LIMIT,sport||null,sport&&fed||null)));
 }
 export async function publicTournament(id){
  if(!isDemo)return publicApi({route:'public-tournament',id});

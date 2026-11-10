@@ -416,7 +416,11 @@ final class Domain {
    if($old&&($old['hiddenBy']??null)!==null&&$status!=='draft')throw new AppError('Turniej ukrył Administrator. Status może zmienić tylko Administrator.',409);
    if(self::organizer($u))self::organizerLimits($db,$u,$old,$status,$date);
    $selfEntry=array_key_exists('selfEntry',$p)?$p['selfEntry']===true:($old?($old['selfEntry']??false)===true:self::organizer($u));
-   $t=array_replace($old??['id'=>self::id(),'createdBy'=>$u['id'],'createdAt'=>$now,'entries'=>[],'draws'=>[],'activity'=>[]],['name'=>$name,'city'=>$city,'date'=>$date,'mat'=>$mat,'status'=>$status,'selfEntry'=>$selfEntry]);self::audit($t,$old?'Zaktualizowano ustawienia turnieju.':'Utworzono turniej.');
+   // Martial art and federation (Sports, migration 0010): kept when the payload leaves them out; a new sport drops the old federation.
+   $sport=array_key_exists('sport',$p)?$p['sport']:($old?Sports::of($old):Sports::DEFAULT);if(!Sports::valid($sport))throw new AppError('Wybierz sztukę walki z listy.');
+   $fed=array_key_exists('federation',$p)?$p['federation']:($old&&Sports::of($old)===$sport?Sports::federationOf($old):null);
+   if($fed==='')$fed=null;if($fed!==null&&!Sports::federationValid($sport,$fed))throw new AppError('Wybierz federację z listy.');
+   $t=array_replace($old??['id'=>self::id(),'createdBy'=>$u['id'],'createdAt'=>$now,'entries'=>[],'draws'=>[],'activity'=>[]],['name'=>$name,'city'=>$city,'date'=>$date,'mat'=>$mat,'status'=>$status,'sport'=>$sport,'federation'=>$fed,'selfEntry'=>$selfEntry]);self::audit($t,$old?'Zaktualizowano ustawienia turnieju.':'Utworzono turniej.');
    if($old){$target=&self::entity($db['tournaments'],$old['id'],'Turniej');$target=$t;}else $db['tournaments'][]=$t;return ['id'=>$t['id']];
   }
   // Materials (PLAN-MATERIALY §2.4): set by the materials routes only (the command route refuses the type), value = Materials::meta or null.

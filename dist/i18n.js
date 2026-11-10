@@ -87,7 +87,8 @@ export const PL_FORMS={
  '{n} nieprzeczytanych':{one:'{n} nieprzeczytana',few:'{n} nieprzeczytane',many:'{n} nieprzeczytanych'},
  'Archiwum · {n} zakończone':{one:'Archiwum · {n} zakończony',few:'Archiwum · {n} zakończone',many:'Archiwum · {n} zakończonych'},
  'Zostało {n} znaków':{one:'Został {n} znak',few:'Zostały {n} znaki',many:'Zostało {n} znaków'},
- 'Tekst, {n} znaków. Otwiera się w czytelnym oknie.':{one:'Tekst, {n} znak. Otwiera się w czytelnym oknie.',few:'Tekst, {n} znaki. Otwiera się w czytelnym oknie.',many:'Tekst, {n} znaków. Otwiera się w czytelnym oknie.'}
+ 'Tekst, {n} znaków. Otwiera się w czytelnym oknie.':{one:'Tekst, {n} znak. Otwiera się w czytelnym oknie.',few:'Tekst, {n} znaki. Otwiera się w czytelnym oknie.',many:'Tekst, {n} znaków. Otwiera się w czytelnym oknie.'},
+ '{n} turniejów':{one:'{n} turniej',few:'{n} turnieje',many:'{n} turniejów'}
 };
 /** t('Polish text {n}',{n}) – Polish keys with a count use PL_FORMS; English entries may be a string, {one,other} (chosen by
  * params.n) or a function. */

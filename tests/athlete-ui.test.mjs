@@ -372,10 +372,9 @@ test('demo in a browser (PL 1440, EN 390): #starts, the entry window by keyboard
    const ctx=await browser.newContext({viewport:{width:w,height:hh},locale:lang==='pl'?'pl-PL':'en-GB',serviceWorkers:'block'});
    await ctx.addInitScript(()=>{window.__csp=[];document.addEventListener('securitypolicyviolation',e=>window.__csp.push(e.violatedDirective));});
    const page=await ctx.newPage();page.on('pageerror',e=>problems.push(w+': '+e.message));page.on('console',m=>{if(m.type()==='error')problems.push(w+': '+m.text());});
-   await page.goto(url);await page.click('[data-action="demo-login"][data-role="athlete"]');await page.waitForSelector('.app-shell');
-   // Phones: the member lands in the full-screen chat, whose own button opens the menu.
-   if(w<800)await page.click('.chat-back[data-action="menu"]');
-   await page.locator('[data-page="starts"]').filter({visible:true}).first().click();await page.waitForSelector('.ath-profile');
+   // Signing in keeps the home page (owner 2026-11-10); its account card links "Moje starty" (once me arrives), also on a phone.
+   await page.goto(url);await page.click('[data-action="demo-login"][data-role="athlete"]');await page.waitForSelector('#home-account');
+   await page.click('#home-account [data-page="starts"]');await page.waitForSelector('.ath-profile');
    assert.equal(await page.locator('h1').innerText(),lang==='pl'?'Moje starty':'My competitions');
    assert.equal(await page.locator('.ath-profile h2').innerText(),'Zuzanna Demo');
    assert.deepEqual(await unnamed(page,'#main'),[],'every control of #starts has a name');
@@ -448,7 +447,7 @@ test('demo in a browser (PL 1440, EN 390): #starts, the entry window by keyboard
   // A member without an athlete profile (the demo organizer): "add athlete data" only where self-entries are on.
   const ctx=await browser.newContext({viewport:{width:1440,height:900},locale:'pl-PL',serviceWorkers:'block'}),page=await ctx.newPage();
   page.on('pageerror',e=>problems.push('organizer: '+e.message));page.on('console',m=>{if(m.type()==='error')problems.push('organizer: '+m.text());});
-  await page.goto(url);await page.click('[data-action="demo-login"][data-role="organizer"]');await page.waitForSelector('.app-shell');
+  await page.goto(url);await page.click('[data-action="demo-login"][data-role="organizer"]');await page.waitForSelector('#home-account');
   await page.goto(url+'#guest?t=t-winter-2027');await page.waitForSelector('.ath-cta');
   assert.match(await page.locator('.ath-cta').innerText(),/Dodaj dane zawodnika, aby się zgłosić/);
   await page.goto(url+'#guest?t=t-autumn-2026');await page.waitForSelector('.guest-stats [data-athlete-cta], [data-athlete-cta]',{state:'attached'});await page.waitForTimeout(500);

@@ -15,6 +15,17 @@
  /* Layers (plan §8.7): below modals (100) and the toast (200). */
  --z-pwa-bar:90;--z-pwa-sheet:95;
 }
+/* Martial arts (sports.js, owner 2026-11-10): the colour of each, set by [data-sport] on the home page, its tiles and tabs, the full
+   chat and the sport labels. --sport: fills under white text and accents on white (contrast with white at least 4.5:1); --sport-tint:
+   accents and text on the navy home columns. Unknown sports (a profile's wrestling, 'other') keep the brand blue. */
+:root,[data-sport]{--sport:#0072bc;--sport-tint:#4ac1ed}
+[data-sport="karate"]{--sport:#7b3fa0;--sport-tint:#d19cf2}
+[data-sport="boxing"]{--sport:#c0392b;--sport-tint:#ff8f80}
+[data-sport="judo"]{--sport:#0f7a6c;--sport-tint:#4fd1bd}
+[data-sport="kickboxing"]{--sport:#c2560c;--sport-tint:#ffab6b}
+[data-sport="bjj"]{--sport:#4054b2;--sport-tint:#9fb0ff}
+[data-sport="muaythai"]{--sport:#b8235a;--sport-tint:#ff8ab8}
+[data-sport="mma"]{--sport:#8a6400;--sport-tint:#f2c94c}
 /* Menu badge of a registered page (registry.setBadge, plan §8.3 point 4): the shell renders it hidden until a module sets a count. */
 .nav-badge{margin-left:auto;min-width:20px;padding:1px 6px;border-radius:10px;background:var(--mb-cyan,#00aeef);color:#fff;font-size:11px;font-weight:800;line-height:16px;text-align:center}
 .nav-badge[hidden]{display:none}

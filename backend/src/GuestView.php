@@ -5,9 +5,11 @@ namespace MatDraw;
 /**
  * Public (unauthenticated) read-only projection for the login screen and the guest preview.
  * Every field a guest can receive is listed here; nothing is copied wholesale from stored records.
- *  - upcoming():   id, name, date, city, status of tournaments that are not drafts and are dated today or later
- *                  (Europe/Warsaw), nearest first, at most LIMIT.
- *  - tournament(): the same five tournament fields, aggregate counts, categories (code, event, labels, size, state)
+ *  - upcoming():   id, name, date, city, status, sport (and the sparse federation) of tournaments that are not drafts and are
+ *                  dated today or later (Europe/Warsaw), nearest first: at most LIMIT of every sport, or with $sport (home page per
+ *                  martial art, Sports) at most SPORT_LIMIT of that sport, of one federation with $fed. sports {id: n} counts every
+ *                  listed tournament per sport (the sport switcher), federations {id: n} those of $sport (its federation filter).
+ *  - tournament(): the same tournament fields, aggregate counts, categories (code, event, labels, size, state)
  *                  and saved brackets in which every athlete is reduced to initials ("J. K.") and club name.
  * Never sent: full names, birth dates, ages, weights, heights, grades of athletes, check-in/presence, champion flags,
  * e-mails, accounts, entry/profile/club/user ids, creators, mats, activity, revisions, draft or past tournaments.
@@ -25,18 +27,21 @@ namespace MatDraw;
  * dist/guest-view.js mirrors this class for the browser demo; tests/php.test.mjs checks that both agree.
  */
 final class GuestView {
- public const LIMIT=6;
+ public const LIMIT=6,SPORT_LIMIT=12;
  private const STATUSES=['open','closed','finished'];
  private const PREFIX=['forms'=>'UF','soft'=>'SO','hogo'=>'HG','semi'=>'SC','light'=>'LC','special'=>'TS','power'=>'SI'];
 
  public static function visible(array $t,string $today):bool{return in_array($t['status']??null,self::STATUSES,true)&&is_string($t['date']??null)&&$t['date']>=$today;}
- private static function summary(array $t,bool $detail=false):array{$s=['id'=>(string)$t['id'],'name'=>(string)$t['name'],'date'=>(string)$t['date'],'city'=>(string)$t['city'],'status'=>(string)$t['status']];if(!empty($t['community'])){$s['community']=true;$s['trusted']=!empty($t['trusted']);}if($detail&&$s['status']==='open'&&($t['selfEntry']??false)===true)$s['selfEntry']=true;return $s+Materials::view($t['materials']??null);}
+ private static function summary(array $t,bool $detail=false):array{$s=['id'=>(string)$t['id'],'name'=>(string)$t['name'],'date'=>(string)$t['date'],'city'=>(string)$t['city'],'status'=>(string)$t['status'],'sport'=>Sports::of($t)];if(($fed=Sports::federationOf($t))!==null)$s['federation']=$fed;if(!empty($t['community'])){$s['community']=true;$s['trusted']=!empty($t['trusted']);}if($detail&&$s['status']==='open'&&($t['selfEntry']??false)===true)$s['selfEntry']=true;return $s+Materials::view($t['materials']??null);}
  private static function listed(array $t):bool{return empty($t['community'])||!empty($t['trusted']);}
 
- public static function upcoming(array $tournaments,string $today,int $limit=self::LIMIT):array{
+ public static function upcoming(array $tournaments,string $today,int $limit=self::LIMIT,?string $sport=null,?string $fed=null):array{
   $list=array_values(array_filter($tournaments,fn($t)=>is_array($t)&&self::visible($t,$today)&&self::listed($t)));
   usort($list,fn($a,$b)=>strcmp($a['date'],$b['date'])?:strcmp((string)$a['name'],(string)$b['name'])?:strcmp((string)$a['id'],(string)$b['id']));
-  return ['tournaments'=>array_map([self::class,'summary'],array_slice($list,0,$limit))];
+  $sports=[];$feds=[];
+  foreach($list as $t){$s=Sports::of($t);$sports[$s]=($sports[$s]??0)+1;if($s===$sport&&($f=Sports::federationOf($t))!==null)$feds[$f]=($feds[$f]??0)+1;}
+  if($sport!==null)$list=array_values(array_filter($list,fn($t)=>Sports::of($t)===$sport&&($fed===null||Sports::federationOf($t)===$fed)));
+  return ['tournaments'=>array_map([self::class,'summary'],array_slice($list,0,$limit)),'sports'=>(object)$sports]+($sport===null?[]:['federations'=>(object)$feds]);
  }
 
  /** "Jan Kowalski" → "J. K."; first given name + last surname; a hyphenated surname keeps both parts ("K.-N."). */

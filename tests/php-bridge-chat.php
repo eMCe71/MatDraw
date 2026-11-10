@@ -2,13 +2,13 @@
 // Bridge for tests/chat.test.mjs (plan §11): chat functions called with JSON on STDIN, no database.
 declare(strict_types=1);
 require dirname(__DIR__).'/backend/bootstrap.php';
-use MatDraw\{Chat,ChatGuestView,ChatModeration,ChatSettings};
+use MatDraw\{Chat,ChatGuestView,ChatModeration,ChatSettings,Sports};
 date_default_timezone_set('Europe/Warsaw');
 /** ['ok'=>value] or ['error'=>message,'status'=>http status]. */
 function attempt(callable $fn):array{try{return ['ok'=>$fn()];}catch(MatDraw\AppError $e){return ['error'=>$e->getMessage(),'status'=>$e->status]+($e instanceof MatDraw\ApiError?['data'=>$e->data]:[]);}}
 $in=json_decode(stream_get_contents(STDIN),true,512,JSON_THROW_ON_ERROR);
 $out=match($in['job']){
- 'constants'=>['lobby'=>Chat::LOBBY,'defaults'=>ChatSettings::DEFAULTS,'client'=>ChatSettings::CLIENT,'presets'=>ChatSettings::PRESETS,'fields'=>ChatGuestView::FIELDS,'tombstone'=>ChatGuestView::TOMBSTONE],
+ 'constants'=>['lobby'=>Sports::LOBBY,'retired'=>Sports::RETIRED,'defaults'=>ChatSettings::DEFAULTS,'client'=>ChatSettings::CLIENT,'presets'=>ChatSettings::PRESETS,'fields'=>ChatGuestView::FIELDS,'tombstone'=>ChatGuestView::TOMBSTONE],
  'guest'=>array_map(fn($c)=>ChatGuestView::message($c['row'],$c['channel'],$c['key']),$in['cases']),
  'variant'=>array_map(fn($c)=>ChatGuestView::variant($c['key'],$c['ms'],$c['channel'],$c['user']),$in['cases']),
  'member'=>array_map(fn($c)=>Chat::memberMessage($c['row'],$c['pid'],$c['organizer']),$in['cases']),

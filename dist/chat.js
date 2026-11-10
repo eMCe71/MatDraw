@@ -12,11 +12,12 @@ import {t as T,locale,getLanguage,translateMessage} from './i18n.js';
 import {getMe,onMe,loadMe,personKey} from './me.js';
 import {createTransport,normalizeCfg,clientId} from './chat-transport.js';
 import {SPORTS} from './profile-data.js';
+import {SPORTS as ARTS,SPORT_IDS,DEFAULT_SPORT,sportOf,federationOf,hasFederations,lobbyOf,generalSlug,fromProfile,profileSports} from './sports.js';
 const Demo=Client.isDemo?await import('./chat-demo.js'):null;
 
 export const MAX_DOM=300,GROUP_MS=300000,PREVIEW=3,SR_MS=15000,READ_MS=1000,FLOOR_PREVIEW=10000;
-const DRAFT='matdraw.chat.draft.',SEEN='matdraw.chat.seen',LAST='matdraw.chat.channel',STRIP='matdraw.chat.strip';
-const SLUGS=['taekwondo-pl','taekwondo','karate','general'];
+// matdraw.sport: the martial art of the home page (app.js), shared with the full chat's sport picker.
+const DRAFT='matdraw.chat.draft.',SEEN='matdraw.chat.seen',LAST='matdraw.chat.channel',STRIP='matdraw.chat.strip',SPORT='matdraw.sport';
 
 // ——— Pure helpers (tests/chat-client.test.mjs) ———
 
@@ -77,13 +78,17 @@ export function layout(msgs,{divider=null,now=Date.now(),own=null}={}){
  }
  return items;
 }
-/** Default channel (plan §5.1): last used, else a member's sport and country, else the interface language. */
-export function defaultSlug({stored,me,lang}){
- if(SLUGS.includes(stored))return stored;
- const p=me?.profile;
- if(p){const sport=p.sports?.[0];return sport==='taekwondo'?(p.country==='PL'?'taekwondo-pl':'taekwondo'):sport==='karate'?'karate':'general';}
- return lang==='pl'?'taekwondo-pl':'taekwondo';
+/**
+ * Default channel (plan §5.1; per martial art since 2026-11-10, no PL/world split): the last one used when it belongs to the sport
+ * asked for (any sport when none is asked), else the general channel of that sport, of a member's profile sport or of taekwondo.
+ */
+export function defaultSlug({stored,me,sport}){
+ const last=lobbyOf(stored);
+ if(last&&(!sport||last.sport===sport))return stored;
+ return generalSlug(SPORT_IDS.includes(sport)?sport:fromProfile(me?.profile?.sports)||DEFAULT_SPORT);
 }
+/** The martial art shown on the home page of this device (null before the first choice). */
+export const storedSport=()=>{let s=null;try{s=localStorage.getItem(SPORT);}catch{}return SPORT_IDS.includes(s)?s:null;};
 /**
  * What closes or opens the composer: composer | readonly | off | wait | login | paid | free (guests, matrix §6.10 from public-config)
  * | activate (no full access) | profile | password | muted (me.access.block, in the order of the chat-send checks).
@@ -120,7 +125,7 @@ export function avatarQueue(max=2,{setTimeout:later=(f,ms)=>setTimeout(f,ms)}={}
 
 const S={mode:null,transport:null,channels:new Map(),lobby:[],tours:[],archive:[],byTid:new Map(),people:new Map(),status:'connecting',cfg:normalizeCfg(null),
  pending:new Map(),listsAt:0,listsP:null,listsError:null,unavailable:false,config:null,configP:null,views:new Set(),outdated:false,reported:new Set(),revealed:new Set(),
- scroll:new Map(),homeSlug:null,pageKey:null,lastSend:0,limitUntil:0,queued:null,flush:null};
+ scroll:new Map(),homeSlugs:{},pageKey:null,lastSend:0,limitUntil:0,queued:null,flush:null};
 const avatars=avatarQueue(2);
 let ready=false,vid=0,minuteTimer=null;
 const doc=()=>globalThis.document;
@@ -146,15 +151,28 @@ const draftKey=key=>DRAFT+key;
 function chan(key,props){let c=S.channels.get(key);if(!c){c={key,id:/^\d+$/.test(key)?key:null,msgs:new Map(),cursor:0,loaded:false,older:false,st:'open',known:0,n:0,count:0,counted:0,countedRead:0};S.channels.set(key,c);}Object.assign(c,props);return c;}
 const sorted=c=>[...c.msgs.values()].sort((a,b)=>a.id-b.id);
 const lastId=c=>{let m=c.known||0;for(const id of c.msgs.keys())if(id>m)m=id;return m;};
-const chName=c=>!c?'':c.kind==='lobby'?(c.slug==='general'?T('Ogólny'):c.slug==='karate'?'Karate':'Taekwondo'):c.title||T('Czat turnieju');
-const chScope=c=>c?.kind==='lobby'?(c.scope==='pl'?T('Polska'):T('Świat')):'';
-const chFull=c=>c?.kind==='lobby'?chName(c)+' · '+chScope(c):chName(c);
-const ABOUT={pl:()=>T('Rozmowy po polsku'),world:()=>T('Dowolny język — najlepiej angielski'),general:()=>T('Wszystko o sztukach walki i MatBravo')};
-const chAbout=c=>!c?'':c.kind==='lobby'?(c.slug==='general'?ABOUT.general():c.scope==='pl'?ABOUT.pl():ABOUT.world()):[c.date?fmtDate(c.date):'',c.city||''].filter(Boolean).join(' · ');
+// Channels per martial art (sports.js): a sport's general channel and one per federation (sports with two or more), no PL/world split.
+const artName=id=>{const s=sportOf(id);return s?T(s.label):'';};
+/** Short name: "General" or the federation's abbreviation (lobby), the tournament's title. */
+const chName=c=>!c?'':c.kind==='lobby'?(c.fed?federationOf(c.sport,c.fed)?.[1]||c.fed:T('Ogólny')):c.title||T('Czat turnieju');
+/** Full name: "Karate · WKF", "Judo · General"; a tournament's title. */
+const chFull=c=>c?.kind==='lobby'?artName(c.sport)+' · '+chName(c):chName(c);
+const chAbout=c=>!c?'':c.kind==='lobby'?(c.fed?federationOf(c.sport,c.fed)?.[2]||'':T('Wszystkie federacje i kluby')):[c.date?fmtDate(c.date):'',c.city||''].filter(Boolean).join(' · ');
 const fmtDate=d=>{const x=new Date(d+'T12:00:00');return Number.isNaN(x.getTime())?d:x.toLocaleDateString(locale(),{day:'numeric',month:'long',year:'numeric'});};
 const slugKey=slug=>S.lobby.find(k=>S.channels.get(k)?.slug===slug)||null;
 const keyOfTid=tid=>S.byTid.get(tid)||null;
-const routeOf=c=>c?.kind==='tournament'?{t:c.tid}:{c:c?.slug||'general'};
+/** The key a virtual channel (no row yet: 'l:<slug>' for guests, 't:<tournamentId>') has in the latest lists. */
+const realKey=c=>c?.kind==='lobby'?slugKey(c.slug):keyOfTid(c?.tid);
+const routeOf=c=>c?.kind==='tournament'?{t:c.tid}:{c:c?.slug||generalSlug(DEFAULT_SPORT)};
+/** Martial arts whose general channels count for a member's badge: the profile's, the home page's of this device, else taekwondo. */
+function mySports(){const set=new Set(profileSports(getMe()?.profile?.sports));const st=storedSport();if(st)set.add(st);if(!set.size)set.add(DEFAULT_SPORT);return set;}
+/** The martial art a view shows: its channel's, the one picked in it, the home page's, the profile's, else taekwondo. */
+const viewSport=v=>S.channels.get(v?.key)?.sport||v?.sport||storedSport()||fromProfile(getMe()?.profile?.sports)||DEFAULT_SPORT;
+/** The channel of a sport for the home card and the sport picker: the one used last in this sport, else the default rules. */
+function sportKey(sport){
+ const remembered=S.homeSlugs[sport];
+ return (remembered&&slugKey(remembered))||slugKey(defaultSlug({stored:local.get(LAST),me:getMe(),sport}))||S.lobby.find(k=>S.channels.get(k)?.sport===sport)||null;
+}
 
 // ——— Transport ———
 
@@ -172,7 +190,8 @@ function transport(){
  if(S.outdated)return null;
  const opts={mode:()=>S.mode,wants,isOwn:m=>!!m.a&&m.a===myPid(),onData:apply,onStatus:st=>{S.status=st;paintAll(false);},onUnauth:unauthorized,
   onOutdated:()=>{S.outdated=true;S.status='error';paintAll(false);}};
- S.transport=Demo?Demo.createDemoTransport({...opts,me:()=>getMe(),tournaments:()=>Client.upcoming().then(r=>r?.tournaments||[])}):createTransport(opts);
+ // The demo's tournament channels: the upcoming tournaments of every martial art (the list without a sport has only the nearest six).
+ S.transport=Demo?Demo.createDemoTransport({...opts,me:()=>getMe(),tournaments:()=>Promise.all(SPORT_IDS.map(sport=>Client.upcoming({sport}).then(r=>r?.tournaments||[],()=>[]))).then(l=>l.flat())}):createTransport(opts);
  S.status=S.transport.status;
  return S.transport;
 }
@@ -188,11 +207,14 @@ function wants(){
   if(v.kind!=='strip'&&v.visible&&!v.hiddenTab){onScreen=true;const f=v.compact?FLOOR_PREVIEW:0;floor=floor===null?f:Math.min(floor,f);}
  }
  if(views.length||signedIn()){
-  const read=readMap(),heads=[...S.lobby,...(signedIn()?S.tours:[])].map(k=>S.channels.get(k)).filter(c=>c?.id&&!c.gone);
+  // Heads: the general and federation channels of the sports on screen, then (members) of their own sports and the tournaments;
+  // other sports' channels are not counted (their unread state shows once their sport is picked).
+  const member=signedIn(),shown=new Set(views.filter(v=>v.kind==='home'||v.kind==='page').map(viewSport)),mine=member?mySports():new Set();
+  const rank=c=>c.kind!=='lobby'?2:shown.has(c.sport)?0:mine.has(c.sport)?1:3;
+  const read=readMap(),heads=[...S.lobby,...(member?S.tours:[])].map(k=>S.channels.get(k)).filter(c=>c?.id&&!c.gone&&rank(c)<3).sort((a,b)=>rank(a)-rank(b));
   // Members: knownLast is the last id the counter c.n was computed for (counted), not the channel's last id from the lists: a channel
   // that got messages while the person was away is counted on the first poll, and counted again after the read cursor moved (another
   // tab). Guests never see c.n (their dot is c.known > read), so they send the known last id and the server counts only on a change.
-  const member=signedIn();
   for(const c of heads.slice(0,30))if(!(c.id in ch)){const r=read[c.id]||0;h[c.id]=[r,member?(c.countedRead===r?c.counted||0:0):c.known||0];}
  }
  return {ch,h,init,onScreen,floor:floor||0};
@@ -264,17 +286,22 @@ function ensureLists(force=false){
 function applyLists(r){
  if(r?.cfg)S.cfg=normalizeCfg(r.cfg);
  S.lobby=[];S.tours=[];S.archive=[];S.byTid.clear();
- for(const x of r?.lobby||[]){if(!SLUGS.includes(x.slug))continue;const c=chan(String(x.id),{kind:'lobby',slug:x.slug,scope:x.scope,st:x.st||'open',count:x.count||0});c.known=Math.max(c.known||0,x.last||0);S.lobby.push(c.key);}
+ // The lobby of the catalogue; a channel without a row yet (guests: {id: null}) is an empty virtual one, 'l:<slug>'.
+ for(const x of r?.lobby||[]){
+  const cat=lobbyOf(x?.slug);if(!cat)continue;const key=x.id!=null?String(x.id):'l:'+x.slug;
+  const c=chan(key,{kind:'lobby',slug:x.slug,sport:cat.sport,fed:cat.fed,st:x.st||'open',count:x.count||0});
+  c.known=Math.max(c.known||0,x.last||0);if(x.id==null){c.loaded=true;c.virtual=true;}S.lobby.push(c.key);
+ }
  const day=today();
  for(const x of r?.tournaments||[]){
   if(!x?.tournamentId)continue;const key=x.id!=null?String(x.id):'t:'+x.tournamentId;
-  const c=chan(key,{kind:'tournament',tid:x.tournamentId,title:x.title,date:x.date,city:x.city,st:x.st||'open',count:x.count||0});
+  const c=chan(key,{kind:'tournament',tid:x.tournamentId,title:x.title,date:x.date,city:x.city,sport:SPORT_IDS.includes(x.sport)?x.sport:DEFAULT_SPORT,fed:x.fed||null,st:x.st||'open',count:x.count||0});
   c.known=Math.max(c.known||0,x.last||0);if(x.id==null){c.loaded=true;c.virtual=true;}
   S.byTid.set(x.tournamentId,key);(x.st==='archive'||(x.date&&x.date<day&&x.st!=='open')?S.archive:S.tours).push(key);
  }
- // A tournament channel created since the last lists replaces its virtual entry 't:<tournamentId>' (views and drafts move with it).
+ // A channel created since the last lists replaces its virtual entry ('l:<slug>', 't:<tournamentId>'; views and drafts move with it).
  for(const [k,c] of [...S.channels]){
-  const real=c.virtual?keyOfTid(c.tid):null;if(!real||real===k)continue;
+  const real=c.virtual?realKey(c):null;if(!real||real===k)continue;
   const draft=session.get(draftKey(k));if(draft&&!session.get(draftKey(real)))session.set(draftKey(real),draft);session.set(draftKey(k),'');
   S.channels.delete(k);if(S.pageKey===k)S.pageKey=real;
   for(const v of S.views)if(v.key===k){const ta=v.footEl?.querySelector?.('textarea[data-chat-key]');if(ta)ta.dataset.chatKey=real;v.key=real;v.divider=undefined;v.nodes.clear();v.pinned=true;}
@@ -314,7 +341,8 @@ export function mount(el,kind,opts={}){
  if(!el)return null;
  if(el.chatView&&S.views.has(el.chatView)){paint(el.chatView);return el.chatView;}
  ensureGlobal();transport();
- const v={id:++vid,el,kind,key:null,nodes:new Map(),pinned:true,unseen:0,firstUnseen:null,visible:kind!=='home',compact:false,tid:opts.tid||null,params:opts.params||new URLSearchParams(),divider:undefined,srN:0,srAt:0,srTimer:null,readTimer:null,foot:null};
+ const v={id:++vid,el,kind,key:null,nodes:new Map(),pinned:true,unseen:0,firstUnseen:null,visible:kind!=='home',compact:false,tid:opts.tid||null,params:opts.params||new URLSearchParams(),divider:undefined,srN:0,srAt:0,srTimer:null,readTimer:null,foot:null,
+  sport:SPORT_IDS.includes(opts.sport)?opts.sport:kind==='home'?DEFAULT_SPORT:null};
  el.chatView=v;S.views.add(v);
  v.compact=kind==='home'&&matchesPhone();
  frame(v);
@@ -329,11 +357,11 @@ export function mount(el,kind,opts={}){
 const matchesPhone=()=>{try{return matchMedia('(max-width:650px)').matches;}catch{return false;}};
 /** Picks the channel of a view from its route, the remembered choice or the default rules. */
 function choose(v){
- const cur=v.key?S.channels.get(v.key):null;
- if(cur&&!cur.gone&&!(cur.virtual&&keyOfTid(cur.tid)&&keyOfTid(cur.tid)!==v.key))return;
- const me=getMe(),stored=local.get(LAST),fallback=()=>{v.auto=!stored&&!me&&signedIn();return slugKey(defaultSlug({stored,me,lang:getLanguage()}))||S.lobby[0]||null;};
+ const cur=v.key?S.channels.get(v.key):null,real=cur?.virtual?realKey(cur):null;
+ if(cur&&!cur.gone&&!(real&&real!==v.key))return;
+ const me=getMe(),stored=local.get(LAST),sport=v.sport||storedSport(),fallback=()=>{v.auto=!lobbyOf(stored)&&!sport&&!me&&signedIn();return slugKey(defaultSlug({stored,me,sport}))||S.lobby[0]||null;};
  if(v.kind==='tournament'){v.key=keyOfTid(v.tid);if(!v.key)v.missing=true;return;}
- if(v.kind==='home'){v.key=(S.homeSlug&&slugKey(S.homeSlug))||fallback();return;}
+ if(v.kind==='home'){v.key=sportKey(v.sport);return;}
  if(v.kind==='strip'){v.key=fallback();return;}
  const t=v.params.get('t'),c=v.params.get('c');
  if(t){v.key=keyOfTid(t);if(!v.key){v.missing=true;return;}}
@@ -346,20 +374,36 @@ function open(v,key){
  saveScroll(v);
  v.key=key;v.divider=undefined;v.nodes.clear();v.pinned=true;v.unseen=0;v.foot=null;v.missing=false;
  const c=S.channels.get(key);
- if(c?.kind==='lobby'){local.set(LAST,c.slug);if(v.kind==='home')S.homeSlug=c.slug;}
+ if(c?.kind==='lobby'){local.set(LAST,c.slug);S.homeSlugs[c.sport]=c.slug;}
+ if(c?.sport&&v.kind==='page')v.sport=c.sport;
  if(v.kind==='page'){S.pageKey=key;if(registry.parseRoute(location.hash).page==='chat'){try{history.replaceState(null,'',registry.routeHash('chat',routeOf(c)));}catch{}}}
  frame(v);paint(v,{open:true});announce();S.transport?.poke();
 }
 
+/** The sport picker of the full chat: remembers the sport for the home page too and opens its channel (the one used last there, else
+ * the general one); the focus stays on the picker that was used. */
+function pickSport(v,sport,n){
+ if(!SPORT_IDS.includes(sport))return;
+ local.set(SPORT,sport);v.sport=sport;
+ const key=sportKey(sport);
+ if(key&&key!==v.key)open(v,key);else paint(v);
+ v.el.querySelector('#chat-v'+v.id+'-sport-'+(n==='bar'?'bar':'rail'))?.focus();
+}
+
 // ——— Templates ———
 
-// World channels: a colour globe in the style of the 🌍 emoji (owner's request), a self-hosted file so its gradient ids stay
-// inside the image.
-const globe=()=>h`<img class="chat-globe" src="./brand/globe.svg" alt="" width="16" height="16" aria-hidden="true">`;
-const flagPl=()=>h`<span class="chat-flag" aria-hidden="true"><svg viewBox="0 0 16 10" focusable="false"><rect width="16" height="5" fill="#fff"/><rect y="5" width="16" height="5" fill="#dc143c"/></svg></span>`;
+// Channel icons: the date of a tournament, people for a sport's general channel, a shield for a federation's.
 function chIcon(c){
  if(c?.kind==='tournament'){const d=c.date?new Date(c.date+'T12:00:00'):null;return d&&!Number.isNaN(d.getTime())?h`<span class="chat-ch-date${c.date===today()?' is-today':''}" aria-hidden="true"><small>${d.toLocaleDateString(locale(),{month:'short'}).replace('.','')}</small><strong>${d.getDate()}</strong></span>`:h`<span class="chat-ch-ico" aria-hidden="true">${icon('trophy')}</span>`;}
- return h`<span class="chat-ch-ico" aria-hidden="true">${c?.scope==='pl'?flagPl():globe()}</span>`;
+ return h`<span class="chat-ch-ico${c?.fed?' is-fed':''}" aria-hidden="true">${icon(c?.fed?'shield':'users')}</span>`;
+}
+/** Id of a channel's tab in the home card (slugs only: a virtual key 'l:<slug>' has a colon). */
+const tabId=(v,c)=>'chat-v'+v.id+'-tab-'+(c?.slug||'x');
+/** Picker of the martial art in the full chat: in the rail (desktop, visible label) and before the chips (phones). The select keeps
+ * data-chat-act so swap() gives the focus back after a repaint. */
+function sportPicker(v,n){
+ const id='chat-v'+v.id+'-sport-'+n,cur=viewSport(v);
+ return h`<label class="${n==='rail'?'chat-sport-label':'sr-only'}" for="${id}">${T('Sztuka walki')}</label><span class="chat-sport-field" data-sport="${cur}"><select id="${id}" class="chat-sport-select" data-chat-act="sport" data-key="${n}">${ARTS.map(s=>h`<option value="${s.id}"${s.id===cur?h` selected`:''}>${T(s.label)}</option>`)}</select>${icon('down','chat-sport-caret')}</span>`;
 }
 const langSwitch=()=>h`<div class="lang-switch" role="group" aria-label="Język / Language">${[['pl','PL','Polski'],['en','EN','English']].map(([code,label,name])=>h`<button type="button" class="lang-option" data-set-lang="${code}" lang="${code}" aria-pressed="${getLanguage()===code}" aria-label="${name}" title="${name}">${label}</button>`)}</div>`;
 const live=()=>h`<span class="chat-live" data-chat-part="live" hidden><i aria-hidden="true"></i>${T('Na żywo')}</span>`;
@@ -371,18 +415,20 @@ function frame(v){
  const foot=h`<div class="chat-foot" data-chat-part="foot"></div><div class="sr-only" aria-live="polite" aria-atomic="true" data-chat-part="sr"></div>`;
  let html;
  if(v.kind==='home'){
-  html=h`<div class="chat-card chat-v-home${v.compact?' is-compact':''}"><div class="chat-head"><span class="chat-head-ico" aria-hidden="true">${icon('chat')}</span><div class="chat-grow"><h2 id="home-chat-title">${T('Czat MatBravo')}</h2><p>${T('Rozmowy środowiska — czytać może każdy')}</p></div>${live()}${v.compact?'':h`<a class="chat-icon-btn" data-chat-part="expand" href="${registry.routeHash('chat',routeOf(c))}" aria-label="${T('Otwórz pełny czat')}" title="${T('Otwórz pełny czat')}">${icon('expand')}</a>`}</div><div class="${v.compact?'chat-chips':'chat-tabs'}" role="tablist" aria-label="${T('Kanały')}" data-chat-part="tabs"></div><div role="tabpanel" class="chat-panel" id="${hid}-panel" aria-labelledby="${hid}-tab-${v.key||'x'}">${main}</div>${foot}</div>`;
+  // A sport with federations has tabs (general + one per federation); one with a single channel shows it without tabs.
+  const tabs=hasFederations(v.sport);
+  html=h`<div class="chat-card chat-v-home${v.compact?' is-compact':''}"><div class="chat-head"><span class="chat-head-ico" aria-hidden="true">${icon('chat')}</span><div class="chat-grow"><h2 id="home-chat-title">${T('Czat · {sport}',{sport:artName(v.sport)})}</h2><p>${T('Rozmowy środowiska — czytać może każdy')}</p></div>${live()}${v.compact?'':h`<a class="chat-icon-btn" data-chat-part="expand" href="${registry.routeHash('chat',routeOf(c))}" aria-label="${T('Otwórz pełny czat')}" title="${T('Otwórz pełny czat')}">${icon('expand')}</a>`}</div>${tabs?h`<div class="${v.compact?'chat-chips':'chat-tabs'}" role="tablist" aria-label="${T('Kanały: {sport}',{sport:artName(v.sport)})}" data-chat-part="tabs"></div><div role="tabpanel" class="chat-panel" id="${hid}-panel" aria-labelledby="${tabId(v,c)}">${main}</div>`:h`<div class="chat-panel">${main}</div>`}${foot}</div>`;
  }else if(v.kind==='strip'){
   html=h``;
  }else if(v.kind==='tournament'){
   html=h`<div class="chat-card chat-v-tournament"><div class="chat-conv-head" data-chat-part="convhead"></div>${main}${foot}</div>`;
  }else{
-  html=h`<div class="chat-full${signedIn()?'':' is-public'}"><nav class="chat-rail" aria-label="${T('Kanały czatu')}" data-chat-part="rail"></nav><section class="chat-conv" aria-label="${chFull(c)||T('Czat')}"><div class="chat-conv-head" data-chat-part="convhead"></div><div class="chat-chips" role="list" data-chat-part="chips"></div>${main}${foot}</section></div>`;
+  html=h`<div class="chat-full${signedIn()?'':' is-public'}"><nav class="chat-rail" aria-label="${T('Kanały czatu')}"><div class="chat-sport-pick" data-chat-part="sport"></div><div data-chat-part="rail"></div></nav><section class="chat-conv" aria-label="${chFull(c)||T('Czat')}"><div class="chat-conv-head" data-chat-part="convhead"></div><div class="chat-chipbar"><div class="chat-sport-pick" data-chat-part="sport2"></div><div class="chat-chips" role="list" data-chat-part="chips"></div></div>${main}${foot}</section></div>`;
  }
  setHtml(v.el,html);
  if(v.kind==='home')v.el.setAttribute('aria-busy','false');
  const part=name=>v.el.querySelector('[data-chat-part="'+name+'"]');
- Object.assign(v,{log:part('log'),pillBtn:v.el.querySelector('.chat-pill'),pillText:part('pill'),footEl:part('foot'),banners:part('banners'),sr:part('sr'),tabs:part('tabs'),rail:part('rail'),chips:part('chips'),convhead:part('convhead'),strip:part('strip'),liveEl:part('live'),expand:part('expand')});
+ Object.assign(v,{log:part('log'),pillBtn:v.el.querySelector('.chat-pill'),pillText:part('pill'),footEl:part('foot'),banners:part('banners'),sr:part('sr'),tabs:part('tabs'),rail:part('rail'),chips:part('chips'),convhead:part('convhead'),strip:part('strip'),liveEl:part('live'),expand:part('expand'),sportEl:part('sport'),sportEl2:part('sport2')});
  v.nodes.clear();v.foot=null;
 }
 
@@ -401,6 +447,9 @@ function paint(v,{open:opening=false,others=0}={}){
  if(v.liveEl)v.liveEl.hidden=S.status!=='live';
  if(v.expand&&c)v.expand.href=registry.routeHash('chat',routeOf(c));
  labels(v,c);
+ // The colour of the sport shown (workspace.css [data-sport]): the home card has it from the page, the full chat follows its channel.
+ if(v.kind==='page'){const sport=viewSport(v);if(v.el.dataset.sport!==sport)v.el.dataset.sport=sport;}
+ if(v.sportEl)swap(v.sportEl,sportPicker(v,'rail'));if(v.sportEl2)swap(v.sportEl2,sportPicker(v,'bar'));
  if(v.tabs)paintTabs(v);if(v.rail)paintRail(v);if(v.chips)paintChips(v);if(v.convhead)paintConvHead(v,c);
  paintBanners(v,c);paintLog(v,c,opening,others);paintFoot(v,c);
 }
@@ -428,22 +477,24 @@ function swap(el,safe){
 }
 function unreadDot(c){if(!c?.id)return false;const read=readMap()[c.id];return signedIn()?(c.n>0):(read!==undefined?(c.known||0)>read:false);}
 function paintTabs(v){
- const keys=S.lobby,hid='chat-v'+v.id;
- if(!keys.length){swap(v.tabs,h``);return;}
- swap(v.tabs,h`${keys.map(k=>{const c=S.channels.get(k),on=k===v.key,dot=!on&&unreadDot(c);return h`<button type="button" role="tab" class="${v.compact?'chat-chip':'chat-tab'}" id="${hid}-tab-${k}" aria-selected="${on}" aria-controls="${hid}-panel" tabindex="${on?0:-1}" data-chat-act="tab" data-key="${k}" title="${chFull(c)}">${chIcon(c)}<span class="chat-tab-text"><b>${chName(c)}</b><small>${chScope(c)}</small></span>${dot?h`<i class="chat-dot" aria-hidden="true"></i><span class="sr-only">${T('Nowe od ostatniej wizyty')}</span>`:''}</button>`;})}`);
- v.el.querySelector('.chat-panel')?.setAttribute('aria-labelledby',hid+'-tab-'+v.key);
+ const keys=S.lobby.filter(k=>S.channels.get(k)?.sport===v.sport),hid='chat-v'+v.id;
+ if(keys.length<2){swap(v.tabs,h``);return;}
+ swap(v.tabs,h`${keys.map(k=>{const c=S.channels.get(k),on=k===v.key,dot=!on&&unreadDot(c);return h`<button type="button" role="tab" class="${v.compact?'chat-chip':'chat-tab'}" id="${tabId(v,c)}" aria-selected="${on}" aria-controls="${hid}-panel" tabindex="${on?0:-1}" data-chat-act="tab" data-key="${k}" title="${chAbout(c)}">${chIcon(c)}<span class="chat-tab-text"><b>${chName(c)}</b></span>${dot?h`<i class="chat-dot" aria-hidden="true"></i><span class="sr-only">${T('Nowe od ostatniej wizyty')}</span>`:''}</button>`;})}`);
+ v.el.querySelector('.chat-panel[role="tabpanel"]')?.setAttribute('aria-labelledby',tabId(v,S.channels.get(v.key)));
 }
 function railItem(v,k){
  const c=S.channels.get(k);if(!c)return '';const on=k===v.key,muted=mutedChannels().has(c.id),n=signedIn()&&!on?c.n:0;
- return h`<a class="chat-rail-item${on?' is-on':''}" href="${registry.routeHash('chat',routeOf(c))}" data-chat-act="open" data-key="${k}"${on?h` aria-current="page"`:''}>${chIcon(c)}<span class="chat-grow"><b>${chName(c)}</b><small>${c.kind==='lobby'?chScope(c):chAbout(c)}</small></span>${muted?h`<i class="chat-mdot" title="${T('Wyciszony')}"></i>`:n?h`<span class="chat-ub">${registry.badgeText(n)}<span class="sr-only"> ${T('{n} nieprzeczytanych',{n})}</span></span>`:unreadDot(c)&&!signedIn()&&!on?h`<i class="chat-dot" aria-hidden="true"></i>`:''}</a>`;
+ return h`<a class="chat-rail-item${on?' is-on':''}" href="${registry.routeHash('chat',routeOf(c))}" data-chat-act="open" data-key="${k}"${on?h` aria-current="page"`:''}>${chIcon(c)}<span class="chat-grow"><b>${chName(c)}</b><small>${chAbout(c)}</small></span>${muted?h`<i class="chat-mdot" title="${T('Wyciszony')}"></i>`:n?h`<span class="chat-ub">${registry.badgeText(n)}<span class="sr-only"> ${T('{n} nieprzeczytanych',{n})}</span></span>`:unreadDot(c)&&!signedIn()&&!on?h`<i class="chat-dot" aria-hidden="true"></i>`:''}</a>`;
 }
+/** Channels of the sport a view shows (lobby, tournaments or archive), keeping the open one in its list. */
+const ofSport=(v,keys)=>{const sport=viewSport(v);return keys.filter(k=>k===v.key||S.channels.get(k)?.sport===sport);};
 function paintRail(v){
- const tours=S.tours,arch=S.archive;
- swap(v.rail,h`<div class="chat-rail-sec"><h3>${T('Kanały')}</h3>${S.lobby.map(k=>railItem(v,k))}</div>${tours.length?h`<div class="chat-rail-sec"><h3>${T('Czaty turniejów')}</h3>${tours.map(k=>railItem(v,k))}</div>`:''}${arch.length?h`<details class="chat-rail-sec chat-arch"${arch.includes(v.key)?h` open`:''}><summary>${icon('archive')}<span>${T('Archiwum · {n} zakończone',{n:arch.length})}</span></summary>${arch.map(k=>railItem(v,k))}</details>`:''}`);
+ const tours=ofSport(v,S.tours),arch=ofSport(v,S.archive);
+ swap(v.rail,h`<div class="chat-rail-sec"><h3>${T('Kanały')}</h3>${ofSport(v,S.lobby).map(k=>railItem(v,k))}</div>${tours.length?h`<div class="chat-rail-sec"><h3>${T('Czaty turniejów')}</h3>${tours.map(k=>railItem(v,k))}</div>`:''}${arch.length?h`<details class="chat-rail-sec chat-arch"${arch.includes(v.key)?h` open`:''}><summary>${icon('archive')}<span>${T('Archiwum · {n} zakończone',{n:arch.length})}</span></summary>${arch.map(k=>railItem(v,k))}</details>`:''}`);
 }
 function paintChips(v){
- const keys=[...S.lobby,...S.tours];if(v.key&&!keys.includes(v.key))keys.push(v.key);
- if(!swap(v.chips,h`${keys.map(k=>{const c=S.channels.get(k),on=k===v.key;return h`<a role="listitem" class="chat-chip${on?' is-on':''}" href="${registry.routeHash('chat',routeOf(c))}" data-chat-act="open" data-key="${k}"${on?h` aria-current="page"`:''}>${chIcon(c)}<span>${c.kind==='lobby'?h`${chName(c)} <small>${chScope(c)}</small>`:chName(c)}</span>${!on&&signedIn()&&c.n?h`<span class="chat-ub">${registry.badgeText(c.n)}</span>`:''}</a>`;})}`))return;
+ const keys=ofSport(v,[...S.lobby,...S.tours]);if(v.key&&!keys.includes(v.key))keys.push(v.key);
+ if(!swap(v.chips,h`${keys.map(k=>{const c=S.channels.get(k),on=k===v.key;return h`<a role="listitem" class="chat-chip${on?' is-on':''}" href="${registry.routeHash('chat',routeOf(c))}" data-chat-act="open" data-key="${k}"${on?h` aria-current="page"`:''} title="${chAbout(c)}">${chIcon(c)}<span>${chName(c)}</span>${!on&&signedIn()&&c.n?h`<span class="chat-ub">${registry.badgeText(c.n)}</span>`:''}</a>`;})}`))return;
  v.chips.querySelector('.is-on')?.scrollIntoView?.({block:'nearest',inline:'nearest'});
 }
 function paintConvHead(v,c){
@@ -637,7 +688,8 @@ async function older(v){
 }
 function paintFoot(v,c){
  const box=v.footEl;if(!box)return;
- const me=getMe(),config=S.config,kind=v.kind==='home'&&v.compact?'preview':v.missing||!c||c.gone?'none':footKind({signedIn:signedIn(),me,config,st:c.st,on:S.cfg.on!==false&&S.status!=='off'});
+ // A signed-in person's lists create the missing lobby channels: a virtual one left from the guest lists waits for them.
+ const me=getMe(),config=S.config,kind=v.kind==='home'&&v.compact?'preview':v.missing||!c||c.gone?'none':c.virtual&&c.kind==='lobby'&&signedIn()?'wait':footKind({signedIn:signedIn(),me,config,st:c.st,on:S.cfg.on!==false&&S.status!=='off'});
  const sig=kind+':'+v.key+':'+getLanguage()+':'+(config?1:0)+(kind==='preview'?':'+(config?.signup?1:0):'');
  if(v.foot===sig)return;
  const ta=saveDraft(v),caret=ta&&doc().activeElement===ta?{key:ta.dataset.chatKey,start:ta.selectionStart,end:ta.selectionEnd}:null;
@@ -694,8 +746,8 @@ const relevantTours=()=>{const ids=new Set((ws()?.tournaments||[]).filter(t=>(t.
 function counters(){
  const d=doc();if(!d)return;
  if(signedIn()){
-  const muted=mutedChannels(),open=new Set(liveViews().filter(v=>v.kind!=='strip').map(v=>v.key));
-  const total=[...S.lobby.map(k=>S.channels.get(k)),...relevantTours()].filter(c=>c&&!muted.has(c.id)&&!open.has(c.key)).reduce((s,c)=>s+(c.n||0),0);
+  const muted=mutedChannels(),open=new Set(liveViews().filter(v=>v.kind!=='strip').map(v=>v.key)),mine=mySports();
+  const total=[...S.lobby.map(k=>S.channels.get(k)).filter(c=>mine.has(c?.sport)),...relevantTours()].filter(c=>c&&!muted.has(c.id)&&!open.has(c.key)).reduce((s,c)=>s+(c.n||0),0);
   registry.setBadge('chat',total);
   const tid=ui().getState?.()?.tournament?.id,tc=tid&&S.channels.get(keyOfTid(tid));registry.setBadge('event-chat',tc&&!muted.has(tc.id)&&!open.has(tc.key)?tc.n:0);
  }
@@ -718,6 +770,7 @@ function counters(){
 
 async function send(v,text){
  const c=S.channels.get(v.key);if(!c)return;
+ if(!c.id&&c.kind!=='tournament'){ensureLists(true);return false;}
  const body=String(text).replace(/\r\n?/g,'\n').trim();
  if(!body){note(v,T('Wiadomość jest pusta.'));return false;}
  if([...body].length>1000){note(v,T('Wiadomość może mieć najwyżej 1000 znaków.'));return false;}
@@ -872,6 +925,7 @@ function ensureGlobal(){
   const v=viewOf(form),t=form.querySelector('textarea');if(!v||!t)return;
   send(v,t.value).then(ok=>{if(ok){t.value='';session.set(draftKey(v.key),'');grow(t);count(v,t);const n=form.querySelector('[data-chat-part="note"]');if(n&&!n.classList.contains('is-limit')){n.textContent='';n.className='chat-note';}t.focus();}});
  });
+ d.addEventListener('change',event=>{const sel=event.target;if(sel.matches?.('select[data-chat-act="sport"]')){const v=viewOf(sel);if(v)pickSport(v,sel.value,sel.dataset.key);}});
  d.addEventListener('input',event=>{
   const t=event.target;if(!t.matches?.('textarea[data-chat-input]'))return;const v=viewOf(t);if(!v)return;
   grow(t);count(v,t);clearTimeout(t.saveTimer);t.saveTimer=setTimeout(()=>session.set(draftKey(t.dataset.chatKey||v.key),t.value),300);S.touchedAt=Date.now();S.transport?.interact();
@@ -917,7 +971,7 @@ export function scan(root=doc()){
  if(!root)return;
  for(const node of root.querySelectorAll('[data-chat-mount]')){
   const kind=node.dataset.chatMount;
-  if(kind==='home')mount(node,'home');
+  if(kind==='home')mount(node,'home',{sport:node.dataset.sport});
   else if(kind==='tournament')mount(node,'tournament',{tid:node.dataset.tournamentId});
   else if(kind==='strip'){if(local.get(STRIP)!=='off')mount(node,'strip');}
   else if(kind==='page'){const route=registry.parseRoute(location.hash),params=new URLSearchParams(route.params);if(node.dataset.tournament&&!params.get('t')&&!params.get('c'))params.set('t',node.dataset.tournament);mount(node,'page',{params});}

@@ -65,7 +65,7 @@ before(async()=>{
  fixture('reset-limits');fixture('billing-kv',{set:{stripe_down_until:null}});
  // The send pace is tested by chat.http.test.mjs; here it would only slow the scenarios down.
  fixture('chat-settings',{set:{send:{gap:0,perMin:1000,perDay:100000}}});
- admin=await signIn(...ADMIN);general=channel('general');
+ admin=await signIn(...ADMIN);general=channel('taekwondo-pl');
 });
 beforeEach(()=>fixture('reset-limits'));
 after(()=>{if(!skip)fixture('chat-settings',{reset:true});});
@@ -177,9 +177,9 @@ test('diagnostics: StripeClient::probe of the billing slice through the Admin ro
 test('account deletion: messages become tombstones with new revs; no author, text or people entry for members and guests',{skip},async()=>{
  const author=member('del',{profile:{firstName:'Wiesława',lastName:'Usuwalska',username:'zqdel'+RUN,nameDisplay:'full'}});
  const reader=member('reader'),ca=await signIn(author.email),cr=await signIn(reader.email);
- const start=channel('general').rev;
+ const start=channel('taekwondo-pl').rev;
  for(const b of ['Pierwsza do usunięcia','Druga do usunięcia'])assert.equal((await send(ca,{ch:general.id},b)).status,200);
- const sent=channel('general').rev;
+ const sent=channel('taekwondo-pl').rev;
  let f=await get('chat-feed',{ch:`${general.id}:${start}`},cr.cookie);assert.equal(f.status,200,f.text);
  let mine=f.data.ch[general.id].m.filter(x=>x.a===author.publicId);assert.equal(mine.length,2);
  assert.deepEqual([f.data.people[author.publicId].n,f.data.people[author.publicId].u],['Wiesława Usuwalska','zqdel'+RUN]);
@@ -200,7 +200,7 @@ test('account deletion: messages become tombstones with new revs; no author, tex
  assert.deepEqual([state.user.email,state.user.active,state.profile],[`deleted+${author.id}@invalid.matbravo`,0,null]);
  // The Admin's delete of another member goes through the same path.
  const other=member('admindel'),co=await signIn(other.email);
- const r=await send(co,{ch:general.id},'Usunie mnie Administrator');assert.equal(r.status,200);const before=channel('general').rev;
+ const r=await send(co,{ch:general.id},'Usunie mnie Administrator');assert.equal(r.status,200);const before=channel('taekwondo-pl').rev;
  assert.deepEqual(await adminMember({action:'delete',userId:other.id}),{id:other.id,deleted:true});
  f=await get('chat-feed',{ch:`${general.id}:${before}`},cr.cookie);
  assert.deepEqual(f.data.ch[general.id].m.filter(x=>x.id===r.data.m.id).map(x=>[x.x,'a' in x]),[['author',false]]);
@@ -222,7 +222,7 @@ test('privacy sweep: no public or guest answer carries an e-mail, username, name
  // Tomorrow: route=public lists only the 6 nearest tournaments and the other files plant many later ones.
  const tid=fixture('tournament',{name:'Turniej prywatności',city:'Prywatnowo',date:day(1)}).id;
  const sessions=await Promise.all(people.map(p=>signIn(p.email)));
- const lobby=['general','taekwondo-pl','karate'].map(channel);
+ const lobby=['taekwondo-pl','taekwondo-itf','karate'].map(channel);
  for(const [i,c] of sessions.entries()){
   for(const ch of lobby)assert.equal((await send(c,{ch:ch.id},`Wiadomość ${i} w ${ch.slug}`)).status,200);
   assert.equal((await send(c,{t:tid},`Turniej ${i}`)).status,200);
@@ -230,12 +230,16 @@ test('privacy sweep: no public or guest answer carries an e-mail, username, name
  // A tombstone (deleted by its author) and a message hidden by the moderator are part of what guests receive too.
  const gone=await send(sessions[0],{ch:general.id},'Zaraz usunę');assert.equal((await sessions[0].req('chat-delete',{id:gone.data.m.id})).status,200);
  const hidden=await send(sessions[1],{ch:general.id},'Usunie moderator');await moderate({action:'delete',messageId:hidden.data.m.id,note:'test'});
- const tch=fixture('chat-channel',{tournamentId:tid}),ids=[...lobby.map(c=>c.id),tch.id],last=channel('general').last_message_id;
+ const tch=fixture('chat-channel',{tournamentId:tid}),ids=[...lobby.map(c=>c.id),tch.id],last=channel('taekwondo-pl').last_message_id;
  const answers=[];
  // Every answer has its expected status, so a route that stops answering (an empty 404) cannot pass the sweep.
  const check=async(label,route,params={},cookie,status=200)=>{const r=await get(route,params,cookie);assert.equal(r.status,status,label+': '+r.text);answers.push([label,r]);return r;};
  const pub=await check('public','public');
  assert.ok(pub.data.tournaments.some(t=>t.id===tid&&t.name==='Turniej prywatności'),'the planted tournament is public: '+pub.text);
+ // The home page per martial art (sport, then one federation) asks the same route.
+ const tkd=await check('public per sport','public',{sport:'taekwondo'});
+ assert.ok(tkd.data.tournaments.some(t=>t.id===tid)&&tkd.data.tournaments.every(t=>t.sport==='taekwondo'),'the taekwondo list: '+tkd.text);
+ await check('public per federation','public',{sport:'taekwondo',fed:'itf'});
  const one=await check('public-tournament','public-tournament',{id:tid});
  assert.deepEqual([one.data.tournament.id,one.data.tournament.name,one.data.tournament.city],[tid,'Turniej prywatności','Prywatnowo']);
  await check('public-config','public-config');
@@ -247,7 +251,7 @@ test('privacy sweep: no public or guest answer carries an e-mail, username, name
  for(const id of ids)for(const m of initial.data.ch[id].m)assert.deepEqual(Object.keys(m),'b' in m?GUEST_FIELDS:GUEST_TOMB);
  const shown=Object.fromEntries(initial.data.ch[general.id].m.map(m=>[m.id,m]));
  assert.deepEqual([shown[gone.data.m.id].x,shown[hidden.data.m.id].x],['author','mod'],'both tombstones, without their text');
- await check('public-chat heads','public-chat',{ch:`${general.id}:${channel('general').rev}`,h:ids.slice(1).map(id=>`${id}:0:0`).join(','),cv:'0'});
+ await check('public-chat heads','public-chat',{ch:`${general.id}:${channel('taekwondo-pl').rev}`,h:ids.slice(1).map(id=>`${id}:0:0`).join(','),cv:'0'});
  await check('public-chat history','public-chat',{ch:`${general.id}:0`,before:String(last)});
  await check('public-chat since','public-chat',{ch:`${general.id}:1`});
  await check('public-chat with a member cookie','public-chat',{ch:all},sessions[0].cookie);
@@ -335,7 +339,7 @@ test('roles end to end in free mode: sign-up with roles, publishing at once, sel
  const tname='000 Integracja Ról '+RUN,t=(await org.cmd('tournament.save',TOUR(tname))).id;
  assert.deepEqual(['status','selfEntry','community','trusted'].map(k=>tourOf(org,t)[k]),['open',true,true,true]);
  let pv=await get('public-tournament',{id:t});
- assert.deepEqual(pv.data.tournament,{id:t,name:tname,date:day(0),city:'Integracja',status:'open',community:true,trusted:true,selfEntry:true},'F2: the preview offers the self-entry');
+ assert.deepEqual(pv.data.tournament,{id:t,name:tname,date:day(0),city:'Integracja',status:'open',sport:'taekwondo',community:true,trusted:true,selfEntry:true},'F2: the preview offers the self-entry');
  const home=(await get('public')).data.tournaments;assert.ok(home.some(x=>x.id===t)||home.length===6&&home.every(x=>x.date<=day(0)),'on the home list (trusted community)');
  assert.ok((await get('public-chat-channels')).data.tournaments.some(x=>x.tournamentId===t),'and in the chat lobby');
  const open=(await view(ath)).open.find(x=>x.id===t);

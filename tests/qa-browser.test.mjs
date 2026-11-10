@@ -37,11 +37,13 @@ test('demo in a browser: tab focus across repaints, moderation page, print previ
   page.on('console',m=>{if(m.type()==='error')problems.push('console: '+m.text().slice(0,200));});
   return {ctx,page};
  };
- const demoLogin=async(page,i=0)=>{await page.goto(url);await page.locator('[data-action="demo-login"]').nth(i).click();await page.waitForSelector('.app-shell');};
+ // Signing in keeps the home page (owner 2026-11-10); every use below then opens its page by address.
+ const demoLogin=async(page,i=0)=>{await page.goto(url);await page.locator('[data-action="demo-login"]').nth(i).click();await page.waitForSelector('#home-account');};
  const overflow=page=>page.evaluate(()=>document.documentElement.scrollWidth-document.documentElement.clientWidth);
  try{
-  // 1. Home chat: arrow keys move the selection and the focus stays on the selected tab after the next repaints.
-  { const {ctx,page}=await open();await page.goto(url);await page.waitForSelector('.chat-tabs [role="tab"][aria-selected="true"]');await sleep(800);
+  // 1. Home chat (the taekwondo page: its general channel and three federations): arrow keys move the selection and the focus
+  //    stays on the selected tab after the next repaints.
+  { const {ctx,page}=await open();await page.goto(url+'#home?s=taekwondo');await page.waitForSelector('.chat-tabs [role="tab"][aria-selected="true"]');await sleep(800);
     await page.locator('.chat-tabs [role="tab"][aria-selected="true"]').focus();
     const first=await page.evaluate(()=>document.activeElement.dataset.key);
     await page.keyboard.press('ArrowRight');await sleep(3500);
@@ -75,7 +77,7 @@ test('demo in a browser: tab focus across repaints, moderation page, print previ
     const {ctx,page}=await open({width,height});await demoLogin(page,0);
     await page.goto(url+'#chat');await page.waitForSelector('[data-chat-part="'+part+'"] *');await sleep(800);
     await page.evaluate(async()=>{
-     const chat=await import('./chat.js'),S=chat._state(),row=k=>{const c=S.channels.get(k);return c.kind==='lobby'?{id:Number(k),slug:c.slug,scope:c.scope,st:c.st,last:c.known||0,count:c.count||0}:{id:Number(k),tournamentId:c.tid,title:c.title,date:c.date,city:c.city,st:c.st,last:c.known||0,count:c.count||0};};
+     const chat=await import('./chat.js'),S=chat._state(),row=k=>{const c=S.channels.get(k);return c.kind==='lobby'?{id:Number(k),slug:c.slug,st:c.st,last:c.known||0,count:c.count||0}:{id:Number(k),tournamentId:c.tid,title:c.title,date:c.date,city:c.city,st:c.st,last:c.known||0,count:c.count||0};};
      chat._internals.applyLists({lobby:S.lobby.map(row),tournaments:[...S.tours.map(row),{id:990,tournamentId:'qa-past',title:'Puchar 2020',date:'2020-03-01',city:'Kraków',st:'archive',last:0,count:0}]});
      window.dispatchEvent(new Event('offline'));window.dispatchEvent(new Event('online'));
     });
@@ -122,10 +124,10 @@ test('final review in a browser: focus trap in the crop dialog, focus back to me
  try{
   const ctx=await browser.newContext({viewport:{width:1440,height:900},locale:'pl-PL',serviceWorkers:'block'}),page=await ctx.newPage();
   page.on('pageerror',e=>problems.push('pageerror: '+e.message));page.on('console',m=>{if(m.type()==='error')problems.push('console: '+m.text().slice(0,200));});
-  await page.goto(url);await page.waitForSelector('.chat-tabs [role="tab"]');await sleep(600);
+  await page.goto(url+'#home?s=taekwondo');await page.waitForSelector('.chat-tabs [role="tab"]');await sleep(600);
   assert.deepEqual(await page.$$eval(EMPTY_ARIA,els=>els.map(e=>e.outerHTML.slice(0,80))),[],'home: no empty ARIA state');
   assert.match(await page.getAttribute('.chat-card .chat-log','aria-label'),/^Wiadomości: \S/,'home feed named after the channel');
-  await page.locator('[data-action="demo-login"]').first().click();await page.waitForSelector('.app-shell');
+  await page.locator('[data-action="demo-login"]').first().click();await page.waitForSelector('#home-account');
   await page.goto(url+'#chat');await page.waitForSelector('.chat-full .chat-msg[data-id]');await sleep(600);
   assert.deepEqual(await page.$$eval(EMPTY_ARIA,els=>els.map(e=>e.outerHTML.slice(0,80))),[],'chat page: no empty ARIA state');
   const names=()=>page.evaluate(()=>[document.querySelector('.chat-full .chat-log').getAttribute('aria-label'),document.querySelector('.chat-conv').getAttribute('aria-label')]);
@@ -159,7 +161,7 @@ test('final review in a browser: focus trap in the crop dialog, focus back to me
   // Phone menu opened from the full-screen chat (F14): focus moves into the drawer, Tab stays there, Esc closes it and focus returns
   // to the chat's menu button; the buttons expose aria-expanded.
   { const ctx3=await browser.newContext({viewport:{width:390,height:844},locale:'pl-PL',serviceWorkers:'block'}),p3=await ctx3.newPage();p3.on('pageerror',e=>problems.push('pageerror: '+e.message));
-    await p3.goto(url);await p3.locator('[data-action="demo-login"]').first().click();await p3.waitForSelector('.app-shell');
+    await p3.goto(url);await p3.locator('[data-action="demo-login"]').first().click();await p3.waitForSelector('#home-account');
     await p3.goto(url+'#chat');await p3.waitForSelector('.chat-back[data-action="menu"]');await sleep(400);
     assert.equal(await p3.getAttribute('.chat-back[data-action="menu"]','aria-expanded'),'false');
     await p3.focus('.chat-back[data-action="menu"]');await p3.keyboard.press('Enter');await p3.waitForSelector('#app-sidebar.open');
@@ -190,7 +192,7 @@ test('full chat on short screens (200 % and 400 % zoom): messages keep a usable 
   for(const [width,height] of [[640,400],[320,256]])for(const who of ['guest','member']){
    const ctx=await browser.newContext({viewport:{width,height},locale:'pl-PL',serviceWorkers:'block'}),page=await ctx.newPage();
    page.on('pageerror',e=>problems.push('pageerror: '+e.message));
-   if(who==='member'){await page.goto(url);await page.locator('[data-action="demo-login"]').last().click();await page.waitForSelector('.app-shell');}
+   if(who==='member'){await page.goto(url);await page.locator('[data-action="demo-login"]').last().click();await page.waitForSelector('#home-account');}
    await page.goto(url+'#chat');await page.waitForSelector('.chat-full .chat-msg');await sleep(600);
    if(who==='guest')await page.evaluate(async()=>{const c=await import('./chat.js'),S=c._state();S.config={...(S.config||{}),signup:true,billing:true,amounts:{pln:899,usd:299}};dispatchEvent(new Event('offline'));dispatchEvent(new Event('online'));});
    const target=who==='guest'?'.chat-full .chat-gate-price':'.chat-full textarea[data-chat-input]';await page.waitForSelector(target);
@@ -203,7 +205,7 @@ test('full chat on short screens (200 % and 400 % zoom): messages keep a usable 
   }
   // A phone keeps the full-screen chat (position:fixed, no page scroll inside the chat).
   const ctx=await browser.newContext({viewport:{width:390,height:844},locale:'pl-PL',serviceWorkers:'block'}),page=await ctx.newPage();
-  await page.goto(url);await page.locator('[data-action="demo-login"]').last().click();await page.waitForSelector('.app-shell');
+  await page.goto(url);await page.locator('[data-action="demo-login"]').last().click();await page.waitForSelector('#home-account');
   await page.goto(url+'#chat');await page.waitForSelector('.chat-full .chat-msg');
   assert.equal(await page.evaluate(()=>getComputedStyle(document.querySelector('.chat-page-mount .chat-full')).position),'fixed');
   await ctx.close();
@@ -212,7 +214,7 @@ test('full chat on short screens (200 % and 400 % zoom): messages keep a usable 
   for(const [width,height,keyboard] of [[412,800,450],[390,740,420],[360,640,340]]){
    const ctx=await browser.newContext({viewport:{width,height},locale:'pl-PL',serviceWorkers:'block',isMobile:true,hasTouch:true}),page=await ctx.newPage();
    page.on('pageerror',e=>problems.push('pageerror: '+e.message));
-   await page.goto(url);await page.locator('[data-action="demo-login"]').last().click();await page.waitForSelector('.app-shell');
+   await page.goto(url);await page.locator('[data-action="demo-login"]').last().click();await page.waitForSelector('#home-account');
    await page.goto(url+'#chat');await page.waitForSelector('.chat-full textarea[data-chat-input]');await sleep(400);
    await page.focus('.chat-full textarea[data-chat-input]');
    await page.setViewportSize({width,height:keyboard});await sleep(300);
