@@ -140,7 +140,8 @@ function bannerView(b){
  return h`<span class="acct-banner-icon">${icon('card')}</span><p><strong>${title}</strong> ${text}</p><button type="button" class="btn primary acct-banner-btn" data-acct-act="plan">${T('Wybierz plan')}</button>`;
 }
 function paintBanner(page){
- const main=document.querySelector('#main');if(!main)return;
+ // The home page keeps it in its account card (data-acct-banner; its #main is a grid), the shell puts it on top of #main.
+ const main=document.querySelector('[data-acct-banner]')||document.querySelector('#main');if(!main)return;
  main.querySelector(':scope>.acct-banner')?.remove();
  const b=FLOW_PAGES.includes(page)?null:bannerInfo(getMe());if(!b)return;
  const el=document.createElement('div');el.className='acct-banner'+(b.kind==='blocked'?' blocked':'');el.setAttribute('role','status');setHtml(el,bannerView(b));main.prepend(el);
@@ -212,6 +213,7 @@ if(browser){
    let notice=null;try{notice=sessionStorage.getItem(NOTICE_KEY);sessionStorage.removeItem(NOTICE_KEY);}catch{}
    if(notice==='deleted')ui()?.toast?.(T('Konto zostało usunięte.'));}
   else if(view==='app'){if(guard())return;leaveFlow(p);paintBanner(p);paintSelf();if(['profile','billing','signup'].includes(p))mountPage(p);}
+  else if(view==='home'){if(guard())return;leaveFlow('home');paintBanner('home');paintSelf();}
   else if(view==='guest'){if(memberPreview&&guard())return;leaveFlow('guest');}
   else if(view==='public'&&p!=='signup')leaveFlow(p);
  });

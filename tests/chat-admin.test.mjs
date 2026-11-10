@@ -167,7 +167,13 @@ test('request URLs: report queue, history, muted people, context and settings us
 test('helpers: reasons, channel titles, links to the chat, names, the mute preview',()=>{
  assert.deepEqual(groupReasons({other:1,spam:2,abuse:2,bad:0}),[{reason:'spam',n:2},{reason:'abuse',n:2},{reason:'other',n:1}]);
  assert.deepEqual(groupReasons(undefined),[]);
- assert.equal(channelTitle({kind:'lobby',slug:'taekwondo-pl',scope:'pl'}),'Taekwondo · Polska');
+ // Channels per martial art (dist/sports.js): the sport and General or the federation; the retired PL/world channels keep a name
+ // in the moderation panel, where their messages stay reachable.
+ assert.equal(channelTitle({kind:'lobby',slug:'taekwondo-pl',scope:'pl'}),'Taekwondo · Ogólny');
+ assert.equal(channelTitle({kind:'lobby',slug:'taekwondo-itf'}),'Taekwondo · ITF');
+ assert.equal(channelTitle({kind:'lobby',slug:'boxing'}),'Boks · Ogólny');
+ assert.equal(channelTitle({kind:'lobby',slug:'muaythai-ifma'}),'Muay Thai · IFMA');
+ assert.equal(channelTitle({kind:'lobby',slug:'taekwondo',scope:'world'}),'Taekwondo · Świat');
  assert.equal(channelTitle({kind:'lobby',slug:'general',scope:'world'}),'Ogólny · Świat');
  assert.equal(channelTitle({kind:'tournament',title:'Puchar',date:'2030-05-01'}),'Puchar · 2030-05-01');
  assert.equal(chatHash({kind:'lobby',slug:'karate'}),'#chat?c=karate');assert.equal(chatHash({kind:'tournament',tournamentId:'t 1&x'}),'#chat?t=t+1%26x');assert.equal(chatHash(null),'#chat');
@@ -176,7 +182,7 @@ test('helpers: reasons, channel titles, links to the chat, names, the mute previ
  assert.match(muteNotice('1h',Date.UTC(2030,0,1,11,0)/1000),/^Moderator wstrzymał Twoje pisanie do .*13:00\.$/);
  assert.match(muteNotice('7d',Date.UTC(2030,0,1,11,0)/1000),/8 sty/);
  setLanguage('en',{persist:false});
- try{assert.equal(muteNotice('perm'),'A moderator has paused your posting indefinitely.');assert.equal(channelTitle({kind:'lobby',slug:'taekwondo-pl',scope:'pl'}),'Taekwondo · Poland');}finally{setLanguage('pl',{persist:false});}
+ try{assert.equal(muteNotice('perm'),'A moderator has paused your posting indefinitely.');assert.equal(channelTitle({kind:'lobby',slug:'taekwondo-pl',scope:'pl'}),'Taekwondo · General');assert.equal(channelTitle({kind:'lobby',slug:'boxing'}),'Boxing · General');assert.equal(channelTitle({kind:'lobby',slug:'taekwondo'}),'Taekwondo · World');}finally{setLanguage('pl',{persist:false});}
 });
 test('every action and tab has an English text (no Polish left in English mode)',()=>{
  setLanguage('en',{persist:false});
@@ -255,7 +261,7 @@ test('panel in a browser: hostile texts stay text, the dialogs send the right bo
  try{
   const ctx=await browser.newContext({viewport:{width:1280,height:900},locale:'pl-PL'}),page=await ctx.newPage();
   page.on('pageerror',e=>problems.push('pageerror '+e.message));page.on('console',m=>{if(m.type()==='error'||/Content Security Policy/i.test(m.text()))problems.push(m.text());});
-  await page.goto(url);await page.waitForSelector('.login-page');
+  await page.goto(url);await page.waitForSelector('.home');
   await page.evaluate(()=>{window.__sec=[];document.addEventListener('securitypolicyviolation',e=>window.__sec.push(e.violatedDirective));});
   await page.evaluate(async({evil,svg,link,bidi})=>{
    const m=await import('./chat-admin.js');

@@ -1,7 +1,8 @@
 /* Chat entry points (plan §8.1, §8.9, §12.10): small and static, app.js imports it; the interface itself (chat.js) loads lazily.
  * Pages: #chat for every signed-in role (global menu, unread badge), "Czat turnieju" in the tournament menu (staff, organizers), the public #chat
- * for guests. After 'painted' it mounts [data-chat-mount=home|tournament|strip|page] (the home card only when it comes within 200 px of
- * the viewport) and fills [data-chat-tournament-link]; [data-chat-count] is filled after 'painted' and after 'upcoming-painted',
+ * for guests. After 'painted' it mounts [data-chat-mount=home|tournament|strip|page] (the home card, for guests (view 'login') and
+ * signed-in people (view 'home') alike, only when it comes within 200 px of the viewport; signed in without the card, on the sport
+ * chooser, the counters start at once) and fills [data-chat-tournament-link]; [data-chat-count] is filled after 'painted' and after 'upcoming-painted',
  * because the upcoming list arrives asynchronously and is refreshed. Nothing is mounted on #screen (no 'painted' there). */
 import {registry,h,setHtml} from './registry.js';
 import {t as T} from './i18n.js';
@@ -36,7 +37,7 @@ function near(el,fn){
 const run=fn=>load().then(m=>{if(m){loaded=m;fn(m);}});
 registry.on('painted',({view}={})=>{
  const d=document,home=d.querySelector('[data-chat-mount="home"]');
- if(view==='login'){if(home)near(home,()=>run(m=>m.scan()));if(d.querySelector('[data-chat-count]'))run(m=>m.fillCounts());return;}
+ if(view==='login'||view==='home'){if(home)near(home,()=>run(m=>m.scan()));else if(view==='home')run(m=>m.scan());if(d.querySelector('[data-chat-count]'))run(m=>m.fillCounts());return;}
  if(view==='app'||d.querySelector('[data-chat-mount],[data-chat-tournament-link],[data-chat-tab-count],[data-chat-count]'))run(m=>m.scan());
 });
 registry.on('upcoming-painted',()=>run(m=>m.fillCounts()));

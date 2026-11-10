@@ -54,12 +54,15 @@ test('tournament chat lifecycle: draft hidden, open until the day, grace day onl
   [t('2026-11-12'),member],[t('2026-11-12'),null],[t('2026-11-12'),member,2],[t('2026-11-13'),member,0]
  ].map(([tt,viewer,grace])=>({t:tt,today,viewer,grace}))});
  assert.deepEqual(states,['hidden','hidden','open','open','gone','open','archive','gone','open','archive']);
- const lobby=s=>({kind:'lobby',status:s}),tc=s=>({kind:'tournament',status:s});
+ // Global channels of the catalogue (Sports::LOBBY) for everyone; the retired PL/world ones for nobody, the Admin included.
+ const lobby=(s,slug='taekwondo-pl')=>({kind:'lobby',slug,status:s}),tc=s=>({kind:'tournament',status:s}),admin={id:'a',full:true,role:'admin'};
+ const lobbies=bridge({job:'visible',cases:[[lobby('open','mma-almma'),null],[lobby('open','taekwondo'),null],[lobby('open','general'),member],[lobby('open','general'),admin],[lobby('open','curling'),admin],[{kind:'lobby',status:'open'},null]].map(([ch,viewer])=>({ch,t:null,viewer,today}))});
+ assert.deepEqual(lobbies,['open',null,null,null,null,null]);
  const visible=bridge({job:'visible',cases:[
-  [lobby('open'),null,null],[lobby('readonly'),null,null],[lobby('closed'),null,member],
+  [lobby('open'),null,null],[lobby('readonly','karate-wkf'),null,null],[lobby('closed'),null,member],
   [tc('open'),t('2026-11-20'),null],[tc('readonly'),t('2026-11-20'),null],[tc('closed'),t('2026-11-20'),null],[tc('closed'),t('2026-11-20'),member],
   [tc('open'),t('2026-11-13'),null],[tc('open'),t('2026-11-13'),member],[tc('open'),t('2026-11-01'),member],[tc('readonly'),t('2026-11-01'),member],
-  [tc('open'),t('2026-11-20','draft'),{id:'a',full:true,role:'admin'}]
+  [tc('open'),t('2026-11-20','draft'),admin]
  ].map(([ch,tt,viewer])=>({ch,t:tt,viewer,today}))});
  assert.deepEqual(visible,['open','closed','closed','open','closed',null,'closed',null,'open','archive','closed',null]);
  assert.deepEqual(bridge({job:'shift',cases:[['2026-03-29',-1],['2026-10-25',-1],['2026-01-01',-1],['2026-12-31',1]]}),['2026-03-28','2026-10-24','2025-12-31','2027-01-01'],'DST days and year ends');
@@ -138,15 +141,20 @@ test('hosting health: the current hour in full plus the overlapping part of the 
  assert.deepEqual(out.map(o=>o[0]),[36,27,18,0,0,0],'rows as strings from the database; statuses outside the list ignored');
 });
 
-test('migration 0003 seeds the four channels of Chat::LOBBY, Chat::LOBBY carries the owner\'s order, and 0003 the default settings of ChatSettings',{skip},()=>{
+test('migration 0003 seeds four channels: Sports::LOBBY keeps taekwondo-pl and karate and retires the other two; 0003 the default settings of ChatSettings',{skip},()=>{
  const k=bridge({job:'constants'}),src=readFileSync('backend/migrations/0003_chat.php','utf8');
  const seeded=[...src.match(/\$lobby=\[(.*?)\];/)[1].matchAll(/\['([a-z-]+)','(world|pl)',(\d+)\]/g)].map(m=>[m[1],m[2],Number(m[3])]);
- // 0003 seeds the channels and scopes. The order (Taekwondo Polska first, owner 2026-11-01) lives only in Chat::LOBBY and is
- // applied by Chat::lists: no migration rewrites chat_channels.sort, because migrations never change existing rows.
- assert.deepEqual(seeded.map(([slug,scope])=>[slug,scope]).sort(),Object.entries(k.lobby).map(([slug,l])=>[slug,l.scope]).sort());
- assert.deepEqual(Object.keys(k.lobby),['taekwondo-pl','taekwondo','karate','general']);
- assert.deepEqual(Object.values(k.lobby).map(l=>l.sort),[10,20,30,40]);
+ // 0003 seeded the channels of the old PL/world split. The chat per martial art (owner 2026-11-10) keeps their rows: taekwondo-pl
+ // is Taekwondo's general channel (its Polish conversations stay), karate Karate's; taekwondo (world) and general are retired. The
+ // order and the new channels live only in Sports::LOBBY (Chat::lists creates the missing rows): no migration inserts or rewrites
+ // chat_channels rows, because migrations never change existing tables' data.
+ assert.deepEqual(seeded.map(([slug])=>slug).sort(),['general','karate','taekwondo','taekwondo-pl']);
+ assert.deepEqual(seeded.map(([slug])=>slug).filter(slug=>!(slug in k.lobby)).sort(),[...k.retired].sort());
+ assert.ok(k.retired.every(slug=>!(slug in k.lobby)));
+ assert.deepEqual(Object.keys(k.lobby).slice(0,5),['taekwondo-pl','taekwondo-uitf','taekwondo-itf','taekwondo-wt','karate']);
+ assert.deepEqual(k.lobby['taekwondo-pl'],['taekwondo',null]);assert.deepEqual(k.lobby['karate-wkf'],['karate','wkf']);
  assert.equal(existsSync('backend/migrations/0009_lobby_order.php'),false,'the order is code, not a data migration');
+ assert.doesNotMatch(readFileSync('backend/migrations/0010_sports.php','utf8'),/INSERT\s+INTO|UPDATE\s|chat_channels/,'0010 adds two columns only');
  const json=[...src.match(/\$defaults=('.*?');/s)[1].matchAll(/'([^']*)'/g)].map(m=>m[1]).join('');
  assert.deepEqual(JSON.parse(json),k.defaults);
 });

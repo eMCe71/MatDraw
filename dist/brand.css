@@ -9,17 +9,16 @@
 /* Logo: vector SVG, sized by height; the image's alt (or the link's label) gives the accessible name "MatBravo". */
 .brand-logo{display:block;width:auto;height:26px;max-width:100%}
 .sidebar .brand-logo{height:24px}
-.login-story .brand-logo{height:30px}
 .guest-brand picture{display:block}
 .guest-brand .brand-logo{height:25px}
 .arena .brand-logo{height:28px}
 @media(max-width:1250px){.sidebar .brand-logo{height:22px}}
-@media(max-width:650px){.login-story .brand-logo{height:26px}.guest-brand .brand-logo{height:30px}.arena .brand-logo{height:24px}}
+@media(max-width:650px){.guest-brand .brand-logo{height:30px}.arena .brand-logo{height:24px}}
 
 /* Decorative character images (alt="", aria-hidden): never interactive, never in the print-out. */
 .mascot{display:block;width:auto;max-width:none;pointer-events:none;user-select:none}
 
-/* Login: Matbravo waves from behind the "Upcoming tournaments" card (the card hides his legs). Subtle breathing loop
+/* Home page: Matbravo, dressed for the chosen martial art, waves from behind the "Upcoming tournaments" card (the card hides his legs). Subtle breathing loop
    (kit motion: 6.4 s, scale 1.006/1.008, 0.16 deg) with the pivot at his feet below the cropped image; pause button;
    static under prefers-reduced-motion. --mascot-h is the height of the cropped image (head to mid-thigh). */
 .upcoming-stage{--mascot-h:256px;position:relative;width:100%;padding-top:calc(var(--mascot-h) * .78)}
@@ -33,9 +32,8 @@
 .motion-toggle:hover{background:#ffffff24;color:#fff}
 .motion-toggle:focus-visible{outline:2px solid #4ac1ed;outline-offset:2px}
 .motion-toggle .icon{width:14px;height:14px}
-.login-upcoming{padding-top:clamp(36px,7vh,96px);padding-bottom:clamp(36px,7vh,96px)}
-@media(max-width:1199px){.login-upcoming{padding-top:8px}.upcoming-stage{max-width:560px}}
-@media(max-width:650px){.upcoming-stage{--mascot-h:196px}.login-mascot{right:40px}.login-upcoming{padding-top:12px}}
+@media(max-width:1199px){.upcoming-stage{max-width:560px}}
+@media(max-width:650px){.upcoming-stage{--mascot-h:196px}.login-mascot{right:40px}}
 @media(prefers-reduced-motion:reduce){.login-mascot-img{animation:none;will-change:auto}.motion-toggle{display:none}}
 
 /* Guest preview: the guide pose points at "Log in" in the access card. */

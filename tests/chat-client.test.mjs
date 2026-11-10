@@ -28,6 +28,7 @@ const {registry,SafeHtml}=await import('../dist/registry.js');
 const chat=await import('../dist/chat.js');
 const {setLanguage}=await import('../dist/i18n.js');setLanguage('pl',{persist:false});
 const {createDemoTransport,KEY:DEMO_KEY}=await import('../dist/chat-demo.js');
+const {LOBBY}=await import('../dist/sports.js');
 const CFG=T.normalizeCfg(null);
 
 // ——— Fake DOM pieces ———
@@ -88,11 +89,16 @@ test('day labels and times',()=>{
  assert.equal(chat.timeLabel(now-30000,now),'teraz');assert.equal(chat.timeLabel(now-7*60000,now),'7 min');assert.match(chat.timeLabel(now-3*3600000,now),/^\d{2}:\d{2}$/);
 });
 test('default channel, composer gate and price',()=>{
- assert.equal(chat.defaultSlug({stored:'karate',me:null,lang:'pl'}),'karate');
- assert.equal(chat.defaultSlug({stored:'bogus',me:{profile:{sports:['taekwondo'],country:'PL'}},lang:'en'}),'taekwondo-pl');
- assert.equal(chat.defaultSlug({me:{profile:{sports:['taekwondo'],country:'DE'}}}),'taekwondo');
- assert.equal(chat.defaultSlug({me:{profile:{sports:['karate']}}}),'karate');assert.equal(chat.defaultSlug({me:{profile:{sports:['judo']}}}),'general');
- assert.equal(chat.defaultSlug({lang:'pl'}),'taekwondo-pl');assert.equal(chat.defaultSlug({lang:'en'}),'taekwondo');
+ // Per martial art (dist/sports.js): the channel used last if it belongs to the sport asked for, else that sport's general channel;
+ // without a sport the profile's first known sport, else taekwondo. The retired PL/world slugs are never chosen.
+ assert.equal(chat.defaultSlug({stored:'karate',me:null}),'karate');assert.equal(chat.defaultSlug({stored:'karate-wkf'}),'karate-wkf');
+ assert.equal(chat.defaultSlug({stored:'karate-wkf',sport:'karate'}),'karate-wkf');assert.equal(chat.defaultSlug({stored:'karate-wkf',sport:'boxing'}),'boxing');
+ assert.equal(chat.defaultSlug({stored:'bogus',me:{profile:{sports:['taekwondo'],country:'PL'}}}),'taekwondo-pl');
+ assert.equal(chat.defaultSlug({stored:'taekwondo',me:{profile:{sports:['taekwondo'],country:'DE'}}}),'taekwondo-pl');assert.equal(chat.defaultSlug({stored:'general'}),'taekwondo-pl');
+ assert.equal(chat.defaultSlug({me:{profile:{sports:['karate']}}}),'karate');assert.equal(chat.defaultSlug({me:{profile:{sports:['judo']}}}),'judo');
+ assert.equal(chat.defaultSlug({me:{profile:{sports:['wrestling','jujitsu']}}}),'bjj','Japanese jiu-jitsu goes with jiu-jitsu, wrestling with none');
+ assert.equal(chat.defaultSlug({me:{profile:{sports:['other']}}}),'taekwondo-pl');assert.equal(chat.defaultSlug({}),'taekwondo-pl');
+ assert.equal(chat.defaultSlug({sport:'taekwondo'}),'taekwondo-pl');assert.equal(chat.defaultSlug({sport:'mma',me:{profile:{sports:['judo']}}}),'mma');assert.equal(chat.defaultSlug({sport:'curling'}),'taekwondo-pl');
  const f=(x)=>chat.footKind({signedIn:false,config:null,st:'open',...x});
  assert.equal(f({}),'login');assert.equal(f({config:{signup:false,billing:true}}),'login');assert.equal(f({config:{signup:true,billing:true}}),'paid');assert.equal(f({config:{signup:true,billing:false}}),'free');
  const member=block=>chat.footKind({signedIn:true,me:{access:{block,canPost:block===null}},st:'open'});
@@ -250,7 +256,7 @@ test('background counters: the first poll counts what came while away; knownLast
  const S=chat._state(),SEEN='matdraw.chat.seen';registry.provide('ui',{getWorkspace:()=>({user:{id:'u1',role:'club'}})});
  try{
   localStorage.setItem(SEEN,JSON.stringify({'1':100}));
-  chat._internals.applyLists({cv:1,lobby:[{id:1,slug:'taekwondo',scope:'world',last:105,count:9,st:'open'}],tournaments:[]});
+  chat._internals.applyLists({cv:1,lobby:[{id:1,slug:'taekwondo-pl',sport:'taekwondo',fed:null,last:105,count:9,st:'open'}],tournaments:[]});
   const first=chat._internals.wants().h;assert.deepEqual(first,{'1':[100,0]},'not the last id from the lists (the server would answer same)');
   assert.match(T.buildQuery({route:'chat-feed',h:first}).h,/^1:100:0$/);
   chat._internals.apply({cv:1,heads:{'1':{last:105,n:5}}},{},{'1':[100,0]});
@@ -269,22 +275,24 @@ test('background counters: the first poll counts what came while away; knownLast
  }finally{registry.provide('ui',undefined);localStorage.removeItem(SEEN);chat.purgeIdentity();}
 });
 test('background counters for guests: the known last id from the lists, so the server counts only after a change (§5.4, H4)',()=>{
- const S=chat._state(),SEEN='matdraw.chat.seen',view={el:{isConnected:true},key:'none',kind:'strip'};
+ const S=chat._state(),SEEN='matdraw.chat.seen',view={el:{isConnected:true},key:'none',kind:'home',sport:'taekwondo'},page={el:{isConnected:true},key:'none',kind:'page',sport:'karate'};
  try{
   localStorage.setItem(SEEN,JSON.stringify({'1':100}));
-  chat._internals.applyLists({cv:1,lobby:[{id:1,slug:'taekwondo',scope:'world',last:105,count:9,st:'open'},{id:2,slug:'karate',scope:'world',last:40,count:3,st:'open'}],tournaments:[]});
+  chat._internals.applyLists({cv:1,lobby:[{id:1,slug:'taekwondo-pl',sport:'taekwondo',fed:null,last:105,count:9,st:'open'},{id:2,slug:'karate',sport:'karate',fed:null,last:40,count:3,st:'open'},{id:3,slug:'taekwondo-itf',sport:'taekwondo',fed:'itf',last:0,count:0,st:'open'}],tournaments:[]});
   assert.deepEqual(chat._internals.wants().h,{},'no chat on screen: no background counters');
   S.views.add(view);
-  assert.deepEqual(chat._internals.wants().h,{'1':[100,105],'2':[0,40]},'the server answers same until last_message_id changes');
+  assert.deepEqual(chat._internals.wants().h,{'1':[100,105],'3':[0,0]},'the server answers same until last_message_id changes; only the sport on screen');
   chat._internals.apply({cv:1,heads:{'1':{last:107,n:7}}},{},{'1':[100,105]});
-  assert.deepEqual(chat._internals.wants().h,{'1':[100,107],'2':[0,40]});
- }finally{S.views.delete(view);localStorage.removeItem(SEEN);chat.purgeIdentity();}
+  assert.deepEqual(chat._internals.wants().h,{'1':[100,107],'3':[0,0]});
+  S.views.add(page);
+  assert.deepEqual(chat._internals.wants().h,{'1':[100,107],'2':[0,40],'3':[0,0]},'the full chat on karate counts karate too');
+ }finally{S.views.delete(view);S.views.delete(page);localStorage.removeItem(SEEN);chat.purgeIdentity();}
 });
 
 test('a change to a message below the loaded window is not inserted: history keeps asking before the first loaded id (no gap)',()=>{
  const S=chat._state(),msg=(id,r=id,extra={})=>({id,r,t:Date.now(),a:'PidMarta0001',c:0,b:'m'+id,...extra});
  try{
-  chat._internals.applyLists({cv:1,lobby:[{id:1,slug:'taekwondo',scope:'world',last:149,count:150,st:'open'}],tournaments:[]});
+  chat._internals.applyLists({cv:1,lobby:[{id:1,slug:'taekwondo-pl',sport:'taekwondo',fed:null,last:149,count:150,st:'open'}],tournaments:[]});
   const page=[];for(let id=100;id<150;id++)page.push(msg(id));
   chat._internals.apply({cv:1,ch:{'1':{rev:149,st:'open',more:false,older:true,m:page}}},{});
   const c=S.channels.get('1'),first=()=>[...c.msgs.keys()].sort((a,b)=>a-b)[0];
@@ -304,7 +312,7 @@ test('a change to a message below the loaded window is not inserted: history kee
 // ——— purgeIdentity ———
 function populate(){
  const S=chat._state();
- chat._internals.applyLists({cv:1,lobby:[{id:1,slug:'taekwondo',scope:'world',last:5,count:1,st:'open'}],tournaments:[{id:3,tournamentId:'t-1',title:'Puchar',date:'2099-01-01',city:'X',st:'open',last:0,count:0}]});
+ chat._internals.applyLists({cv:1,lobby:[{id:1,slug:'taekwondo-pl',sport:'taekwondo',fed:null,last:5,count:1,st:'open'}],tournaments:[{id:3,tournamentId:'t-1',title:'Puchar',date:'2099-01-01',city:'X',st:'open',last:0,count:0}]});
  chat._internals.apply({cv:1,ch:{'1':{rev:7,st:'open',more:false,older:false,m:[{id:5,r:7,t:Date.now(),a:'PidMarta0001',c:0,b:'Cześć'}]}},people:{PidMarta0001:{n:'Marta K.',u:'marta.k'}}},{});
  sessionStorage.setItem('matdraw.chat.draft.1','szkic');sessionStorage.setItem('matdraw.other','keep');
  assert.equal(S.people.size,1);assert.equal(S.channels.get('1').msgs.size,1);assert.equal(S.channels.get('1').cursor,7);
@@ -342,19 +350,21 @@ test('demo adapter: seeded channels, member and guest projections, a demo accoun
  let wants={ch:{},h:{}},mode='feed';const data=[];
  const t=createDemoTransport({mode:()=>mode,wants:()=>wants,me:()=>me,tournaments:async()=>[{id:'t-a',name:'Puchar',date:'2099-01-02',city:'Kraków'}],onData:d=>data.push(d)});
  const lists=await t.lists();
- assert.deepEqual(lists.lobby.map(c=>c.slug),['taekwondo-pl','taekwondo','karate','general']);assert.ok(lists.lobby.every(c=>c.count===8));
+ assert.deepEqual(lists.lobby.map(c=>c.slug),LOBBY.map(c=>c.slug));assert.deepEqual(lists.lobby.map(c=>c.id),LOBBY.map((c,i)=>i+1));
+ assert.deepEqual(lists.lobby.slice(0,4).map(c=>[c.slug,c.sport,c.fed,c.count]),[['taekwondo-pl','taekwondo',null,8],['taekwondo-uitf','taekwondo','uitf',3],['taekwondo-itf','taekwondo','itf',8],['taekwondo-wt','taekwondo','wt',5]]);
+ assert.ok(lists.lobby.filter(c=>!c.fed).every(c=>c.count>=4),'every general channel is seeded');assert.equal(lists.lobby.find(c=>c.slug==='mma-almma').count,0,'a federation channel may start empty');
  assert.equal(lists.tournaments[0].tournamentId,'t-a');assert.equal(lists.tournaments[0].count,8);
- wants={ch:{'2':0},h:{'1':[0,0]}};t.update();await flush();await new Promise(r=>setTimeout(r,5));
- const page=data.at(-1).ch['2'];assert.equal(page.m.length,8);assert.ok(page.m.every(m=>m.a&&!('g' in m)));assert.ok(data.at(-1).people[page.m[0].a].n);assert.equal(data.at(-1).heads['1'].n,8);
- const sent=await t.send({ch:2,cid:T.clientId(),b:'  Cześć z demo  '});
+ wants={ch:{'3':0},h:{'1':[0,0]}};t.update();await flush();await new Promise(r=>setTimeout(r,5));
+ const page=data.at(-1).ch['3'];assert.equal(page.m.length,8);assert.ok(page.m.every(m=>m.a&&!('g' in m)));assert.ok(data.at(-1).people[page.m[0].a].n);assert.equal(data.at(-1).heads['1'].n,8);
+ const sent=await t.send({ch:3,cid:T.clientId(),b:'  Cześć z demo  '});
  assert.equal(sent.m.a,'DemoAdmin001');assert.equal(sent.m.b,'Cześć z demo');assert.equal(sent.people.DemoAdmin001.n,'Anna D.');
- await assert.rejects(t.send({ch:2,cid:T.clientId(),b:'drugi'}),e=>e.status===429&&e.data.retry===2);
- await assert.rejects(t.send({ch:2,cid:T.clientId(),b:'   '}),e=>e.status===422);
- mode='public';wants={ch:{'2':0}};t.update();await new Promise(r=>setTimeout(r,5));
- const guest=data.at(-1);assert.ok(!guest.people);assert.ok(guest.ch['2'].m.every(m=>!('a' in m)&&Number.isInteger(m.g)&&m.g>=0&&m.g<5));
+ await assert.rejects(t.send({ch:3,cid:T.clientId(),b:'drugi'}),e=>e.status===429&&e.data.retry===2);
+ await assert.rejects(t.send({ch:3,cid:T.clientId(),b:'   '}),e=>e.status===422);
+ mode='public';wants={ch:{'3':0}};t.update();await new Promise(r=>setTimeout(r,5));
+ const guest=data.at(-1);assert.ok(!guest.people);assert.ok(guest.ch['3'].m.every(m=>!('a' in m)&&Number.isInteger(m.g)&&m.g>=0&&m.g<5));
  assert.ok(!JSON.stringify(guest).includes('Anna'),'no names in the guest projection');
- const older=await t.history('2',guest.ch['2'].m[2].id);assert.equal(older.m.length,2);
- await t.remove(sent.m.id);mode='feed';wants={ch:{'2':0}};t.update();await new Promise(r=>setTimeout(r,5));assert.equal(data.at(-1).ch['2'].m.find(m=>m.id===sent.m.id).x,'author');
+ const older=await t.history('3',guest.ch['3'].m[2].id);assert.equal(older.m.length,2);
+ await t.remove(sent.m.id);mode='feed';wants={ch:{'3':0}};t.update();await new Promise(r=>setTimeout(r,5));assert.equal(data.at(-1).ch['3'].m.find(m=>m.id===sent.m.id).x,'author');
  t.stop();
 });
 
@@ -377,7 +387,8 @@ function chatApi(){
   if(route==='public-config')return [200,{signup:false,billing:false}];
   if(route==='me')return api.me?[200,api.me]:[401,{error:'Zaloguj się ponownie.'}];
   if(route==='public-chat-channels'||route==='chat-channels'){
-   const lobby=[['taekwondo','world'],['taekwondo-pl','pl'],['karate','world'],['general','world']].map(([slug,scope],i)=>({id:i+1,slug,scope,st:'open',last:api.channels[i+1].at(-1)?.id||0,count:api.channels[i+1].length}));
+   // Part of the catalogue's lobby (dist/sports.js): two Taekwondo channels with messages, an empty Karate and Boxing one.
+   const lobby=[['taekwondo-pl','taekwondo',null],['karate','karate',null],['taekwondo-itf','taekwondo','itf'],['boxing','boxing',null]].map(([slug,sport,fed],i)=>({id:i+1,slug,sport,fed,st:'open',last:api.channels[i+1].at(-1)?.id||0,count:api.channels[i+1].length}));
    return [200,{cv:1,lobby,tournaments:[{id:api.tour.id,tournamentId:'t-1',title:'Puchar',date:'2099-01-01',city:'Kraków',st:'open',last:0,count:0}],archive:[]}];
   }
   if(route==='public-chat'||route==='chat-feed'){
@@ -407,7 +418,7 @@ test('chat.js in a browser: "new messages" per channel, a tournament channel cre
  try{
   // Guest, two full chats in one tab: a poll with 1 new message in one channel and 3 in the other counts each view's own channel.
   { const {ctx,page}=await open();
-    await mountPage(page,'a','c=taekwondo');await mountPage(page,'b','c=karate');
+    await mountPage(page,'a','c=taekwondo-pl');await mountPage(page,'b','c=taekwondo-itf');
     await page.waitForFunction(()=>['a','b'].every(id=>document.querySelectorAll('#'+id+' .chat-msg').length===40));
     await page.evaluate(()=>{for(const id of ['a','b']){const log=document.querySelector('#'+id+' .chat-log');log.scrollTop=0;log.dispatchEvent(new Event('scroll'));}});
     await page.waitForFunction(()=>['a','b'].every(id=>document.getElementById(id).chatView.pinned===false));
@@ -430,7 +441,7 @@ test('chat.js in a browser: "new messages" per channel, a tournament channel cre
   { const {ctx,page}=await open();
     api.me={user:{id:'u1',role:'club'},profile:{publicId:'PidAnna00001',username:'anna',firstName:'Anna',lastName:'K',country:'PL',sports:['taekwondo'],complete:true},access:{full:true,canPost:true,block:null}};
     await page.evaluate(async()=>{window.__ws={user:{id:'u1',role:'club'},tournaments:[]};await window.__me.loadMe();});
-    await mountPage(page,'a','c=taekwondo');
+    await mountPage(page,'a','c=taekwondo-pl');
     await page.waitForSelector('#a textarea[data-chat-key="1"]');
     const ta='#a textarea';
     await page.type(ta,'Cześć');

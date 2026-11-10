@@ -1,29 +1,114 @@
 /* Multi-tournament workspace, MEDUCASE palette. */
-.tournament-switch{width:100%;font-size:11px;margin:0 0 16px;background:#19365d;color:#e3efff;border-color:#365779;padding:10px 8px}.sidebar{padding-top:24px}.sidebar .brand{margin-bottom:26px}.sidebar .nav-link{padding:10px 12px;min-height:39px;margin:2px 0}.sidebar-bottom{padding-top:20px}.sidebar .demo-note{margin-bottom:12px}.sidebar .profile{padding-top:14px}.sidebar .compact-nav{font-size:10px;min-height:32px;padding:7px 12px}.sidebar .nav-divider{margin:14px 10px}.sidebar-label{display:block}.workspace-summary{display:flex;gap:0;background:#fff;border:1px solid var(--line);border-radius:10px;margin-bottom:25px}.workspace-summary>div{flex:1;padding:22px 26px;display:flex;align-items:center;gap:14px}.workspace-summary>div+div{border-left:1px solid var(--line)}.workspace-summary strong{font-size:28px;letter-spacing:-1px;color:#00448a}.workspace-summary span{font-size:12px;color:#64748b}.collection-toolbar{display:flex;align-items:center;justify-content:space-between;gap:24px;margin-bottom:22px}.collection-toolbar .search-field{flex:0 1 410px;background:#fff}.tournament-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:22px}.tournament-card{background:#fff;border:1px solid #dce6f1;border-radius:12px;padding:26px;transition:border-color .18s,box-shadow .18s}.tournament-card:hover{border-color:#aacfe7;box-shadow:0 6px 24px #00448a09}.tournament-card.current-tournament{border-top:3px solid #00aeef;padding-top:24px}.tournament-card-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:22px}.tournament-symbol{width:43px;height:43px;display:grid;place-items:center;background:#eaf6fd;color:#0072bc;border-radius:11px}.tournament-symbol .icon{width:24px;height:24px}.tournament-card h2{font-size:23px;line-height:1.35;margin-bottom:9px}.tournament-card>p{font-size:12px;color:#647a93}.tournament-card>p span{margin:0 7px}.tournament-card-meta{display:flex;gap:22px;align-items:center;margin:25px 0 22px;color:#617d98;font-size:11px}.tournament-card-meta>span{display:flex;gap:7px;align-items:center}.tournament-card-meta .icon{width:15px;height:15px}.tournament-card-actions{padding-top:19px;border-top:1px solid #e8eef6;display:flex;gap:9px}.tournament-card-actions>.primary{flex:1}.icon-only{padding:10px}.row-buttons{display:flex;justify-content:flex-end;gap:6px;flex-wrap:wrap}.form-note{margin-top:17px!important}.field-label>small,.form-grid label>small{font-size:10px;font-weight:400;color:#73869e}.role-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:23px}.role-grid p{font-size:12px;line-height:1.8;margin-top:12px}.entry-event-name{font-size:12px;display:flex;align-items:center;gap:9px;background:#eef7fd;border:1px solid #d6eaf8;border-radius:7px;padding:12px;margin-bottom:22px;color:#275d88}.picker-search{width:100%;margin-bottom:16px}.profile-picker{display:flex;flex-direction:column;gap:4px;max-height:46vh;overflow:auto}.picker-row{display:flex;align-items:center;gap:12px;padding:12px;background:#fff;text-align:left;border:1px solid #e4ebf3;border-radius:7px}.picker-row:hover{background:#edf7fd;border-color:#b7daed}.picker-row strong{display:block;font-size:12px}.picker-row small{display:block;font-size:10px;color:#6a829c;margin-top:3px}.picker-row>.icon{margin-left:auto;width:16px;color:#0072bc}.picker-row[hidden]{display:none}.account-summary{padding-bottom:22px;margin-bottom:22px;border-bottom:1px solid var(--line)}.account-summary strong{font-size:16px}.account-summary p{margin-top:6px;font-size:12px}.app-loading{min-height:100dvh;display:grid;place-items:center;background:#f5f8fc;color:#00448a;font-size:16px}.login-page{display:grid;grid-template-columns:1fr 1fr;min-height:100dvh}.login-story{background:#102447;color:#fff;padding:44px 60px;display:flex;flex-direction:column;justify-content:space-between;gap:60px}.login-story>.brand{align-self:flex-start}.login-story>div{max-width:470px}.login-eyebrow{color:#65c8ec;font-size:10px;letter-spacing:2px}.login-story h1{font-size:clamp(40px,4.2vw,64px);font-weight:650;line-height:1.1;letter-spacing:-2.4px;margin:21px 0}.login-story p{font-size:15px;line-height:1.9;color:#aec5e0;margin-bottom:34px;max-width:380px}.login-feature{display:flex;align-items:center;gap:12px;margin-top:18px;color:#d8e8fb;font-size:12px}.login-feature>.icon{color:#4ac1ed;width:19px;height:19px}.login-signature{font-size:9px;letter-spacing:2px;color:#8daacb}.login-form-panel{background:#fff;display:flex;flex-direction:column;justify-content:center;padding:58px 60px 16px;min-width:0}.login-form-content{width:100%;max-width:390px;margin:auto}.login-form-content h2{font-size:29px;letter-spacing:-.8px;margin:8px 0 12px}.login-form-content>p{font-size:12px;line-height:1.8}.login-form-content .field-label{margin-top:18px;font-size:12px;color:#456481}.login-form-content input{min-height:45px;font-size:14px}.login-submit{width:100%;margin-top:23px;min-height:45px}.login-submit .icon{margin-left:auto}.login-demo-note{font-size:11px;line-height:1.7;background:#edf7fd;border:1px solid #d5eaf8;color:#3b7198;border-radius:7px;padding:12px 14px;margin:24px 0 6px}.demo-accounts{margin-top:30px;border-top:1px solid #e4ebf3;padding-top:20px}.demo-accounts>span{display:block;font-size:10px;color:#7a8fa7;letter-spacing:.5px;margin-bottom:10px}.demo-account{width:100%;display:flex;align-items:center;gap:11px;background:#fff;border:1px solid #dfe8f2;border-radius:7px;margin-top:7px;padding:11px 13px;text-align:left;font-size:11px;color:#365e84}.demo-account .icon{width:16px;height:16px;color:#0072bc}.demo-account .icon:last-child{margin-left:auto}.demo-account:hover{background:#edf7fd;border-color:#b1d6ec}.demo-accounts>p{font-size:10px;margin-top:12px;color:#7a8ca2}.login-foot .footer{margin:38px 0 0;justify-content:center}.login-foot .footer>span{display:none}.login-help{font-size:11px!important;margin-top:24px}.login-form-content .form-error{font-size:11px}.login-foot .creator img{width:140px}.form-grid input[readonly]{background:#f1f5fa;color:#6c829a}.btn.danger-text{color:#af5a5a}.picker-empty{font-size:12px;padding:22px;text-align:center}
-@media(min-width:1600px){.tournament-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}@media(max-width:1000px){.login-story{padding:35px}.login-form-panel{padding:38px 32px 16px}.role-grid{grid-template-columns:1fr}.tournament-card{padding:21px}.tournament-card.current-tournament{padding-top:19px}.tournament-card h2{font-size:21px}.tournament-card-meta{gap:12px;flex-wrap:wrap}.collection-toolbar>span{display:none}.workspace-summary>div{padding:20px 17px;gap:10px}}
-@media(max-width:650px){.tournament-grid{grid-template-columns:1fr;gap:16px}.workspace-summary>div{flex-direction:column;align-items:flex-start;padding:16px 13px;gap:4px}.workspace-summary strong{font-size:25px}.workspace-summary span{font-size:9px;line-height:1.6}.collection-toolbar{margin-bottom:17px}.collection-toolbar .search-field{flex:1;min-width:0}.role-grid{gap:14px}.row-buttons{justify-content:flex-end}.roster-table td.row-action{flex-wrap:wrap}.tournament-card h2{font-size:23px}.tournament-card-actions>.primary{min-height:43px}.login-page{grid-template-columns:1fr;background:#fff}.login-story{padding:24px;gap:25px}.login-signature{display:none}.login-form-panel{padding:30px 24px 12px}.login-form-content h2{font-size:28px}.login-foot .footer{margin-top:28px}.login-form-content{max-width:420px}.demo-accounts{margin-top:23px}.login-form-content input{font-size:16px}.tournament-switch{font-size:12px}.topbar-right>.text-btn span{display:none}.entry-event-name{align-items:flex-start;line-height:1.8}.profile-picker{max-height:45dvh}}
-@media print{.login-page,.app-loading{display:none!important}}
+.tournament-switch{width:100%;font-size:11px;margin:0 0 16px;background:#19365d;color:#e3efff;border-color:#365779;padding:10px 8px}.sidebar{padding-top:24px}.sidebar .brand{margin-bottom:26px}.sidebar .nav-link{padding:10px 12px;min-height:39px;margin:2px 0}.sidebar-bottom{padding-top:20px}.sidebar .demo-note{margin-bottom:12px}.sidebar .profile{padding-top:14px}.sidebar .compact-nav{font-size:10px;min-height:32px;padding:7px 12px}.sidebar .nav-divider{margin:14px 10px}.sidebar-label{display:block}.workspace-summary{display:flex;gap:0;background:#fff;border:1px solid var(--line);border-radius:10px;margin-bottom:25px}.workspace-summary>div{flex:1;padding:22px 26px;display:flex;align-items:center;gap:14px}.workspace-summary>div+div{border-left:1px solid var(--line)}.workspace-summary strong{font-size:28px;letter-spacing:-1px;color:#00448a}.workspace-summary span{font-size:12px;color:#64748b}.collection-toolbar{display:flex;align-items:center;justify-content:space-between;gap:24px;margin-bottom:22px}.collection-toolbar .search-field{flex:0 1 410px;background:#fff}.tournament-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:22px}.tournament-card{background:#fff;border:1px solid #dce6f1;border-radius:12px;padding:26px;transition:border-color .18s,box-shadow .18s}.tournament-card:hover{border-color:#aacfe7;box-shadow:0 6px 24px #00448a09}.tournament-card.current-tournament{border-top:3px solid #00aeef;padding-top:24px}.tournament-card-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:22px}.tournament-symbol{width:43px;height:43px;display:grid;place-items:center;background:#eaf6fd;color:#0072bc;border-radius:11px}.tournament-symbol .icon{width:24px;height:24px}.tournament-card h2{font-size:23px;line-height:1.35;margin-bottom:9px}.tournament-card>p{font-size:12px;color:#647a93}.tournament-card>p span{margin:0 7px}.tournament-card-meta{display:flex;gap:22px;align-items:center;margin:25px 0 22px;color:#617d98;font-size:11px}.tournament-card-meta>span{display:flex;gap:7px;align-items:center}.tournament-card-meta .icon{width:15px;height:15px}.tournament-card-actions{padding-top:19px;border-top:1px solid #e8eef6;display:flex;gap:9px}.tournament-card-actions>.primary{flex:1}.icon-only{padding:10px}.row-buttons{display:flex;justify-content:flex-end;gap:6px;flex-wrap:wrap}.form-note{margin-top:17px!important}.field-label>small,.form-grid label>small{font-size:10px;font-weight:400;color:#73869e}.role-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;margin-top:23px}.role-grid p{font-size:12px;line-height:1.8;margin-top:12px}.entry-event-name{font-size:12px;display:flex;align-items:center;gap:9px;background:#eef7fd;border:1px solid #d6eaf8;border-radius:7px;padding:12px;margin-bottom:22px;color:#275d88}.picker-search{width:100%;margin-bottom:16px}.profile-picker{display:flex;flex-direction:column;gap:4px;max-height:46vh;overflow:auto}.picker-row{display:flex;align-items:center;gap:12px;padding:12px;background:#fff;text-align:left;border:1px solid #e4ebf3;border-radius:7px}.picker-row:hover{background:#edf7fd;border-color:#b7daed}.picker-row strong{display:block;font-size:12px}.picker-row small{display:block;font-size:10px;color:#6a829c;margin-top:3px}.picker-row>.icon{margin-left:auto;width:16px;color:#0072bc}.picker-row[hidden]{display:none}.account-summary{padding-bottom:22px;margin-bottom:22px;border-bottom:1px solid var(--line)}.account-summary strong{font-size:16px}.account-summary p{margin-top:6px;font-size:12px}.app-loading{min-height:100dvh;display:grid;place-items:center;background:#f5f8fc;color:#00448a;font-size:16px}.login-eyebrow{color:#65c8ec;font-size:10px;letter-spacing:2px}.login-form-panel{background:#fff;display:flex;flex-direction:column;justify-content:center;padding:58px 60px 16px;min-width:0}.login-form-content{width:100%;max-width:390px;margin:auto}.login-form-content h2{font-size:29px;letter-spacing:-.8px;margin:8px 0 12px}.login-form-content>p{font-size:12px;line-height:1.8}.login-form-content .field-label{margin-top:18px;font-size:12px;color:#456481}.login-form-content input{min-height:45px;font-size:14px}.login-submit{width:100%;margin-top:23px;min-height:45px}.login-submit .icon{margin-left:auto}.login-demo-note{font-size:11px;line-height:1.7;background:#edf7fd;border:1px solid #d5eaf8;color:#3b7198;border-radius:7px;padding:12px 14px;margin:24px 0 6px}.demo-accounts{margin-top:30px;border-top:1px solid #e4ebf3;padding-top:20px}.demo-accounts>span{display:block;font-size:10px;color:#7a8fa7;letter-spacing:.5px;margin-bottom:10px}.demo-account{width:100%;display:flex;align-items:center;gap:11px;background:#fff;border:1px solid #dfe8f2;border-radius:7px;margin-top:7px;padding:11px 13px;text-align:left;font-size:11px;color:#365e84}.demo-account .icon{width:16px;height:16px;color:#0072bc}.demo-account .icon:last-child{margin-left:auto}.demo-account:hover{background:#edf7fd;border-color:#b1d6ec}.demo-accounts>p{font-size:10px;margin-top:12px;color:#7a8ca2}.login-foot .footer{margin:38px 0 0;justify-content:center}.login-foot .footer>span{display:none}.login-help{font-size:11px!important;margin-top:24px}.login-form-content .form-error{font-size:11px}.login-foot .creator img{width:140px}.form-grid input[readonly]{background:#f1f5fa;color:#6c829a}.btn.danger-text{color:#af5a5a}.picker-empty{font-size:12px;padding:22px;text-align:center}
+@media(min-width:1600px){.tournament-grid{grid-template-columns:repeat(3,minmax(0,1fr))}}@media(max-width:1000px){.login-form-panel{padding:38px 32px 16px}.role-grid{grid-template-columns:1fr}.tournament-card{padding:21px}.tournament-card.current-tournament{padding-top:19px}.tournament-card h2{font-size:21px}.tournament-card-meta{gap:12px;flex-wrap:wrap}.collection-toolbar>span{display:none}.workspace-summary>div{padding:20px 17px;gap:10px}}
+@media(max-width:650px){.tournament-grid{grid-template-columns:1fr;gap:16px}.workspace-summary>div{flex-direction:column;align-items:flex-start;padding:16px 13px;gap:4px}.workspace-summary strong{font-size:25px}.workspace-summary span{font-size:9px;line-height:1.6}.collection-toolbar{margin-bottom:17px}.collection-toolbar .search-field{flex:1;min-width:0}.role-grid{gap:14px}.row-buttons{justify-content:flex-end}.roster-table td.row-action{flex-wrap:wrap}.tournament-card h2{font-size:23px}.tournament-card-actions>.primary{min-height:43px}.login-form-panel{padding:30px 24px 12px}.login-form-content h2{font-size:28px}.login-foot .footer{margin-top:28px}.login-form-content{max-width:420px}.demo-accounts{margin-top:23px}.login-form-content input{font-size:16px}.tournament-switch{font-size:12px}.topbar-right>.text-btn span{display:none}.entry-event-name{align-items:flex-start;line-height:1.8}.profile-picker{max-height:45dvh}}
+@media print{.home,.app-loading{display:none!important}}
 /* Language switcher (PL | EN): segmented toggle in the top bar and on the login screen. */
-.lang-switch{display:inline-flex;align-items:center;gap:2px;padding:3px;background:#f0f5fa;border:1px solid #dbe5ef;border-radius:8px;flex-shrink:0}.lang-switch button{min-width:32px;height:26px;padding:0 8px;border-radius:5px;background:transparent;color:#667c97;font-size:10px;font-weight:650;letter-spacing:.8px;line-height:1;transition:background .18s,color .18s,box-shadow .18s}.lang-switch button:hover{color:#00448a}.lang-switch button[aria-pressed="true"]{background:#fff;color:#00448a;box-shadow:0 1px 3px #0f244724,0 0 0 1px #d3e2f0}.lang-switch button:focus-visible{outline:2px solid #0072bc;outline-offset:2px}.login-page{position:relative}.login-lang{position:absolute;top:28px;right:32px;z-index:2}
-@media(max-width:650px){.lang-switch button{height:30px;min-width:34px}.login-lang{top:22px;right:20px}.login-lang .lang-switch{background:#1a355d;border-color:#36557c}.login-lang .lang-switch button{color:#b7cbe3}.login-lang .lang-switch button:hover{color:#fff}.login-lang .lang-switch button[aria-pressed="true"]{background:#fff;color:#00448a;box-shadow:none}}
+.lang-switch{display:inline-flex;align-items:center;gap:2px;padding:3px;background:#f0f5fa;border:1px solid #dbe5ef;border-radius:8px;flex-shrink:0}.lang-switch button{min-width:32px;height:26px;padding:0 8px;border-radius:5px;background:transparent;color:#667c97;font-size:10px;font-weight:650;letter-spacing:.8px;line-height:1;transition:background .18s,color .18s,box-shadow .18s}.lang-switch button:hover{color:#00448a}.lang-switch button[aria-pressed="true"]{background:#fff;color:#00448a;box-shadow:0 1px 3px #0f244724,0 0 0 1px #d3e2f0}.lang-switch button:focus-visible{outline:2px solid #0072bc;outline-offset:2px}
+@media(max-width:650px){.lang-switch button{height:30px;min-width:34px}}
 /* On a phone the signed-in chat covers the top bar, so the opened menu carries the language switch too (app.js adds it only then). */
 .sidebar-lang{display:none}
 @media(max-width:650px){.sidebar-lang{display:block;margin:0 12px 18px}.sidebar-lang .lang-switch{background:#1a355d;border-color:#36557c}.sidebar-lang .lang-switch button{color:#b7cbe3}.sidebar-lang .lang-switch button[aria-pressed="true"]{background:#fff;color:#00448a;box-shadow:none}.sidebar-lang .lang-switch button:focus-visible{outline-color:#4ac1ed}}
-@media print{.lang-switch,.login-lang{display:none!important}}
-/* Home page = login screen with the community chat (plan §8.9, mockup docs/plan/mockups/home-chat.html). Grid areas story | chat | auth; the
-   upcoming tournaments sit under the headline on desktop and after the sign-in form on phones. DOM order: story, chat, auth, upcoming, footer.
-   The inside of the chat card belongs to chat.css; here only the card, its skeleton and the layout. */
-.login-page{grid-template-columns:minmax(340px,388px) minmax(460px,1fr) clamp(400px,30vw,480px);grid-template-rows:auto 1fr auto;grid-template-areas:"story chat auth" "upcoming chat auth" "upcoming chat foot";background:#fff}
-.login-story{grid-area:story;padding:38px 30px 0 clamp(24px,3vw,52px);min-width:0;justify-content:flex-start;gap:0}
-.login-story>div{margin-top:44px;max-width:none}
-.login-story h1{font-size:44px;line-height:1.06;letter-spacing:-1.8px;font-weight:700;margin:14px 0}
-.login-story p{font-size:14px;line-height:1.75;max-width:300px;margin-bottom:0}
-.home-centre{grid-area:chat;background:radial-gradient(120% 70% at 30% 0%,#173360 0%,#102447 60%);padding:30px 22px 30px 4px;display:flex;min-width:0}
-.login-form-panel{grid-area:auth;padding:58px 44px 8px}
-.login-foot{grid-area:foot;background:#fff;padding:0 44px 16px;min-width:0}
-.login-page .login-upcoming{grid-area:upcoming;background:#102447;display:flex;align-items:flex-end;padding:0 30px 34px clamp(24px,3vw,52px);min-width:0}
-.login-page .upcoming-stage{--mascot-h:196px}
-.login-page .login-mascot{right:22px}
+@media print{.lang-switch{display:none!important}}
+/* Home page per martial art (owner 2026-11-10; app.js renderHome). A bar with the logo, the sport switcher and the language and account
+   buttons; under it the chosen sport's tournaments with the federation filter (events), its chat (chat; the inside of the card belongs
+   to chat.css) and the sign-in or, signed in, the account card (auth) with the footer under it (foot). Without a sport the chooser of
+   eight tiles stands where the tournaments and the chat go. DOM order: events, chat, auth, foot (chooser, auth, foot). The colour of
+   the sport comes from [data-sport] (tokens.css): --sport for fills and accents on white, --sport-tint on the navy columns. */
+.home{min-height:100dvh;display:flex;flex-direction:column;background:#0b1d3a}
+.home-bar{position:sticky;top:0;z-index:30;background:#0b1d3a;border-bottom:1px solid #ffffff14}
+.home-bar-inner{display:flex;align-items:center;gap:24px;height:64px;padding:0 clamp(16px,2.6vw,40px)}
+.home-brand{flex-shrink:0;display:block}
+.home-brand .brand-logo{height:24px}
+.home-brand:focus-visible{outline:2px solid #4ac1ed;outline-offset:4px;border-radius:4px}
+.sport-nav{position:relative;flex:1;min-width:0;align-self:stretch}
+.sport-list{list-style:none;margin:0;padding:0;display:flex;height:100%;gap:2px}
+.sport-tab{position:relative;display:flex;align-items:center;height:100%;padding:0 clamp(8px,.9vw,14px);font-size:14px;font-weight:650;color:#b7cbe3;white-space:nowrap;transition:color .18s}
+.sport-tab:after{content:'';position:absolute;left:clamp(8px,.9vw,14px);right:clamp(8px,.9vw,14px);bottom:0;height:3px;border-radius:3px 3px 0 0;background:var(--sport-tint);transform:scaleX(0);transition:transform .18s}
+.sport-tab:hover{color:#fff}
+.sport-tab:hover:after{transform:scaleX(.5)}
+.sport-tab[aria-current="page"]{color:#fff}
+.sport-tab[aria-current="page"]:after{transform:none}
+.sport-tab:focus-visible{outline:2px solid #4ac1ed;outline-offset:-6px;border-radius:8px}
+.home-bar-actions{display:flex;align-items:center;gap:10px;flex-shrink:0;margin-left:auto}
+.home-bar .lang-switch{background:#1a355d;border-color:#36557c}
+.home-bar .lang-switch button{color:#b7cbe3}
+.home-bar .lang-switch button:hover{color:#fff}
+.home-bar .lang-switch button[aria-pressed="true"]{background:#fff;color:#00448a;box-shadow:none}
+.home-bar .demo-badge{font-size:10px;font-weight:800;letter-spacing:1.4px;color:#06243f;background:#f2c94c;border-radius:999px;padding:3px 9px}
+.home-main{flex:1;display:grid;grid-template-columns:minmax(330px,410px) minmax(460px,1fr) clamp(330px,25vw,420px);grid-template-rows:1fr auto;grid-template-areas:"events chat auth" "events chat foot";background:#102447;background:radial-gradient(70% 55% at 12% 0%,color-mix(in srgb,var(--sport-tint) 16%,transparent),transparent 72%),radial-gradient(120% 70% at 45% 0%,#173360 0%,#102447 60%)}
+.home-main:focus{outline:none}
+.home-events{grid-area:events;padding:30px 24px 40px clamp(20px,2.6vw,40px);min-width:0}
+.home-events:focus{outline:none}
+.home-events .upcoming-stage{--mascot-h:220px}
+.home-events .login-mascot{right:20px}
+.home-centre{grid-area:chat;padding:30px 22px 30px 4px;display:flex;min-width:0}
+.home-chat{flex:1;align-self:flex-start;position:sticky;top:88px;height:calc(100dvh - 112px);min-height:560px;max-height:900px}
+.home .login-form-panel{grid-area:auth;justify-content:flex-start;padding:42px 34px 8px}
+.home .login-form-content{max-width:360px;margin:0 auto}
+.home .login-form-content h2{font-size:26px}
+.home .login-foot{grid-area:foot;background:#fff;padding:0 34px 16px;min-width:0}
+.home .login-foot .footer{margin-top:28px}
+/* Without the chat on the server (chat.js hides the centre): tournaments and the sign-in only. */
+.home-main:has(>.home-centre[hidden]){grid-template-columns:minmax(0,1fr) clamp(330px,25vw,420px);grid-template-areas:"events auth" "events foot"}
+.home-main:has(>.home-centre[hidden]) .upcoming-stage{max-width:620px}
+/* The mascot of the sport: the glow takes its colour. */
+.home .login-mascot:before{background:radial-gradient(circle,#4ac1ed38 0%,#00aeef1a 45%,transparent 70%);background:radial-gradient(circle,color-mix(in srgb,var(--sport-tint) 26%,transparent) 0%,color-mix(in srgb,var(--sport-tint) 10%,transparent) 45%,transparent 70%)}
+.home .upcoming-icon{background:color-mix(in srgb,var(--sport-tint) 14%,transparent);color:var(--sport-tint)}
+.home .upcoming-meta .icon{color:var(--sport-tint)}
+.home .upcoming-item.is-next .upcoming-date{background:var(--sport-tint);border-color:var(--sport-tint);box-shadow:0 6px 18px color-mix(in srgb,var(--sport-tint) 28%,transparent)}
+.home .upcoming-item.is-next .upcoming-date small{color:#0b1d3a}
+.home .upcoming-next,.home .upcoming-empty>.icon,.home .upcoming-hint .icon{color:var(--sport-tint)}
+.home .upcoming-item:focus-visible,.home .fed-chip:focus-visible{outline:2px solid var(--sport-tint);outline-offset:0}
+/* Federation filter of the tournament list (sports with two or more federations): toggle buttons, the count of each. */
+.fed-chips{display:flex;flex-wrap:wrap;gap:6px;padding:14px 16px 6px;border-bottom:1px solid #27466f}
+.fed-chip{display:inline-flex;align-items:center;gap:6px;min-height:32px;padding:5px 12px;border-radius:999px;border:1px solid #2f507c;background:#ffffff08;color:#cfe3f6;font-size:12px;font-weight:700;transition:background .18s,border-color .18s,color .18s}
+.fed-chip:hover{border-color:var(--sport-tint);color:#fff}
+.fed-chip[aria-pressed="true"]{background:var(--sport-tint);border-color:var(--sport-tint);color:#0b1d3a}
+.fed-count{font-size:10.5px;font-weight:800;opacity:.75}
+.fed-count:empty{display:none}
+.upcoming-fed{font-size:9.5px;font-weight:800;letter-spacing:.5px;color:var(--sport-tint,#4ac1ed);border:1px solid #33557f;border-radius:4px;padding:0 5px;line-height:15px}
+/* Sport chooser (first visit without a sport): eight tiles with the character of each martial art. */
+.home.is-chooser .home-main{grid-template-columns:minmax(0,1fr) clamp(330px,25vw,420px);grid-template-areas:"chooser auth" "chooser foot"}
+.home-chooser{grid-area:chooser;padding:40px clamp(20px,3.4vw,56px) 48px;min-width:0;color:#fff}
+.chooser-head{max-width:640px;margin-bottom:26px}
+.chooser-head h1{font-size:clamp(30px,3vw,44px);line-height:1.08;letter-spacing:-1.4px;font-weight:700;margin:12px 0 10px}
+.chooser-head p{font-size:14px;line-height:1.7;color:#aec5e0}
+.chooser-grid{list-style:none;margin:0;padding:0;display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px}
+.sport-tile{position:relative;display:flex;flex-direction:column;height:100%;min-height:232px;padding:18px 18px 16px;border-radius:16px;overflow:hidden;color:#fff;background:#183460;background:radial-gradient(90% 70% at 85% 100%,color-mix(in srgb,var(--sport-tint) 30%,transparent),transparent 70%),linear-gradient(180deg,#183460,#13294d);border:1px solid #2b4c79;box-shadow:0 18px 40px #040d1d40;transition:transform .18s,border-color .18s,box-shadow .18s}
+.sport-tile:hover{transform:translateY(-2px);border-color:var(--sport-tint);box-shadow:0 22px 48px #040d1d59}
+.sport-tile:focus-visible{outline:3px solid var(--sport-tint);outline-offset:3px}
+.sport-tile-name{position:relative;z-index:1;font-size:20px;font-weight:750;letter-spacing:-.4px;line-height:1.2}
+.sport-tile-feds{position:relative;z-index:1;font-size:11px;color:#a5bfdd;margin-top:4px;max-width:70%}
+.sport-tile-count{position:relative;z-index:1;font-size:11.5px;font-weight:700;color:var(--sport-tint);margin-top:6px;max-width:62%}
+.sport-tile-arrow{position:relative;z-index:1;margin-top:auto;width:30px;height:30px;padding:7px;border-radius:50%;background:#ffffff14;color:#fff;transition:background .18s,color .18s}
+.sport-tile:hover .sport-tile-arrow{background:var(--sport-tint);color:#0b1d3a}
+.sport-tile-figure{position:absolute;right:-4px;bottom:0;height:156px;width:auto;pointer-events:none;user-select:none}
+.chooser-note{font-size:12px;color:#8fb0d3;margin-top:18px}
+/* Signed in: the account card instead of the sign-in form (who, the global menu with its badges, account and sign-out). */
+.home-account-who{display:flex;align-items:center;gap:12px;margin:12px 0 18px}
+.home-account-who .avatar{width:44px;height:44px;flex-shrink:0;overflow:hidden}
+.home-account-who .avatar img{width:100%;height:100%;object-fit:cover}
+.home-account-who h2{font-size:20px;letter-spacing:-.4px;margin:0;overflow-wrap:anywhere}
+.home-account-who p{font-size:12px;color:#5b6f89;margin-top:2px}
+.home-account-banner:empty{display:none}
+.home-account-banner .acct-banner{margin:0 0 14px}
+.home-account-nav{display:grid;gap:4px;border-top:1px solid #e9eef5;padding-top:12px}
+.home-account-link{display:flex;align-items:center;gap:12px;min-height:46px;padding:8px 10px;border-radius:10px;color:#19324f;font-size:14px;font-weight:650}
+button.home-account-link{width:100%;border:0;background:none;font-family:inherit;text-align:left;cursor:pointer}
+.home-account-link:hover{background:#f1f7fc;color:#00448a}
+.home-account-link>.icon:first-child{width:18px;height:18px;color:#4f6987}
+.home-account-link>span:not(.nav-badge){flex:1;min-width:0}
+.home-account-link .nav-badge{margin-left:0}
+.home-account-arrow{width:15px;height:15px;color:#9fb5cf}
+.home-account-foot{display:flex;flex-wrap:wrap;gap:6px 16px;border-top:1px solid #e9eef5;margin-top:12px;padding-top:12px}
+.home-account-foot .text-btn{display:inline-flex;align-items:center;gap:6px;min-height:40px;font-size:13px;font-weight:650;color:#40597a}
+.home-account-foot .text-btn:hover{color:#00448a}
+.home-account-foot .icon{width:16px;height:16px}
+.home-account:focus{outline:none}
+/* Sport of a tournament on its card, in the arena header and in the guest preview; the note of the tournament form. */
+.tournament-sport{display:inline-block;font-size:10.5px;font-weight:750;color:var(--sport);background:#eef4fa;background:color-mix(in srgb,var(--sport) 10%,#fff);border-radius:999px;padding:2px 9px;margin:6px 0 0}
+.sport-note[hidden]{display:none}
 .upcoming-card{width:100%;background:linear-gradient(180deg,#183460,#13294d);border:1px solid #2b4c79;border-radius:14px;box-shadow:0 24px 60px #040d1d4d;overflow:hidden}
 .upcoming-head{display:flex;align-items:center;gap:13px;padding:20px 20px 17px;border-bottom:1px solid #27466f}
 .upcoming-icon{width:38px;height:38px;border-radius:10px;background:#00aeef1f;color:#4ac1ed;display:grid;place-items:center;flex-shrink:0}
@@ -103,76 +188,112 @@
 .home-skips button{background:#fff;color:#00448a;padding:12px 14px;border-radius:6px;font-size:13px;font-weight:650;box-shadow:0 6px 20px #0b1a334d}
 .home-skips button:focus-visible{outline:2px solid #0072bc;outline-offset:2px}
 .login-jump{display:none}
-/* Very wide screens (plan: 400px minmax(560px,760px) 520px, centred): up to 1760px the columns are exactly that. Wider, both outer columns
-   grow by the same amount (the sign-in one is max(520px,50% - 360px)), so the story | chat | sign-in cluster stays in the middle; the navy
-   and white fills still reach the screen edges. The story content stays 400px wide against the chat, the sign-in content (form, footer,
-   PL|EN switch) stays in the first 520px next to the chat. Without the chat (two columns, below) the sign-in column keeps 56px padding. */
-@media(min-width:1650px){.login-page{grid-template-columns:minmax(400px,1fr) minmax(560px,760px) max(520px,calc(50% - 360px))}.login-story,.login-page .login-upcoming{padding-left:max(52px,calc(100% - 400px))}.login-form-panel{padding-inline:56px}.login-foot{padding-inline:56px}.home-centre:not([hidden])~.login-form-panel,.home-centre:not([hidden])~.login-foot{padding-right:max(56px,calc(100% - 464px))}.login-page:not(:has(>.home-centre[hidden]))>.login-lang{right:max(32px,calc(50% - 848px))}}
-/* Features switched off (chat-boot hides the card): two columns, story | sign-in. */
-@media(min-width:1200px){.login-page:has(>.home-centre[hidden]){grid-template-columns:minmax(0,1fr) clamp(440px,35vw,680px);grid-template-areas:"story auth" "upcoming auth" "upcoming foot"}}
+/* Very wide screens: the chat stops at 800px and both outer columns grow by the same amount, so the tournaments | chat | sign-in cluster
+   stays in the middle (the tournaments hug the chat, the sign-in and the footer keep 420px next to it); the fills reach the edges. */
+@media(min-width:1650px){
+ .home-main{grid-template-columns:minmax(410px,1fr) minmax(560px,800px) minmax(420px,1fr)}
+ .home-events{padding-left:max(40px,calc(100% - 410px))}
+ .home .login-form-panel,.home .login-foot{padding-right:max(34px,calc(100% - 420px))}
+ .home-main:has(>.home-centre[hidden]){grid-template-columns:minmax(0,1fr) minmax(420px,1fr)}
+ .home.is-chooser .home-main{grid-template-columns:minmax(0,1fr) clamp(420px,30vw,560px)}
+ .home.is-chooser .login-form-panel,.home.is-chooser .login-foot{padding-right:max(34px,calc(100% - 420px))}
+ .home-chooser{padding-left:max(56px,calc(50% - 560px))}
+}
 @media(max-width:1199px){
- .login-page{grid-template-columns:minmax(0,1.15fr) minmax(360px,1fr);grid-template-rows:auto auto 1fr;grid-template-areas:"story auth" "chat auth" "upcoming foot"}
- .login-story{padding:44px 48px 0}
- .login-story>div{margin-top:36px}
- .home-centre{background:#102447;padding:28px 48px 8px}
+ .home-main{grid-template-columns:minmax(0,1fr) minmax(320px,380px);grid-template-rows:auto auto 1fr;grid-template-areas:"events auth" "chat auth" "chat foot"}
+ .home-events{padding:26px 36px 4px}
+ .home-events .upcoming-stage{max-width:560px}
+ .home-centre{padding:16px 36px 40px}
  .home-chat{position:relative;top:auto;align-self:stretch;height:560px;min-height:0;max-height:none}
- .login-page .login-upcoming{padding:24px 48px 48px;align-items:flex-start}
- .upcoming-card{max-width:560px}
- .login-form-panel{padding:58px 40px 8px}
- .login-foot{padding:0 40px 16px}
+ .home .login-form-panel{padding:36px 28px 8px}
+ .home .login-foot{padding:0 28px 16px}
+ .home-main:has(>.home-centre[hidden]){grid-template-columns:minmax(0,1fr) minmax(320px,380px)}
+ .home.is-chooser .home-main{grid-template-columns:minmax(0,1fr) minmax(320px,380px)}
+ .chooser-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
 }
 @media(max-width:1000px){
- /* The chat gets its own full-width row: in a half column it would be 260–400 px wide (05 §2.4: a readable chat card). */
- .login-page{grid-template-columns:minmax(0,1fr) minmax(0,1fr);grid-template-areas:"story auth" "chat chat" "upcoming foot"}
- .login-story{padding:35px 35px 0}
- .home-centre{padding:24px 35px 8px}
- .login-page .login-upcoming{padding:20px 35px 35px}
- .login-form-panel{padding:38px 28px 8px}
- .login-foot{padding:0 28px 16px}
+ .home-bar-inner{height:auto;flex-wrap:wrap;gap:0 16px;padding:10px 24px 0}
+ .sport-nav{order:3;flex-basis:100%;height:46px;overflow-x:auto;scrollbar-width:none;margin:4px -24px 0;padding:0 18px}
+ .sport-nav::-webkit-scrollbar{display:none}
+ .sport-tab{padding:0 12px}
+ .sport-tab:after{left:12px;right:12px}
+ .home-main{grid-template-columns:minmax(0,1fr) minmax(0,1fr);grid-template-rows:auto;grid-template-areas:"events auth" "chat chat" "foot foot"}
+ .home-events{padding:24px 20px 8px 28px}
+ .home-centre{padding:12px 28px 32px}
+ .home .login-form-panel{padding:30px 24px 8px}
+ .home .login-foot{padding:0 24px 16px}
+ .home-main:has(>.home-centre[hidden]){grid-template-columns:minmax(0,1fr) minmax(0,1fr);grid-template-areas:"events auth" "foot foot"}
+ .home.is-chooser .home-main{grid-template-columns:minmax(0,1fr);grid-template-areas:"chooser" "auth" "foot"}
+ .home.is-chooser.known-device .home-main{grid-template-areas:"auth" "chooser" "foot"}
+ .home-chooser{padding:30px 28px 36px}
+ .home.is-chooser .login-form-content{margin:0}
 }
+/* Phones: one column. Guests see the sport's tournaments and chat first (a device that signed in before: the sign-in first), signed-in
+   people the account card after the chat ("Konto" in the bar jumps there). The sport switcher scrolls sideways under the bar. */
 @media(max-width:650px){
- .login-page{grid-template-columns:minmax(0,1fr);grid-template-rows:auto;grid-template-areas:"story" "chat" "auth" "upcoming" "foot"}
- .login-page.known-device{grid-template-areas:"story" "auth" "chat" "upcoming" "foot"}
- .login-form-panel{padding:30px 24px 8px}
- .login-story{padding:20px 20px 74px}
- .login-story>div{margin-top:18px}
- .login-page .login-story .brand-logo{height:24px}
- .login-eyebrow{font-size:9px}
- .login-story h1{font-size:30px;letter-spacing:-1.1px;line-height:1.08;margin:8px 0}
- .login-story p{font-size:12.5px;line-height:1.6;max-width:none}
- .home-centre{background:transparent;padding:0 14px;margin-top:-60px;position:relative;z-index:1}
+ .home-bar{position:relative}
+ .home-bar-inner{padding:10px 16px 0;gap:0 10px}
+ .home-brand .brand-logo{height:22px}
+ .sport-nav{height:auto;margin:10px -16px 0;padding:0 16px 12px}
+ .sport-list{gap:6px}
+ .sport-tab{height:36px;padding:0 15px;border-radius:999px;background:#ffffff12;font-size:13px;color:#d4e3f3}
+ .sport-tab:after{display:none}
+ .sport-tab[aria-current="page"]{background:var(--sport-tint);color:#0b1d3a}
+ .sport-tab:focus-visible{outline-offset:2px;border-radius:999px}
+ .home-main{grid-template-columns:minmax(0,1fr);grid-template-areas:"events" "chat" "auth" "foot"}
+ .home.known-device .home-main{grid-template-areas:"auth" "events" "chat" "foot"}
+ .home-main:has(>.home-centre[hidden]){grid-template-columns:minmax(0,1fr);grid-template-areas:"events" "auth" "foot"}
+ .home.known-device .home-main:has(>.home-centre[hidden]){grid-template-areas:"auth" "events" "foot"}
+ .home-events{padding:16px 14px 8px}
+ .home-events .upcoming-stage{--mascot-h:180px;max-width:none}
+ .home-events .login-mascot{right:30px}
+ .upcoming-card{max-width:none}
+ .upcoming-head{padding:18px 16px 15px}
+ .fed-chips{padding:12px 12px 6px}
+ .upcoming-list{padding:4px 6px}
+ .upcoming-item{gap:12px;padding:12px 8px}
+ .upcoming-hint{padding:12px 16px 14px}
+ .home-centre{padding:8px 14px 24px}
  .home-chat{height:auto;min-height:0;box-shadow:0 18px 40px #0b1d3a33,0 0 0 1px #0b1d3a12}
  .home-chat-head{padding:13px 14px 10px}
  .home-chat-head h2{font-size:15px}
  .home-skeleton{padding:8px 14px 18px;gap:16px}
- .known-device .login-story{padding-bottom:28px}
- .known-device .home-centre{margin-top:0;padding:6px 14px 0}
- .login-page .login-upcoming{margin-top:30px;padding:28px 16px 30px}
- .upcoming-card{max-width:none}
- .upcoming-head{padding:18px 16px 15px}
- .upcoming-list{padding:4px 6px}
- .upcoming-item{gap:12px;padding:12px 8px}
- .upcoming-hint{padding:12px 16px 14px}
- .login-foot{padding:0 24px 12px}
- .login-lang{top:15px;right:16px;display:flex;align-items:center;gap:8px}
- .login-jump{display:inline-flex;min-height:36px;padding:6px 12px;background:#00aeef;border-color:#00aeef;color:#06243f;font-weight:700}
+ .home .login-form-panel{padding:28px 20px 8px}
+ .home .login-foot{padding:0 20px 12px}
+ .home.is-chooser .home-main{grid-template-areas:"chooser" "auth" "foot"}
+ .home.is-chooser.known-device .home-main{grid-template-areas:"auth" "chooser" "foot"}
+ .home-chooser{padding:22px 14px 28px}
+ .chooser-head{margin-bottom:18px}
+ .chooser-head h1{font-size:28px;letter-spacing:-1px}
+ .chooser-head p{font-size:12.5px;line-height:1.6}
+ .chooser-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+ .sport-tile{min-height:200px;padding:14px 14px 12px;border-radius:14px}
+ .sport-tile-name{font-size:17px}
+ .sport-tile-feds{max-width:none}
+ .sport-tile-count{max-width:none}
+ .sport-tile-figure{height:122px}
+ .login-eyebrow{font-size:9px}
+ .login-jump{display:inline-flex;align-items:center;gap:6px;min-height:36px;padding:6px 12px;background:#00aeef;border-color:#00aeef;color:#06243f;font-weight:700}
+ .login-jump .icon{width:15px;height:15px}
  .login-jump:hover{background:#3cc4f5}
  .login-jump:focus-visible{outline:2px solid #fff;outline-offset:2px}
  .guest-tab{padding:0 12px;flex:1;justify-content:center}
  .guest-chat{height:min(76dvh,640px)}
 }
 @media(max-width:440px){
- .login-story{padding:18px 16px 70px}
- /* 320-440px (WCAG 1.4.10): the language switch and the sign-in button take about 150px, so the logo (156px wide at 22px high) gives way instead of running under them. */
- .login-story>.brand{max-width:calc(100% - 150px)}
- .login-page .login-story .brand-logo{height:auto;width:156px;max-width:100%}
- .login-story h1{font-size:28px}
- .login-page .login-upcoming{padding:24px 12px 28px}
- .login-form-panel{padding:26px 18px 8px}
- .login-lang{right:12px;gap:6px}
- .login-lang .lang-switch button{min-width:clamp(24px,7.4vw,30px);padding:0 clamp(4px,1.5vw,6px)}
+ /* 320-440px (WCAG 1.4.10): the logo gives way to the mark, the language switch and the sign-in button shrink with the screen. */
+ .home-bar-inner{padding-inline:12px;gap:0 8px}
+ .home-brand .brand-logo{height:30px}
+ .home-bar .lang-switch button{min-width:clamp(24px,7.4vw,30px);padding:0 clamp(4px,1.5vw,6px)}
  .login-jump{padding:6px clamp(8px,2.7vw,10px);font-size:clamp(12px,3.4vw,13px)}
- .home-centre{padding-inline:10px}
+ .sport-nav{margin-inline:-12px;padding-inline:12px}
+ .home-events,.home-centre{padding-inline:10px}
+ .home .login-form-panel{padding:26px 16px 8px}
+ .home-chooser{padding-inline:10px}
+ .chooser-grid{gap:8px}
+ .sport-tile{min-height:184px;padding:12px 12px 10px}
+ .sport-tile-name{font-size:16px}
+ .sport-tile-figure{height:108px}
  .guest-tab{padding:0 8px;gap:6px;font-size:12px}
 }
 /* Sponsor pop-up (content in promo.js). Inline SVG only: the CSP allows no external images or fonts. */

@@ -46,7 +46,6 @@ export default {
  'PRZESTRZEŃ MATBRAVO':'MATBRAVO WORKSPACE',
  'CENTRUM TURNIEJU':'TOURNAMENT CENTRE',
  'Zamknij okno':'Close dialog',
- 'Logowanie':'Log in',
 
  // Statistics
  'Zawodników':'Athletes',
@@ -418,7 +417,6 @@ export default {
 
  // Login
  'TWÓJ TURNIEJ. TWÓJ ZESPÓŁ.':'YOUR TOURNAMENT. YOUR TEAM.',
- 'Od zgłoszenia<br>do finału.':'From entry<br>to final.',
  'Wspólna baza zawodników, kolejne turnieje i czytelne drabinki. Wszystko w jednym miejscu.':'A shared athlete database, tournament after tournament, and clear brackets. All in one place.',
  'Konta klubów i proste zgłoszenia':'Club accounts and simple entries',
  'Wiele turniejów, osobna historia':'Many tournaments, separate histories',

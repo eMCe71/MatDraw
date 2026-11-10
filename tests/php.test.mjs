@@ -44,18 +44,42 @@ test('PHP public projection equals the browser demo projection (list, previews, 
 test('PHP public projection: allow-listed fields, initials only, no drafts or past dates',{skip:!php},()=>{
  const db=drawn(),today='2026-10-31',t=db.tournaments[0];
  const out=bridge({job:'guest',tournaments:db.tournaments,today,ids:[t.id,'t-spring-2027','t-past','t-winter-2027']});
- assert.deepEqual(out.upcoming.tournaments.map(x=>x.id),['t-autumn-2026','t-gp-gdansk-2026','t-winter-2027']);
- for(const x of out.upcoming.tournaments)assert.deepEqual(Object.keys(x).sort(),['city','date','id','name','status']);
+ // Without a sport: the nearest six of every martial art (older app shells ask without one); every demo tournament has a federation.
+ assert.deepEqual(out.upcoming.tournaments.map(x=>x.id),['t-autumn-2026','t-gp-gdansk-2026','t-karate-2026','t-bjj-2026','t-boxing-2027','t-mma-2027']);
+ for(const x of out.upcoming.tournaments)assert.deepEqual(Object.keys(x).sort(),['city','date','federation','id','name','sport','status']);
+ assert.deepEqual(out.upcoming.sports,{taekwondo:3,karate:2,bjj:1,boxing:1,mma:1,muaythai:1},'counts of every listed tournament, not only the six shown');
+ assert.equal(out.upcoming.federations,undefined);
  const [view,draft,past,empty]=out.tournaments;
  assert.equal(draft,null);assert.equal(past,null);assert.deepEqual(empty.categories,[]);
  assert.deepEqual(Object.keys(view).sort(),['categories','summary','tournament']);
- assert.deepEqual(Object.keys(view.tournament).sort(),['city','date','id','name','status']);
+ assert.deepEqual(Object.keys(view.tournament).sort(),['city','date','federation','id','name','sport','status']);
  assert.deepEqual(Object.keys(view.summary).sort(),['brackets','categories','clubs','entries']);
  assert.ok(view.categories.some(c=>c.state==='finished')&&view.categories.some(c=>c.state==='progress'));
  for(const c of view.categories){assert.deepEqual(Object.keys(c).sort(),['athletes','bracket','code','event','gradeType','state','subtitle','title','type']);for(const s of c.bracket?.slots||[])if(s)assert.deepEqual(Object.keys(s).sort(),['club','initials']);}
  const json=JSON.stringify(out);
  for(const field of ['birthDate','legacyAge','"age"','weight','height','"grade"','presence','champion','email','password','clubId','profileId','createdBy','"mat"','activity','revision','signature','createdAt'])assert.ok(!json.includes(field),field);
  for(const e of t.entries){assert.ok(!json.includes(e.name),e.name);for(const part of e.name.split(' '))assert.ok(!new RegExp('(^|[^\\p{L}])'+part+'([^\\p{L}]|$)','u').test(json),part);}
+});
+
+// Home page per martial art (owner 2026-11-10): the public list of one sport (at most SPORT_LIMIT), of one federation with fed; counts
+// per sport (the sport switcher) and per federation of the sport (its filter). A stored tournament without a sport, or with one the
+// catalogue does not know, is taekwondo; an unknown federation is none. PHP equals the demo.
+test('PHP public projection per martial art: sport and federation filters, counts, unknown values',{skip:!php},()=>{
+ const db=drawn(),today='2026-10-31',base={city:'Opole',mat:'Mata 1',createdBy:'demo-admin',status:'open',entries:[],draws:{},activity:[]};
+ db.tournaments.push({...base,id:'t-curling',name:'Nieznany sport',date:'2026-11-25',sport:'curling',federation:'wkf'},{...base,id:'t-odd-fed',name:'Karate bez federacji',date:'2026-11-26',sport:'karate',federation:'itf'},
+  {...base,id:'t-judo',name:'Judo',date:'2026-11-27',sport:'judo',federation:'ijf'},...Array.from({length:14},(_,i)=>({...base,id:'t-box-'+i,name:'Boks '+i,date:'2027-05-'+String(10+i),sport:'boxing',federation:i%2?'iba':null})));
+ const cases=[[null,null,6],['taekwondo',null,12],['karate',null,12],['karate','kyokushin',12],['karate','itkf',12],['boxing',null,12],['boxing','iba',12],['judo',null,12],['kickboxing',null,12]];
+ for(const [sport,fed,limit] of cases){
+  const out=bridge({job:'guest',tournaments:db.tournaments,today,ids:[],limit,sport,fed});
+  assert.deepEqual(out.upcoming,guestUpcoming(db.tournaments,today,limit,sport,fed),sport+'/'+fed);
+ }
+ const list=(sport,fed=null)=>guestUpcoming(db.tournaments,today,12,sport,fed);
+ assert.deepEqual(list('taekwondo').tournaments.map(t=>t.id),['t-autumn-2026','t-curling','t-gp-gdansk-2026','t-winter-2027'],'an unknown sport is taekwondo');
+ assert.equal(list('taekwondo').tournaments[1].federation,undefined,'a federation of another sport is none');
+ assert.deepEqual(list('karate').tournaments.map(t=>[t.id,t.federation]),[['t-odd-fed',undefined],['t-karate-2026','wkf'],['t-kyokushin-2027','kyokushin']]);
+ assert.deepEqual([list('karate').federations,list('karate','kyokushin').tournaments.map(t=>t.id),list('karate','itkf').tournaments],[{wkf:1,kyokushin:1},['t-kyokushin-2027'],[]]);
+ assert.deepEqual([list('boxing').tournaments.length,list('boxing').federations,list('boxing','iba').tournaments.length,list('boxing').sports.boxing],[12,{worldboxing:1,iba:7},7,15],'at most 12 of a sport; the counts cover the whole list');
+ assert.deepEqual(list('kickboxing'),{tournaments:[],sports:list(null).sports,federations:{}});
 });
 
 // backend/bin/seed-athletes.php: 90 fictional athletes spread evenly over categories the rules allow.
@@ -86,9 +110,9 @@ test('PHP public projection equals the demo for community tournaments, unverifie
  const out=bridge({job:'guest',tournaments:list,today,ids,limit:20});
  assert.deepEqual(out.upcoming,guestUpcoming(list,today,20));assert.deepEqual(out.tournaments,ids.map(id=>guestTournament(list,id,today)));
  assert.ok(!out.upcoming.tournaments.some(x=>x.id==='t-community-u'),'unconfirmed: not on the home list');
- assert.deepEqual(out.upcoming.tournaments.find(x=>x.id==='t-community-t'),{id:'t-community-t',name:'Społeczny potwierdzony',date:'2026-11-21',city:'Opole',status:'closed',community:true,trusted:true});
+ assert.deepEqual(out.upcoming.tournaments.find(x=>x.id==='t-community-t'),{id:'t-community-t',name:'Społeczny potwierdzony',date:'2026-11-21',city:'Opole',status:'closed',sport:'taekwondo',community:true,trusted:true});
  const [staff,community]=out.tournaments;
- assert.deepEqual(Object.keys(staff.tournament).sort(),['city','date','id','name','status'],'staff tournaments keep five fields');
+ assert.deepEqual(Object.keys(staff.tournament).sort(),['city','date','federation','id','name','sport','status'],'staff tournaments keep the five fields, the sport and the federation');
  assert.deepEqual([community.tournament.community,community.tournament.trusted],[true,false],'public under its own address');
  const slots=staff.categories.flatMap(c=>c.bracket?.slots||[]).filter(Boolean),clubs=new Set(slots.map(s=>s.club));
  assert.ok(clubs.has(null)&&clubs.has('')&&!clubs.has('Klub Niezweryfikowany')&&!clubs.has('Klub Dawny'),JSON.stringify([...clubs]));
@@ -111,11 +135,11 @@ test('PHP public projection: sparse selfEntry in the preview of an open tourname
  assert.deepEqual(out.upcoming,guestUpcoming(list,today,20));assert.deepEqual(out.tournaments,ids.map(id=>guestTournament(list,id,today)));
  for(const x of out.upcoming.tournaments)assert.ok(!('selfEntry' in x),'never on the home list: '+x.id);
  const [open,closed,off,org,draft,winter,staff]=out.tournaments;
- assert.deepEqual(open.tournament,{id:'t-self-open',name:'Zapisy własne',date:'2026-11-20',city:'Opole',status:'open',selfEntry:true});
+ assert.deepEqual(open.tournament,{id:'t-self-open',name:'Zapisy własne',date:'2026-11-20',city:'Opole',status:'open',sport:'taekwondo',selfEntry:true});
  assert.deepEqual([closed.tournament.selfEntry,off.tournament.selfEntry,draft],[undefined,undefined,null],'closed, switched off, draft');
- assert.deepEqual(org.tournament,{id:'t-self-org',name:'Społeczny z zapisami',date:'2026-11-23',city:'Opole',status:'open',community:true,trusted:false,selfEntry:true});
+ assert.deepEqual(org.tournament,{id:'t-self-org',name:'Społeczny z zapisami',date:'2026-11-23',city:'Opole',status:'open',sport:'taekwondo',community:true,trusted:false,selfEntry:true});
  assert.equal(winter.tournament.selfEntry,true,'demo t-winter-2027 takes self-entries');
- assert.deepEqual(Object.keys(staff.tournament).sort(),['city','date','id','name','status'],'a staff tournament without self-entries keeps five fields');
+ assert.deepEqual(Object.keys(staff.tournament).sort(),['city','date','federation','id','name','sport','status'],'a staff tournament without self-entries: no selfEntry field');
 });
 
 // Materials in the public projection (PLAN-MATERIALY §2.1, §4): GuestView adds the sparse poster {v,w,h,color} and rules {v,size,type} to
@@ -135,13 +159,13 @@ test('PHP public projection: sparse poster and rules in the list and the preview
  const out=bridge({job:'guest',tournaments:list,today,ids,limit:20});
  const poster={v:'9'.repeat(12),w:1240,h:1754,color:'#2b4c7e'},rules={v:'8'.repeat(12),size:48000,type:'pdf'};
  const listed=id=>out.upcoming.tournaments.find(x=>x.id===id);
- assert.deepEqual(listed('t-poster'),{id:'t-poster',name:'Z plakatem',date:'2026-11-20',city:'Opole',status:'open',poster,rules});
- assert.deepEqual(listed('t-rules'),{id:'t-rules',name:'Z regulaminem',date:'2026-11-21',city:'Opole',status:'closed',rules});
- assert.deepEqual(Object.keys(listed('t-broken')).sort(),['city','date','id','name','status'],'invalid meta: nothing');
+ assert.deepEqual(listed('t-poster'),{id:'t-poster',name:'Z plakatem',date:'2026-11-20',city:'Opole',status:'open',sport:'taekwondo',poster,rules});
+ assert.deepEqual(listed('t-rules'),{id:'t-rules',name:'Z regulaminem',date:'2026-11-21',city:'Opole',status:'closed',sport:'taekwondo',rules});
+ assert.deepEqual(Object.keys(listed('t-broken')).sort(),['city','date','id','name','sport','status'],'invalid meta: nothing');
  const [p,r,broken,blocked,text]=out.tournaments;
  assert.deepEqual([listed('t-text').rules,text.tournament.rules],Array(2).fill({v:createHash('sha256').update('Regulamin zawodów\n\n- tajny punkt').digest('hex').slice(0,12),size:32,type:'text'}),'a typed text: v and size (characters) only');
  assert.deepEqual([p.tournament.poster,p.tournament.rules,r.tournament.poster,r.tournament.rules],[poster,rules,undefined,rules]);
- assert.deepEqual(Object.keys(broken.tournament).sort(),['city','date','id','name','status']);
+ assert.deepEqual(Object.keys(broken.tournament).sort(),['city','date','id','name','sport','status']);
  assert.equal(blocked.tournament.poster,undefined,'a blocked organizer\'s tournament: the material route refuses its files, so no poster');
  const json=JSON.stringify(out);assert.ok(!json.includes('.webp')&&!json.includes('.pdf')&&!json.includes('"at"')&&!json.includes('tajny punkt'),'stored meta never leaves');
  if(existsSync(new URL('../dist/materials.js',import.meta.url))){

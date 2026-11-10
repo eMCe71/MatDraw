@@ -41,5 +41,9 @@ export default {
  'Administrator ukrył turniej.':'The Administrator hid the tournament.',
  'Administrator przywrócił turniej.':'The Administrator restored the tournament.',
  'Konto organizatora zostało usunięte.':'The organizer\'s account was deleted.',
- 'Dane usunięte':'Data deleted'
+ 'Dane usunięte':'Data deleted',
+ // Martial arts and federations of tournaments and of the home page (Sports.php, guest-view.js).
+ 'Wybierz sztukę walki z listy.':'Choose a martial art from the list.',
+ 'Wybierz federację z listy.':'Choose a federation from the list.',
+ 'Niepoprawne zapytanie.':'Invalid request.'
 };

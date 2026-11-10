@@ -8,6 +8,7 @@
 import {registry,h,setHtml} from './registry.js';
 import {t as T,locale,translateMessage} from './i18n.js';
 import * as Client from './client.js';
+import {sportOf,federationOf,lobbyOf} from './sports.js';
 
 export const REASONS=['spam','abuse','harassment','child_data','other'];
 export const DURATIONS=['1h','24h','7d','perm'];
@@ -32,14 +33,16 @@ export const presetLabel=p=>({normal:T('Normalne'),saver:T('Oszczędne'),emergen
 export const presetSteps=ms=>(Array.isArray(ms)?ms:[]).map(fmtInterval).join(' · ');
 /** Reason counts as [{reason,n}], most frequent first (ties in the order of REASONS). */
 export const groupReasons=reasons=>Object.entries(reasons||{}).map(([reason,n])=>({reason,n:Number(n)||0})).filter(x=>x.n>0).sort((a,b)=>b.n-a.n||REASONS.indexOf(a.reason)-REASONS.indexOf(b.reason));
-const LOBBY_NAMES={taekwondo:'Taekwondo','taekwondo-pl':'Taekwondo',karate:'Karate'};
-/** Title of a channel from the report queue: a global channel by name and scope, a tournament by its title and date. */
+/** Title of a channel from the report queue: a global channel by its martial art and federation ("Karate · WKF") or general channel,
+ * a retired one of the old PL/world split by its old name (its messages stay reachable here), a tournament by its title and date. */
 export function channelTitle(channel){
  if(!channel)return '';
  if(channel.kind==='tournament')return [channel.title||T('Czat turnieju'),channel.date].filter(Boolean).join(' · ');
- const name=channel.slug==='general'?T('Ogólny'):LOBBY_NAMES[channel.slug]||String(channel.slug||'');
- const scope=channel.scope==='pl'?T('Polska'):channel.scope==='world'?T('Świat'):'';
- return scope?name+' · '+scope:name;
+ const lobby=lobbyOf(channel.slug);
+ if(lobby){const fed=lobby.fed?federationOf(lobby.sport,lobby.fed):null;return T(sportOf(lobby.sport).label)+' · '+(fed?fed[1]:T('Ogólny'));}
+ if(channel.slug==='taekwondo')return 'Taekwondo · '+T('Świat');
+ if(channel.slug==='general')return T('Ogólny')+' · '+T('Świat');
+ return String(channel.slug||'');
 }
 /** Hash of the chat that holds a message: #chat?c=<slug> or #chat?t=<tournament id>. */
 export const chatHash=channel=>channel?.kind==='tournament'&&channel.tournamentId?'#chat?'+new URLSearchParams({t:channel.tournamentId}):channel?.slug?'#chat?'+new URLSearchParams({c:channel.slug}):'#chat';

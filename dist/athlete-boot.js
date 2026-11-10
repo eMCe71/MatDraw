@@ -61,9 +61,9 @@ function stopTimer(){if(timer){clearInterval(timer);timer=null;}}
 if(typeof document!=='undefined'){
  registry.on('painted',({view,page,memberPreview}={})=>{
   const u=signedIn();
-  if(view==='app'){
-   if(page==='starts'&&athleteUser(u)){startTimer();flow().then(m=>m.mountStarts()).catch(log);return;}
-   stopTimer();if(athleteUser(u))loadView({maxAge:STALE_MS}).catch(()=>{});// the menu badge
+  if(view==='app'||view==='home'){
+   if(view==='app'&&page==='starts'&&athleteUser(u)){startTimer();flow().then(m=>m.mountStarts()).catch(log);return;}
+   stopTimer();if(athleteUser(u))loadView({maxAge:STALE_MS}).catch(()=>{});// the menu badge (shell or the home page's account card)
   }else if(view==='guest'&&memberPreview&&u?.role==='member'){stopTimer();const mount=document.querySelector('[data-athlete-cta]');if(mount)flow().then(m=>m.mountCta(mount)).catch(log);}
   else stopTimer();
  });

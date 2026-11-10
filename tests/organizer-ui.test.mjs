@@ -39,7 +39,7 @@ test('final review F9: the tournament summary labels do not depend on the count 
 });
 test('app.js uses the roles: communityOnly in the shell, render, the hall screen polling and rerenderLanguage; mount points for wave 3',()=>{
  const shell=app.slice(app.indexOf('function shell('),app.indexOf('function roundName('));
- assert.match(shell,/member=communityOnly\(user\)/);assert.match(shell,/home=registry\.defaultPage\(user\.role,user\)/);
+ assert.match(shell,/member=communityOnly\(user\)/);assert.match(shell,/<a href="#home" class="brand" data-page="home"/,'the logo leads to the home page (sport switcher) for every role');assert.match(shell,/\[\['home','home',T\('Strona główna'\)\],\.\.\.globalNavItems\(user\)\]/,'the home page opens the menu');
  const render=app.slice(app.indexOf('function render(){'),app.indexOf('function memberHome('));
  assert.match(render,/member=communityOnly\(user\)/);assert.match(render,/registry\.allows\(found,role,user\)/,'visible(user) applies to registered pages');
  assert.match(app,/setInterval\(async\(\)=>\{if\(workspace&&!communityOnly\(workspace\.user\)&&location\.hash\.startsWith\('#screen'\)/);
@@ -181,14 +181,16 @@ test('demo in a browser: organizer and editor defaults, copy link with its fallb
  const open=async({clipboard}={})=>{const ctx=await browser.newContext({viewport:{width:1440,height:900},locale:'pl-PL',serviceWorkers:'block'});
   await ctx.addInitScript(mode=>{window.__csp=[];document.addEventListener('securitypolicyviolation',e=>window.__csp.push(e.violatedDirective));
    if(mode){window.__copied=[];Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:mode==='deny'?async()=>{throw new DOMException('denied','NotAllowedError');}:async t=>{window.__copied.push(t);}}});}},clipboard||null);
-  const page=await ctx.newPage();page.on('pageerror',e=>problems.push(e.message));page.on('console',m=>{if(m.type()==='error')problems.push(m.text().slice(0,200));});await page.goto(url);await page.waitForSelector('.login-page');return {ctx,page};};
+  const page=await ctx.newPage();page.on('pageerror',e=>problems.push(e.message));page.on('console',m=>{if(m.type()==='error')problems.push(m.text().slice(0,200));});await page.goto(url);await page.waitForSelector('#login-form');return {ctx,page};};
+ // Signing in keeps the home page (owner 2026-11-10): the account card's "Turnieje" opens the tournaments.
+ const tournaments=async page=>{await page.waitForSelector('#home-account');assert.equal(await page.evaluate(()=>location.hash),'','the home page stays');await page.click('#home-account [data-page="tournaments"]');};
  try{
   // Editor: a new tournament stays a draft without self-entry.
-  {const {ctx,page}=await open();await page.click('[data-action="demo-login"][data-role="editor"]');await page.waitForSelector('.tournament-grid');
+  {const {ctx,page}=await open();await page.click('[data-action="demo-login"][data-role="editor"]');await tournaments(page);await page.waitForSelector('.tournament-grid');
    await page.click('.heading-actions [data-action="new-tournament"]');await page.waitForSelector('#tournament-form');
    assert.deepEqual(await page.evaluate(()=>[document.querySelector('#tournament-form [name=status]').value,document.querySelector('#tournament-form [name=selfEntry]').checked]),['draft',false]);await ctx.close();}
-  // Organizer: lands on "Moje turnieje" with the first-run card; a new tournament opens with self-entry; copy link (clipboard and fallback).
-  {const {ctx,page}=await open({clipboard:'deny'});await page.click('[data-action="demo-login"][data-role="organizer"]');await page.waitForSelector('.first-run');
+  // Organizer: "Moje turnieje" with the first-run card; a new tournament opens with self-entry; copy link (clipboard and fallback).
+  {const {ctx,page}=await open({clipboard:'deny'});await page.click('[data-action="demo-login"][data-role="organizer"]');await tournaments(page);await page.waitForSelector('.first-run');
    assert.equal(await page.evaluate(()=>location.hash),'#tournaments');assert.equal(await page.locator('h1').innerText(),'Moje turnieje');
    assert.equal(await page.locator('.nav-link[data-page="database"]').innerText(),'Moi zawodnicy');
    await page.click('.heading-actions [data-action="new-tournament"]');await page.waitForSelector('#tournament-form');
@@ -203,7 +205,7 @@ test('demo in a browser: organizer and editor defaults, copy link with its fallb
    assert.deepEqual(await page.evaluate(()=>{const f=document.querySelector('#copy-link-field');return [f.value,f.readOnly,f.selectionStart,f.selectionEnd===f.value.length];}),[url+'#guest?t='+id,true,0,true],'fallback: the address selected in a read-only field');
    await page.keyboard.press('Escape');await ctx.close();
    const ok=await open({clipboard:'allow'});
-   await ok.page.click('[data-action="demo-login"][data-role="organizer"]');await ok.page.waitForSelector('.first-run');
+   await ok.page.click('[data-action="demo-login"][data-role="organizer"]');await tournaments(ok.page);await ok.page.waitForSelector('.first-run');
    await ok.page.click('.heading-actions [data-action="new-tournament"]');await ok.page.fill('#tournament-form [name=name]','Puchar Linku');await ok.page.fill('#tournament-form [name=date]','2027-03-20');await ok.page.fill('#tournament-form [name=city]','Opole');
    await ok.page.click('button[form="tournament-form"]');await ok.page.waitForSelector('[data-action="copy-link"]');await ok.page.click('[data-action="copy-link"]');
    await ok.page.waitForFunction(()=>document.querySelector('#toast').textContent==='Link skopiowany.');
@@ -261,7 +263,7 @@ test('API mode in a browser: a reauth at start-up asks for the password, a wrong
   // Cancel: the member's pages stay (no sign-out) with "Narzędzia organizatora" to try again.
   unlocked=false;log.length=0;const c2=await browser.newContext({viewport:{width:1440,height:900},locale:'pl-PL',serviceWorkers:'block'}),p2=await c2.newPage();p2.on('pageerror',e=>problems.push(e.message));
   await p2.goto(url);await p2.waitForSelector('#unlock-form');await p2.keyboard.press('Escape');
-  await p2.waitForSelector('[data-action="organizer-unlock"]');assert.equal(await p2.locator('.login-page').count(),0,'still signed in');
+  await p2.waitForSelector('#home-account [data-action="organizer-unlock"]');assert.equal(await p2.locator('#login-form').count(),0,'still signed in');
   assert.equal(log.filter(r=>r==='bootstrap').length,1);
   await p2.click('[data-action="organizer-unlock"]');await p2.waitForSelector('#unlock-form');await p2.fill('#unlock-form [name=password]','Prawidlowe-Haslo-2026');await p2.click('button[form="unlock-form"]');
   await p2.waitForSelector('.tournament-grid');assert.equal(await p2.locator('[data-action="organizer-unlock"]').count(),0);
@@ -275,7 +277,7 @@ test('final review F1, demo in a browser (390 and 1440): the Administrator erase
   for(const [w,hh] of [[390,844],[1440,900]]){
    const ctx=await browser.newContext({viewport:{width:w,height:hh},locale:'pl-PL',serviceWorkers:'block'}),page=await ctx.newPage();
    page.on('pageerror',e=>problems.push(e.message));page.on('console',m=>{if(m.type()==='error')problems.push(m.text().slice(0,200));});
-   await page.goto(url);await page.click('[data-action="demo-login"][data-role="admin"]');await page.waitForSelector('.app-shell');
+   await page.goto(url);await page.click('[data-action="demo-login"][data-role="admin"]');await page.waitForSelector('#home-account');
    // The parent's child (an athlete account's profile) has an entry in a tournament that then finishes: the result is kept.
    await page.evaluate(async()=>{
     const W=await import('./workspace.js');let db=JSON.parse(localStorage.getItem('matdraw.workspace.v2'));
@@ -316,12 +318,12 @@ test('demo in a browser: a page with visible(user) renders for its user, #event-
  const {server,url}=await serve(),browser=await chromium.launch().catch(e=>{server.close();throw e;}),problems=[];
  const ctx=await browser.newContext({viewport:{width:1440,height:900},locale:'pl-PL',serviceWorkers:'block'}),page=await ctx.newPage();page.on('pageerror',e=>problems.push(e.message));page.on('console',m=>{if(m.type()==='error')problems.push(m.text().slice(0,200));});
  const stored=id=>page.evaluate(id=>JSON.parse(localStorage.getItem('matdraw.workspace.v2')).profiles.find(p=>p.id===id),id);
- const signIn=async role=>{await page.evaluate(()=>sessionStorage.clear());await page.goto(url);await page.reload();await page.waitForSelector('.login-page');await page.click(`[data-action="demo-login"][data-role="${role}"]`);await page.waitForSelector('.app-shell');};
+ const signIn=async role=>{await page.evaluate(()=>sessionStorage.clear());await page.goto(url);await page.reload();await page.waitForSelector('#login-form');await page.click(`[data-action="demo-login"][data-role="${role}"]`);await page.waitForSelector('#home-account');};
  const editSave=async(id,change)=>{await page.evaluate(()=>{location.hash='#database';});await page.waitForSelector(`[data-action="edit-profile"][data-id="${id}"]`);await page.click(`[data-action="edit-profile"][data-id="${id}"]`);await page.waitForSelector('#profile-form');
   const state=await page.evaluate(()=>({disabled:[...document.querySelectorAll('#profile-form [data-cp-mode]')].every(r=>r.disabled),mode:document.querySelector('#profile-form [data-cp-mode]:checked')?.value,note:document.querySelector('#profile-form .club-locked')?.textContent||null}));
   await change();await page.click('button[form="profile-form"]');await page.waitForFunction(()=>!document.querySelector('#profile-form'));return state;};
  try{
-  await page.goto(url);await page.waitForSelector('.login-page');await page.click('[data-action="demo-login"][data-role="athlete"]');await page.waitForSelector('.app-shell');
+  await page.goto(url);await page.waitForSelector('#login-form');await page.click('[data-action="demo-login"][data-role="athlete"]');await page.waitForSelector('#home-account');
   const r=await page.evaluate(async()=>{const {registry,h}=await import('./registry.js'),wait=()=>new Promise(r=>setTimeout(r,300));
    registry.registerPage({id:'qa-starts',icon:'trophy',label:'Moje starty QA',nav:'global',roles:['member'],order:15,visible:u=>!!u?.caps?.athlete,title:'Moje starty QA',render:()=>registry.use('ui').shell(h`<div id="qa-starts-body">STARTS</div>`,'Moje starty QA','')});
    location.hash='#qa-starts';await wait();const starts={body:!!document.querySelector('#qa-starts-body'),title:document.title};
@@ -331,7 +333,7 @@ test('demo in a browser: a page with visible(user) renders for its user, #event-
   // An organizer's unaffiliated athlete with a club name waiting for the Administrator (§6.3).
   await signIn('organizer');
   await page.evaluate(()=>{const key='matdraw.workspace.v2',db=JSON.parse(localStorage.getItem(key));db.profiles.push({id:'qa-pending',name:'Jan Oczekujący',clubId:'unaffiliated',pendingClubName:'Orły Opole',sex:'M',birthDate:'1990-05-01',weight:60,height:175,gradeType:'cup',grade:5,events:['forms'],champion:false,createdBy:'demo-organizer',createdAt:Math.floor(Date.now()/1000),archived:false,ownerId:null});db.revision++;localStorage.setItem(key,JSON.stringify(db));});
-  await page.reload();await page.waitForSelector('.app-shell');
+  await page.reload();await page.waitForSelector('#home-account');
   const org=await editSave('qa-pending',()=>page.fill('#profile-form [name=weight]','61'));
   assert.deepEqual(org,{disabled:true,mode:'none',note:'Klub zawodnika może zmienić Administrator.'},'an organizer sees the club read-only');
   let p=await stored('qa-pending');assert.deepEqual([p.weight,p.clubId,p.pendingClubName],[61,'unaffiliated','Orły Opole']);
@@ -350,7 +352,7 @@ test('review round 2, demo in a browser: a check-in that fails after the club wa
  const {server,url}=await serve(),browser=await chromium.launch().catch(e=>{server.close();throw e;}),problems=[];
  try{
   const ctx=await browser.newContext({viewport:{width:1440,height:900},locale:'pl-PL',serviceWorkers:'block'}),page=await ctx.newPage();page.on('pageerror',e=>problems.push(e.message));page.on('console',m=>{if(m.type()==='error')problems.push(m.text().slice(0,200));});
-  await page.goto(url);await page.waitForSelector('.login-page');await page.click('[data-action="demo-login"][data-role="organizer"]');await page.waitForSelector('.app-shell');
+  await page.goto(url);await page.waitForSelector('#login-form');await page.click('[data-action="demo-login"][data-role="organizer"]');await page.waitForSelector('#home-account');
   // The organizer's own tournament with an adult athlete's self-entry (club "Niezrzeszony", waiting for the check-in).
   const club=await page.evaluate(()=>{const key='matdraw.workspace.v2',db=JSON.parse(localStorage.getItem(key)),club=db.clubs.find(c=>c.id!=='unaffiliated'&&!c.mergedInto);
    db.profiles.push({id:'qa-self',name:'Ola Samodzielna',clubId:'unaffiliated',sex:'F',birthDate:'1995-04-02',weight:58,height:168,gradeType:'cup',grade:6,events:['forms'],champion:false,createdBy:'demo-athlete',createdAt:1793484000,archived:false,ownerId:'demo-athlete',relation:'self'});
@@ -407,7 +409,7 @@ test('final review R1.5, demo in a browser: after club.merge the club account ed
  const {server,url}=await serve(),browser=await chromium.launch().catch(e=>{server.close();throw e;}),problems=[];
  try{
   const ctx=await browser.newContext({viewport:{width:1440,height:900},locale:'pl-PL',serviceWorkers:'block'}),page=await ctx.newPage();page.on('pageerror',e=>problems.push(e.message));page.on('console',m=>{if(m.type()==='error')problems.push(m.text().slice(0,200));});
-  await page.goto(url);await page.waitForSelector('.login-page');await page.click('[data-action="demo-login"][data-role="club"]');await page.waitForSelector('.app-shell');
+  await page.goto(url);await page.waitForSelector('#login-form');await page.click('[data-action="demo-login"][data-role="club"]');await page.waitForSelector('#home-account');
   // A club the Administrator merged into the club of this account; the entry snapshot keeps the former club (PS-10).
   await page.evaluate(()=>{const key='matdraw.workspace.v2',db=JSON.parse(localStorage.getItem(key)),club=db.users.find(u=>u.id==='demo-club').clubId,t=db.tournaments.find(t=>t.id==='t-autumn-2026');
    db.clubs.push({id:'qa-old',name:'Stary Klub QA',verified:true,createdBy:null,createdAt:null,mergedInto:club});
@@ -428,7 +430,7 @@ test('I3, demo in a browser: a club account in the tournament of a deactivated o
  const {server,url}=await serve(),browser=await chromium.launch().catch(e=>{server.close();throw e;}),problems=[];
  try{
   const ctx=await browser.newContext({viewport:{width:1440,height:900},locale:'pl-PL',serviceWorkers:'block'}),page=await ctx.newPage();page.on('pageerror',e=>problems.push(e.message));page.on('console',m=>{if(m.type()==='error')problems.push(m.text().slice(0,200));});
-  await page.goto(url);await page.waitForSelector('.login-page');await page.click('[data-action="demo-login"][data-role="club"]');await page.waitForSelector('.app-shell');
+  await page.goto(url);await page.waitForSelector('#login-form');await page.click('[data-action="demo-login"][data-role="club"]');await page.waitForSelector('#home-account');
   // A confirmed organizer's open tournament with an entry of this club, then the Administrator deactivates the organizer.
   const setActive=active=>page.evaluate(active=>{const key='matdraw.workspace.v2',db=JSON.parse(localStorage.getItem(key)),club=db.users.find(u=>u.id==='demo-club').clubId;
    if(!db.users.some(u=>u.id==='qa-org')){

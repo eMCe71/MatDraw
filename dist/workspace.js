@@ -2,6 +2,7 @@ import {EVENTS,initialState,validateAthlete,eligibility,categories,makeDraw,sign
 import {cleanText,clubKey} from './profile-data.js';
 import {initials,warsawToday} from './guest-view.js';
 import {inviteCheck,inviteJson} from './invite-data.js';
+import {SPORT_IDS,DEFAULT_SPORT,federationOf,tournamentSport,tournamentFederation} from './sports.js';
 /* Workspace rules of the browser demo: mirror of backend/src/Domain.php and backend/src/Clubs.php (plan §5–§7 of
  * PLAN-REJESTRACJA-ROLE). tests/roles-parity.test.mjs runs the same commands through both and compares statuses, messages of
  * the new paths and the normalised state; Domain::forgetMember and Domain::retain are PHP only. Members of the demo live in
@@ -300,12 +301,18 @@ export function initialWorkspace(legacy){
  const materials={poster:{src:'./demo/poster-demo.webp',w:1240,h:1754,c:'#4c4e59',at:1793484000},rules:{src:'./demo/regulamin-demo.pdf',b:41049,at:1793484000},
   // The organizer's invitation of the demo (PLAN-MATERIALY §6): Bogdan's template filled in.
   invite:{s:'classic',d:{event:'Puchar Jesieni 2026',venue:'Hali Sportowej Arena Ursynów',street:'Pileckiego 122 w Warszawie',dates:'14 listopada 2026',special:'Twimyo Nopi Ap Chagi\nTwimyo Dollyo Chagi\nTwimyo Yop Chagi',women:'Pompki na kolanach – 30 s\nPrzysiady – 30 s',men:'Pompki – 30 s\nPodciąganie na drążku',open:'1 października 2026',close:'7 listopada 2026, godz. 23:59',note:'Prosimy o zwracanie uwagi na informacje przesyłane do Klubów przez Organizatora!',closing:'ZAPRASZAMY!'},at:1793484000}};
- const t={...old.tournament,id:'t-autumn-2026',status:'open',createdBy:'demo-admin',selfEntry:false,entries,draws:old.draws||{},activity:old.activity||[],materials};
- const second={id:'t-winter-2027',name:'Puchar Zimy 2027',city:'Kraków',date:'2027-02-20',mat:'Mata 1',status:'open',createdBy:'demo-editor',selfEntry:true,entries:[],draws:{},activity:[]};
- // A further published date and an unpublished draft: the login screen's public list shows the first, never the draft.
- const third={id:'t-gp-gdansk-2026',name:'Grand Prix Pomorza 2026',city:'Gdańsk',date:'2026-12-05',mat:'Mata 1',status:'closed',createdBy:'demo-editor',selfEntry:false,entries:[],draws:{},activity:[]};
- const draft={id:'t-spring-2027',name:'Puchar Wiosny 2027',city:'Wrocław',date:'2027-04-17',mat:'Mata 1',status:'draft',createdBy:'demo-admin',selfEntry:false,entries:[],draws:{},activity:[]};
- return {schemaVersion:2,revision:1,staffRev:1,clubs,users,profiles,tournaments:[t,second,third,draft]};
+ const t={...old.tournament,id:'t-autumn-2026',status:'open',createdBy:'demo-admin',sport:'taekwondo',federation:'itf',selfEntry:false,entries,draws:old.draws||{},activity:old.activity||[],materials};
+ const second={id:'t-winter-2027',name:'Puchar Zimy 2027',city:'Kraków',date:'2027-02-20',mat:'Mata 1',status:'open',createdBy:'demo-editor',sport:'taekwondo',federation:'uitf',selfEntry:true,entries:[],draws:{},activity:[]};
+ // A further published date and an unpublished draft: the home page's public list shows the first, never the draft.
+ const third={id:'t-gp-gdansk-2026',name:'Grand Prix Pomorza 2026',city:'Gdańsk',date:'2026-12-05',mat:'Mata 1',status:'closed',createdBy:'demo-editor',sport:'taekwondo',federation:'wt',selfEntry:false,entries:[],draws:{},activity:[]};
+ const draft={id:'t-spring-2027',name:'Puchar Wiosny 2027',city:'Wrocław',date:'2027-04-17',mat:'Mata 1',status:'draft',createdBy:'demo-admin',sport:'taekwondo',federation:'itf',selfEntry:false,entries:[],draws:{},activity:[]};
+ // Fictional tournaments of other martial arts (home page per sport, owner 2026-11-10): published, without entries; judo and
+ // kickboxing have none, so the demo shows the empty state of a sport too.
+ const other=[['t-karate-2026','Puchar Mazowsza Karate','Warszawa','2026-12-12','karate','wkf'],['t-kyokushin-2027','Lubelskie Kumite Kyokushin','Lublin','2027-01-30','karate','kyokushin'],
+  ['t-bjj-2026','Wielkopolski Turniej BJJ','Poznań','2026-12-19','bjj','ibjjf'],['t-boxing-2027','Turniej Bokserski o Pas Wisły','Kraków','2027-01-16','boxing','worldboxing'],
+  ['t-mma-2027','Amatorski Turniej MMA','Łódź','2027-01-23','mma','immaf'],['t-muaythai-2027','Bałtycki Puchar Muay Thai','Gdynia','2027-03-06','muaythai','ifma']]
+  .map(([id,name,city,date,sport,federation])=>({id,name,city,date,mat:'Mata 1',status:'open',createdBy:'demo-editor',sport,federation,selfEntry:false,entries:[],draws:{},activity:[]}));
+ return {schemaVersion:2,revision:1,staffRev:1,clubs,users,profiles,tournaments:[t,second,third,draft,...other]};
 }
 function validateProfile(p){
  const v={...p,age:25,club:'Klub',events:['forms']};validateAthlete(v);
@@ -442,6 +449,10 @@ function apply(db,user,type,p){
   if(t&&isset(t.hiddenBy)&&data.status!=='draft')fail('Turniej ukrył Administrator. Status może zmienić tylko Administrator.',409);
   if(organizer(user))organizerLimits(db,user,t,data.status,data.date);
   data.selfEntry=has(p,'selfEntry')?p.selfEntry===true:t?t.selfEntry===true:organizer(user);
+  // Martial art and federation (Sports::of/federationOf, migration 0010): kept when the payload leaves them out; a new sport drops the old federation.
+  data.sport=has(p,'sport')?p.sport:t?tournamentSport(t):DEFAULT_SPORT;if(!SPORT_IDS.includes(data.sport))fail('Wybierz sztukę walki z listy.');
+  let fed=has(p,'federation')?p.federation:t&&tournamentSport(t)===data.sport?tournamentFederation(t):null;
+  if(fed==='')fed=null;if(fed!==null&&(typeof fed!=='string'||!federationOf(data.sport,fed)))fail('Wybierz federację z listy.');data.federation=fed;
   if(t){Object.assign(t,data);audit(t,'Zaktualizowano ustawienia turnieju.');return {id:t.id};}
   const next={id:id(),createdBy:user.id,createdAt:now,...data,entries:[],draws:{},activity:[]};audit(next,'Utworzono turniej.');db.tournaments.push(next);return {id:next.id};
  }

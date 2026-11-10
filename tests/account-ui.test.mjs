@@ -601,9 +601,9 @@ test('API stub in a browser: roles closed (rolesOpen false) and the account dele
    assert.equal(await page.locator('#acct-delete-form [name="athleteInitials"]').count(),0);
    sent=[];await page.click('#modal-root button[form="acct-delete-form"]');await page.waitForFunction(()=>!document.querySelector('#acct-delete-form'),null,{timeout:10000});
    assert.deepEqual(sent.map(([r])=>r),['account-delete'],'the athlete data are not erased twice');
-   // The app now logs out and lands on #chat on its own (asynchronously): wait for it, then go on in a fresh context, so
-   // its late navigation cannot take the next page away (final review R1.1: flaky wait for .acct-danger).
-   await page.waitForFunction(()=>location.hash==='#chat',null,{timeout:10000});await ctx.close();
+   // The app now logs out and reloads on the home page (no hash) on its own (asynchronously): wait for it, then go on in a fresh
+   // context, so its late navigation cannot take the next page away (final review R1.1: flaky wait for .acct-danger).
+   await page.waitForFunction(()=>location.hash===''&&!!document.querySelector('.home'),null,{timeout:10000});await ctx.close();
    // Without an athlete profile: no warning and no box.
    member=stubMember({features:{rolesOpen:true}});[ctx,page]=await fresh();
    await page.goto(url+'#profile?tab=security');await page.waitForSelector('.acct-danger');
@@ -627,9 +627,9 @@ test('demo in a browser: sign-up shows the demo message, the profile saves to lo
    await noOverflow(page,'demo signup '+w);await shot(page,'demo-signup-'+w);
    await page.click('.acct-card [data-acct-act="to-login"]');await page.waitForSelector('#login-form');
    assert.equal(await page.locator('[data-account-mount="join"] .acct-join').count(),0,'sign-up disabled in the demo: no card');
-   await page.click('[data-action="demo-login"][data-role="editor"]');await page.waitForSelector('.app-shell');
-   if(w<800)await page.click('.topbar [data-action="menu"]');
-   await page.click('[data-action="my-account"]');await page.waitForSelector('#acct-profile-form');
+   // Signing in keeps the home page (owner 2026-11-10): "Moje konto" sits in its account card, also on a phone.
+   await page.click('[data-action="demo-login"][data-role="editor"]');await page.waitForSelector('#home-account');
+   await page.click('#home-account [data-action="my-account"]');await page.waitForSelector('#acct-profile-form');
    await noOverflow(page,'demo profile '+w);await shot(page,'demo-profile-'+w);
    await page.fill('#acct-profile-form [name="clubText"]','KS Tygrys Kraków');await page.click('[data-sport="judo"]');
    await page.click('[data-set-lang="en"]');await page.waitForSelector('#acct-tab-profile');
@@ -794,9 +794,12 @@ test('PHP build in a browser: sign-up, Checkout and return, portal, cancel, prof
   const payer=fixture('member',{email:'e2e.payer.'+Date.now()+'@example.test',profile:true});
   ({ctx,page}=await context(1440,900));
   await page.goto(app);await page.fill('#login-form [name="email"]',payer.email);await page.fill('#login-form [name="password"]','TestPassword2026!');
-  await page.click('#login-form button[type="submit"]');await page.waitForSelector('.app-shell');
-  // A member's shell (F13): the own name and @username instead of the role "Członek", initials from the profile.
-  await page.waitForFunction(()=>document.querySelector('.sidebar [data-self-name]')?.textContent==='Test Członek');
+  await page.click('#login-form button[type="submit"]');await page.waitForSelector('#home-account');
+  // The home page's account card (F13; signing in keeps the home page): the own name and @username instead of the role
+  // "Członek", initials from the profile. The shell's menu shows the same (its own page below).
+  await page.waitForFunction(()=>document.querySelector('#home-account [data-self-name]')?.textContent==='Test Członek');
+  assert.match(await page.textContent('#home-account [data-self-sub]'),/^@e2epayer/);assert.equal(await page.textContent('#home-account [data-self-avatar]'),'TC');
+  await page.click('#home-account [data-page="chat"]');await page.waitForFunction(()=>document.querySelector('.sidebar [data-self-name]')?.textContent==='Test Członek');
   assert.match(await page.textContent('.sidebar [data-self-sub]'),/^@e2epayer/);assert.equal(await page.textContent('.sidebar [data-self-avatar]'),'TC');
   await page.goto(app+'#billing');await page.waitForSelector('.acct-plan [data-acct-act="checkout"]');
   const isCheckout=u=>new URL(u).searchParams.get('route')==='billing-checkout';
@@ -815,7 +818,7 @@ test('PHP build in a browser: sign-up, Checkout and return, portal, cancel, prof
   fixture('billing',{userId:pwUser.id,billing_exempt:1,exempt_reason:'e2e'});
   ({ctx,page}=await context(1440,900));
   await page.goto(app);await page.fill('#login-form [name="email"]',pwEmail);await page.fill('#login-form [name="password"]','EditorForTests2026!');
-  await page.click('#login-form button[type="submit"]');await page.waitForSelector('.app-shell');
+  await page.click('#login-form button[type="submit"]');await page.waitForSelector('#home-account');
   await page.goto(app+'#profile?tab=security');await page.waitForSelector('#acct-password-form');
   await admin.load();await admin.cmd('account.save',{email:'e2e.bump.'+Date.now()+'@example.test',clubId,role:'editor',active:true,password:'EditorForTests2026!'});
   const statuses=[];const onCommand=r=>{if(r.url().includes('route=command'))statuses.push(r.status());};page.on('response',onCommand);
@@ -843,7 +846,7 @@ test('demo in a browser: the "Role" tab of the parent and of the organizer, PL a
   for(const [w,hh] of [[1440,900],[390,844]])for(const lang of ['pl','en']){
    const ctx=await browser.newContext({viewport:{width:w,height:hh},locale:lang==='pl'?'pl-PL':'en-GB'});await ctx.addInitScript(l=>{try{localStorage.setItem('matdraw.language',l);}catch{}},lang);
    const page=await ctx.newPage();watch(page,errors);
-   await page.goto(url);await page.click('[data-action="demo-login"][data-role="athlete"]');await page.waitForSelector('.app-shell');
+   await page.goto(url);await page.click('[data-action="demo-login"][data-role="athlete"]');await page.waitForSelector('#home-account');
    await page.evaluate(()=>{location.hash='#profile?tab=roles';});await page.waitForSelector('.acct-role');
    assert.equal(await page.getAttribute('#acct-tab-roles','aria-selected'),'true');
    assert.equal(await page.textContent('.acct-role-name'),lang==='pl'?'Opiekun zawodnika':'Athlete’s guardian','role name of a parent');
@@ -856,7 +859,7 @@ test('demo in a browser: the "Role" tab of the parent and of the organizer, PL a
    await page.click('[data-action="logout"]').catch(()=>{});await ctx.close();
    const ctx2=await browser.newContext({viewport:{width:w,height:hh},locale:lang==='pl'?'pl-PL':'en-GB'});await ctx2.addInitScript(l=>{try{localStorage.setItem('matdraw.language',l);}catch{}},lang);
    const page2=await ctx2.newPage();watch(page2,errors);
-   await page2.goto(url);await page2.click('[data-action="demo-login"][data-role="organizer"]');await page2.waitForSelector('.app-shell');
+   await page2.goto(url);await page2.click('[data-action="demo-login"][data-role="organizer"]');await page2.waitForSelector('#home-account');
    await page2.evaluate(()=>{location.hash='#profile?tab=roles';});await page2.waitForSelector('.acct-role');
    assert.equal(await page2.getAttribute('[data-acct-act="organizer-toggle"]','data-on'),'false','the organizer can turn the role off');
    assert.equal(await page2.locator('[data-acct-act="athlete-add"]').count(),1,'no athlete profile yet: add one');

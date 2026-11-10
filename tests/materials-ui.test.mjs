@@ -234,7 +234,8 @@ async function open(browser,url,options={}){
  page.on('dialog',d=>{errors.push('dialog '+d.message());d.dismiss();});
  await page.goto(url);await page.waitForSelector('[data-action="demo-login"]');return {ctx,page,errors};
 }
-const login=async(page,role)=>{await page.click(`[data-action="demo-login"][data-role="${role}"]`);await page.waitForSelector('.app-shell');};
+// Signing in keeps the home page (owner 2026-11-10): the account card's "Turnieje" opens the tournaments.
+const login=async(page,role)=>{await page.click(`[data-action="demo-login"][data-role="${role}"]`);await page.click('#home-account [data-page="tournaments"]');await page.waitForSelector('.app-shell');};
 const logout=async page=>{await page.evaluate(()=>document.querySelector('[data-action="logout"]')?.click());await page.waitForSelector('[data-action="demo-login"]');};
 const settings=async(page,id)=>{await page.click(`main .tournament-card-actions [data-action="edit-tournament"][data-id="${id}"]`);await page.waitForSelector('#tournament-form [data-materials]');};
 
@@ -365,7 +366,9 @@ test('PHP build: the Administrator adds a JPEG and a PDF in the dialog; a guest 
   const ctx=await browser.newContext({viewport:{width:1280,height:900},locale:'pl-PL'});await ctx.addInitScript(()=>{try{localStorage.setItem('matdraw.language','pl');}catch{}});
   const page=await ctx.newPage();page.on('pageerror',e=>errors.push(e.message));
   await page.goto(app);await page.fill('#login-form input[name="email"]','admin@test.example');await page.fill('#login-form input[name="password"]','AdminForTests2026!');
-  await page.click('#login-form button[type="submit"]');await page.waitForSelector('.app-shell',{timeout:20000});
+  // Signing in keeps the home page (owner 2026-11-10): the account card's "Turnieje" opens the tournaments.
+  await page.click('#login-form button[type="submit"]');await page.waitForSelector('#home-account',{timeout:20000});
+  await page.click('#home-account [data-page="tournaments"]');await page.waitForSelector('.app-shell');
   await page.click('main .page-heading [data-action="new-tournament"]');await page.waitForSelector('#tournament-form [data-materials]');
   await page.fill('#tournament-form [name="name"]',name);await page.fill('#tournament-form [name="city"]','Lublin');
   const date=new Date(Date.now()+40*86400000).toISOString().slice(0,10);await page.fill('#tournament-form [name="date"]',date);await page.selectOption('#tournament-form [name="status"]','open');

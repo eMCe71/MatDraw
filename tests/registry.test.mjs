@@ -120,12 +120,12 @@ test('app.js paints registered pages through setHtml, so a page that returns a p
  const el={innerHTML:''};assert.throws(()=>setHtml(el,page('qa-plain-string').render(new URLSearchParams())),TypeError);assert.equal(el.innerHTML,'');
 });
 
-test('app.js: after a 401 the view follows the hash (public page, guest flow or login), and a member preview is dropped',async()=>{
+test('app.js: after a 401 the view follows the hash (public page, guest flow or the home page with the sign-in), and a member preview is dropped',async()=>{
  const {readFileSync}=await import('node:fs');const app=readFileSync(new URL('../dist/app.js',import.meta.url),'utf8');
  const branch=app.match(/if\(error\.status===401\)\{[^\n]*\}/)?.[0]||'';
  assert.match(branch,/workspace=null;closeModal\(\);if\(guest\?\.memberPreview\)\{guest=null;promo=null;\}renderPublic\(error\.message\);return;/);
- assert.ok(!/renderLogin\(/.test(branch),'no login page drawn under a hash that names a public page');
- assert.match(app,/function renderPublic\(message=''\)\{/);assert.match(app,/if\(!id\)\{guest=null;promo=null;renderLogin\(message\);return;\}/);
+ assert.ok(!/renderHome\(/.test(branch),'no home page drawn under a hash that names a public page');
+ assert.match(app,/function renderPublic\(message=''\)\{/);assert.match(app,/if\(!id\)\{guest=null;promo=null;renderHome\(message\);return;\}/);
 });
 
 test('event-chat (chat-boot.js) is a tournament page for an organizer: a member sees it only with a tournament in the workspace',async()=>{

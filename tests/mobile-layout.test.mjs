@@ -89,8 +89,12 @@ test('static demo on phones (393 px PL, 320 px EN): no page wider than the scree
    if(await page.locator('.mat-hero').count()){await page.click('.mat-hero');await page.waitForSelector('.mat-viewer');await check(page,`${width} ${lang} poster preview`,problems);await page.keyboard.press('Escape');}
    for(const role of ['admin','editor','club','organizer','athlete']){
     await page.goto(url);await page.waitForSelector('[data-action="demo-login"]');
-    await page.click(`[data-action="demo-login"][data-role="${role}"]`);await page.waitForSelector('.app-shell');await sleep(300);
-    const pages=await page.evaluate(()=>[...new Set([...document.querySelectorAll('[data-page]')].map(e=>e.dataset.page))]);
+    // Signing in keeps the home page (owner 2026-11-10): check it, then the account card's first shortcut opens the app, whose
+    // pages are visited from its menu (the logo's "home" is checked here already, and from it the menu would be gone).
+    await page.click(`[data-action="demo-login"][data-role="${role}"]`);await page.waitForSelector('#home-account');await sleep(300);
+    await check(page,`${width} ${lang} ${role} home`,problems);
+    await page.locator('#home-account [data-page]').first().click();await page.waitForSelector('.app-shell');await sleep(300);
+    const pages=await page.evaluate(()=>[...new Set([...document.querySelectorAll('[data-page]')].map(e=>e.dataset.page))].filter(p=>p!=='home'));
     for(const p of [...pages,'#profile']){
      if(p.startsWith('#'))await page.evaluate(h=>{location.hash=h;},p);else await page.evaluate(id=>document.querySelector(`[data-page="${id}"]`)?.click(),p);
      await sleep(500);await check(page,`${width} ${lang} ${role} ${p}`,problems);
@@ -160,7 +164,8 @@ test('PHP build on a 393 px phone: sign-up with roles, Moje konto tabs, Moje sta
   // The Administrator's panels.
   const actx=await browser.newContext(phone(393,'pl'));const admin=await actx.newPage();admin.on('pageerror',e=>errors.push(e.message));
   fixture('reset-limits');await admin.goto(app);await admin.fill('#login-form input[name="email"]','admin@test.example');await admin.fill('#login-form input[name="password"]','AdminForTests2026!');
-  await admin.click('#login-form button[type="submit"]');await admin.waitForSelector('.app-shell',{timeout:20000});
+  await admin.click('#login-form button[type="submit"]');await admin.waitForSelector('#home-account',{timeout:20000});await sleep(500);
+  await check(admin,'admin home',problems);// signing in keeps the home page (owner 2026-11-10)
   for(const hash of ['#settings','#members','#clubs','#profile']){await admin.evaluate(h=>{location.hash=h;},hash);await sleep(900);await check(admin,'admin '+hash,problems);}
   await actx.close();
  }finally{

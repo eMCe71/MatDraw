@@ -11,7 +11,8 @@ use PDO;
  * sessions of one account. Writers of one channel queue on that row, writers of different channels never meet. Times are computed in PHP (milliseconds in created_ms and
  * changed_ms, seconds elsewhere), never by the database.
  *
- * Visibility (§5.2), one rule for reading and writing (visibleFor): a global channel is visible to everyone; a tournament
+ * Visibility (§5.2), one rule for reading and writing (visibleFor): a global channel of the catalogue (Sports::LOBBY) is visible
+ * to everyone, a retired one (Sports::RETIRED, the old PL/world split) to nobody (its messages stay for the moderation panel); a tournament
  * channel is hidden for everyone while the tournament is a draft (404), open to everyone from the moment it is not a
  * draft until its date (event_date ≥ today, the window of GuestView), open to signed-in people only on the grace day(s)
  * after it (settings graceDays, default 1), and an archive (read only) for signed-in people only after that. The Admin's
@@ -37,14 +38,9 @@ use PDO;
  * viewer's own; their channels stay reachable by id like their guest page.
  */
 final class Chat {
- /** Global channels (requirement 1, §5.1): fixed order; names and descriptions are interface texts (dictionaries). */
- public const LOBBY=[
-  'taekwondo-pl'=>['scope'=>'pl','sort'=>10,'name'=>'Taekwondo','about'=>'Rozmowy po polsku'],
-  'taekwondo'=>['scope'=>'world','sort'=>20,'name'=>'Taekwondo','about'=>'Dowolny język — najlepiej angielski'],
-  'karate'=>['scope'=>'world','sort'=>30,'name'=>'Karate','about'=>'Dowolny język — najlepiej angielski'],
-  'general'=>['scope'=>'world','sort'=>40,'name'=>'Ogólny','about'=>'Wszystko o sztukach walki i MatBravo'],
- ];
- public const SCOPES=['world'=>'Świat','pl'=>'Polska'];
+ // Global channels: Sports::LOBBY (per martial art, owner 2026-11-10), slug => [sport, federation or null], in display order; names
+ // and descriptions are interface texts (dist/sports.js and the dictionaries). The scope column (world | pl) of migration 0003 is no
+ // longer used: new channels leave it NULL.
  public const MAX_CH=6,MAX_H=30,PAGE=50,HISTORY=30,BATCH=100,UNREAD_CAP=100,ARCHIVE=50,UPCOMING=100,BODY_MAX=1000,CONT_MS=300000;
  /** A hosting report (e) counts once per reporter, status and HEALTH_WINDOW seconds, at most HEALTH_N answers (feed()). */
  public const HEALTH_WINDOW=60,HEALTH_N=10;
@@ -84,7 +80,7 @@ final class Chat {
   */
  public static function visibleFor(array $ch,?array $t,?array $viewer,string $today,int $graceDays=1):?string {
   $status=$ch['status']??'open';$readOnly=$status!=='open';
-  if(($ch['kind']??'')==='lobby')return $readOnly?'closed':'open';
+  if(($ch['kind']??'')==='lobby')return isset(Sports::LOBBY[$ch['slug']??''])?($readOnly?'closed':'open'):null;
   $s=self::tournamentState($t,$today,$viewer,$graceDays);
   if($s==='hidden'||$s==='gone'||$viewer===null&&$status==='closed')return null;
   return $readOnly?'closed':$s;
@@ -263,23 +259,27 @@ final class Chat {
  // ——— Channel lists ———
 
  /**
-  * public-chat-channels ($viewer null) and chat-channels (signed in): {cv, cfg, lobby:[{id, slug, scope, last, count, st}],
-  * tournaments:[{id, tournamentId, title, date, city, st, last, count}]}. Guests: tournaments visible to guests (not
-  * drafts, event_date ≥ today, not closed by the Admin), id null while the channel does not exist; nothing is written.
-  * Signed in: also the grace days, the missing channels of those tournaments are created (INSERT IGNORE, §5.2), and the
-  * archive (at most 50, newest first) of tournaments whose chat was ever used (an archive cannot be written, so an empty
-  * one is not worth a row). Title, date and city are public through the public route already.
+  * public-chat-channels ($viewer null) and chat-channels (signed in): {cv, cfg, lobby:[{id, slug, sport, fed, last, count, st}],
+  * tournaments:[{id, tournamentId, title, date, city, sport, fed, st, last, count}]}. The lobby is Sports::LOBBY in its order
+  * (fed null for a sport's general channel). Guests: tournaments visible to guests (not drafts, event_date ≥ today, not closed
+  * by the Admin), id null while the channel (a tournament's or a lobby one) does not exist; nothing is written.
+  * Signed in: also the grace days, the missing channels of the lobby and of those tournaments are created (INSERT IGNORE, §5.2),
+  * and the archive (at most 50, newest first) of tournaments whose chat was ever used (an archive cannot be written, so an empty
+  * one is not worth a row). Title, date, city, sport and federation are public through the public route already.
   */
  public static function lists(PDO $pdo,?array $viewer,int $now,?array $c=null):array {
   $settings=ChatSettings::get($pdo);$today=self::today();$grace=$settings['data']['graceDays'];
+  // Order of Sports::LOBBY (owner's order of the martial arts), not chat_channels.sort: migrations never change or insert rows of
+  // existing tables (CI back-compat job), so the code decides the order and creates the channels the catalogue adds.
+  $read=function()use($pdo):array{$by=[];foreach(self::rows($pdo,"SELECT ".self::CHANNEL." FROM chat_channels WHERE kind='lobby' ORDER BY id",[]) as $r)if(isset(Sports::LOBBY[$r['slug']]))$by[$r['slug']]??=$r;return $by;};
+  $by=$read();
+  if($viewer!==null&&count($by)<count(Sports::LOBBY)){foreach(array_keys(array_diff_key(Sports::LOBBY,$by)) as $slug)self::lobbyChannel($pdo,$slug,$now);$by=$read();}
   $lobby=[];
-  // Order of Chat::LOBBY (owner's order, 2026-11-01), not chat_channels.sort: migrations never change existing rows (CI
-  // back-compat job), so the seeded sort values of 0003 stay and only the code decides the order.
-  $rows=array_values(array_filter(self::rows($pdo,"SELECT ".self::CHANNEL." FROM chat_channels WHERE kind='lobby' ORDER BY id",[]),fn($r)=>isset(self::LOBBY[$r['slug']])));
-  usort($rows,fn($a,$b)=>self::LOBBY[$a['slug']]['sort']<=>self::LOBBY[$b['slug']]['sort']?:(int)$a['id']<=>(int)$b['id']);
-  foreach($rows as $r)
-   $lobby[]=['id'=>(int)$r['id'],'slug'=>$r['slug'],'scope'=>$r['scope'],'last'=>(int)$r['last_message_id'],'count'=>(int)$r['msg_count'],'st'=>self::visibleFor($r,null,$viewer,$today,$grace)];
-  $cols='t.id,t.name,t.city,t.event_date,t.status,t.created_by,c.id AS cid,c.last_message_id,c.msg_count,c.status AS cstatus';
+  foreach(Sports::LOBBY as $slug=>[$sport,$fed]){
+   $r=$by[$slug]??null;
+   $lobby[]=['id'=>$r===null?null:(int)$r['id'],'slug'=>$slug,'sport'=>$sport,'fed'=>$fed,'last'=>(int)($r['last_message_id']??0),'count'=>(int)($r['msg_count']??0),'st'=>$r===null?'open':self::visibleFor($r,null,$viewer,$today,$grace)];
+  }
+  $cols='t.id,t.name,t.city,t.event_date,t.status,t.sport,t.federation,t.created_by,c.id AS cid,c.last_message_id,c.msg_count,c.status AS cstatus';
   // Staff tournaments and trusted community ones (the same rule as Domain::trusted and GuestView), plus the viewer's own,
   // filtered in SQL: tournaments of unconfirmed organizers cannot push others out of the list's limit.
   $trusted=" AND (u.role IN ('admin','editor','club') OR u.organizer_blocked_at IS NULL AND (u.organizer_trusted_at IS NOT NULL OR ?=0) OR t.created_by=?)";
@@ -294,7 +294,7 @@ final class Chat {
   $items=[];
   foreach([...$rows,...$archive] as $r){
    $st=self::visibleFor(['kind'=>'tournament','status'=>$r['cstatus']??'open'],$r,$viewer,$today,$grace);if($st===null)continue;
-   $items[]=['id'=>$r['cid']===null?null:(int)$r['cid'],'tournamentId'=>$r['id'],'title'=>$r['name'],'date'=>$r['event_date'],'city'=>$r['city'],'st'=>$st,'last'=>(int)($r['last_message_id']??0),'count'=>(int)($r['msg_count']??0)];
+   $items[]=['id'=>$r['cid']===null?null:(int)$r['cid'],'tournamentId'=>$r['id'],'title'=>$r['name'],'date'=>$r['event_date'],'city'=>$r['city'],'sport'=>Sports::of($r),'fed'=>Sports::federationOf($r),'st'=>$st,'last'=>(int)($r['last_message_id']??0),'count'=>(int)($r['msg_count']??0)];
   }
   return ['cv'=>$settings['version'],'cfg'=>ChatSettings::client($settings['data']),'lobby'=>$lobby,'tournaments'=>$items];
  }
@@ -307,6 +307,15 @@ final class Chat {
   throw new \RuntimeException('Cannot create the tournament channel.');
  }
  private static function channelOf(PDO $pdo,string $tid):?array{return self::rows($pdo,'SELECT '.self::CHANNEL.' FROM chat_channels WHERE tournament_id=?',[$tid])[0]??null;}
+ /** The lobby channel $slug of Sports::LOBBY, created when missing (INSERT IGNORE on the unique slug; a public_key collision is retried). */
+ public static function lobbyChannel(PDO $pdo,string $slug,int $now):array {
+  if(!isset(Sports::LOBBY[$slug]))throw new \InvalidArgumentException('Not a lobby channel: '.$slug);
+  for($try=0;$try<4;$try++){
+   if($r=self::rows($pdo,"SELECT ".self::CHANNEL." FROM chat_channels WHERE slug=?",[$slug])[0]??null)return $r;
+   if($try<3)$pdo->prepare("INSERT IGNORE INTO chat_channels (kind,slug,sort,public_key,created_at) VALUES ('lobby',?,?,?,?)")->execute([$slug,(Sports::order($slug)+1)*10,self::publicKey(),$now]);
+  }
+  throw new \RuntimeException('Cannot create the lobby channel.');
+ }
 
  // ——— Sending (§5.5) ———
 
