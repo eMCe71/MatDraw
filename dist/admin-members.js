@@ -60,6 +60,7 @@ export function planBadge(entry,kind='member',{enforced=true}={}){
  switch(state){
   case 'staff':return {text:T('Bez płatności'),type:'neutral'};
   case 'free':return reason==='staff-default'?{text:T('Darmowe (domyślnie)'),type:'warning'}:date?{text:T('Darmowe do {date}',{date}),type:'success'}:{text:T('Darmowe'),type:'success'};
+  case 'partial':return {text:T('Darmowe w części dyscyplin'),type:'success'};
   case 'grace':return {text:date?T('Karencja do {date}',{date}):T('Karencja'),type:'warning'};
   case 'active':return {text:date?T('Płatne do {date}',{date}):T('Płatne'),type:'success'};
   case 'ending':return {text:date?T('Kończy się {date}',{date}):T('Kończy się'),type:'warning'};

@@ -41,14 +41,14 @@ final class Billing {
  public static function summary(PDO $pdo,array $c,array $u,?array $row,?string $country):array {
   if(!self::enabled($c))return ['enabled'=>false];
   $now=time();
-  $exempt=$u['role']==='admin'||($row?!empty($row['billing_exempt'])&&($row['exempt_until']===null||(int)$row['exempt_until']>$now):in_array($u['role'],['editor','club'],true));
+  $exempt=$u['role']==='admin'||($row?!empty($row['billing_exempt'])&&($row['exempt_until']===null||(int)$row['exempt_until']>$now):in_array($u['role'],['editor','club'],true)&&!Permissions::paid([$u['role']],$c['permissions']??null));
   return ['enabled'=>true,'enforce'=>!empty($c['billing_enforce']),'mode'=>$c['billing_mode'],'currency'=>self::currencyFor($pdo,$c,$row,$country,$u['id']),'amounts'=>$c['billing_amounts'],
    'exempt'=>$exempt,'hasCustomer'=>self::sameMode($row,$c)&&$row['stripe_customer_id']!==null,'pending'=>$row!==null&&$row['pending_checkout_id']!==null&&(int)$row['pending_checkout_expires']>$now];
  }
  /** {access, billing, status} after confirm or billing-sync; status is the subscription status of this mode or a session state. */
  private static function state(PDO $pdo,array $c,array $u,?string $status=null):array {
   $row=Access::row($pdo,$u['id']);
-  return ['access'=>Access::compute($row,$u,$c,time()),'billing'=>self::summary($pdo,$c,$u,$row,self::country($pdo,$u['id'])),'status'=>$status??Access::subStatus($row,$c)];
+  return ['access'=>Access::compute($row,Access::withTypes($pdo,$u,$c),$c,time()),'billing'=>self::summary($pdo,$c,$u,$row,self::country($pdo,$u['id'])),'status'=>$status??Access::subStatus($row,$c)];
  }
 
  // ---- Checkout --------------------------------------------------------------------------------------------------
@@ -76,7 +76,7 @@ final class Billing {
   $status=Access::subStatus($row,$c);$ongoing=in_array($status,BillingSync::ONGOING,true);
   $known=$row!==null&&$row['stripe_customer_id']!==null&&self::sameMode($row,$c);
   // The fast refusal needs no Stripe call, but only a status that still gives access is trusted without one.
-  if($ongoing&&(!$known||Access::compute($row,$u,['billing_enforce'=>true]+$c,$now)['full']))self::locked();
+  if($ongoing&&(!$known||Access::compute($row,Access::withTypes($pdo,$u,['billing_enforce'=>true]+$c),['billing_enforce'=>true]+$c,$now)['full']))self::locked();
   $country=self::country($pdo,$u['id']);$currency=self::currencyFor($pdo,$c,$row,$country,$u['id']);
   if($currency===null)throw new AppError('Wybierz kraj w profilu, aby wybrać plan.',422);
   $client=StripeClient::interactive($c);
@@ -290,12 +290,14 @@ final class Billing {
   */
  public static function freePeriodSet(PDO $pdo,array $c,int $now,bool $had=false):array {
   $cfg=['billing_enforce'=>true]+$c;$open=empty($c['billing_enforce']);$a=[];$b=[];$count=0;$from=null;
-  $paid=fn(?array $row,string $id):bool=>Access::compute($row,['id'=>$id,'role'=>'member'],['billing_mode'=>'test']+$cfg,$now)['full']||Access::compute($row,['id'=>$id,'role'=>'member'],['billing_mode'=>'live']+$cfg,$now)['full'];
+  // The kinds of every member account, only when the column "Płatne konto" frees some kind (Access::memberTypes).
+  $types=Access::memberTypes($pdo,null,$cfg);$who=fn(string $id):array=>['id'=>$id,'role'=>'member']+(isset($types[$id])?['types'=>$types[$id]]:[]);
+  $paid=fn(?array $row,string $id):bool=>Access::compute($row,$who($id),['billing_mode'=>'test']+$cfg,$now)['full']||Access::compute($row,$who($id),['billing_mode'=>'live']+$cfg,$now)['full'];
   $rows=$pdo->query("SELECT u.id,b.user_id AS row_id,b.billing_exempt,b.exempt_reason,b.exempt_by,b.exempt_until,b.livemode,b.sub_status,b.current_period_start,b.current_period_end,b.cancel_at_period_end FROM users u LEFT JOIN billing_accounts b ON b.user_id=u.id WHERE u.role='member' AND u.active=1 AND b.deleted_at IS NULL ORDER BY u.id")->fetchAll(PDO::FETCH_ASSOC);
   foreach($rows as $r){
    $row=$r['row_id']===null?null:$r;$until=$row!==null&&$row['exempt_until']!==null?(int)$row['exempt_until']:null;
    if($row!==null&&(int)$row['billing_exempt']===1&&$row['exempt_reason']==='free-signup'&&($until===null||$until>$now)){$a[]=$r['id'];if($until!==null){$count++;$from=$from===null?$until:min($from,$until);}}
-   elseif($open&&Access::subStatus($row,$cfg)==='none'&&!($row!==null&&(int)$row['billing_exempt']===0&&$row['exempt_by']!==null)&&!Access::compute($row,['id'=>$r['id'],'role'=>'member'],$cfg,$now)['full']&&(!$had||$paid($row,$r['id'])))$b[]=$r['id'];
+   elseif($open&&Access::subStatus($row,$cfg)==='none'&&!($row!==null&&(int)$row['billing_exempt']===0&&$row['exempt_by']!==null)&&!Access::compute($row,$who((string)$r['id']),$cfg,$now)['full']&&(!$had||$paid($row,$r['id'])))$b[]=$r['id'];
   }
   return ['a'=>$a,'b'=>$b,'scheduled'=>['count'=>$count,'from'=>$from]];
  }
@@ -317,17 +319,17 @@ final class Billing {
  /** Plan badges of every staff account (admin-billing?list=staff), computed as if payments were enforced. */
  public static function adminList(PDO $pdo,array $c):array {
   $now=time();$cfg=['billing_enforce'=>true]+$c;$out=[];
-  $rows=$pdo->query("SELECT u.id,u.role,b.user_id AS row_id,b.billing_exempt,b.exempt_reason,b.exempt_until,b.livemode,b.sub_status,b.current_period_start,b.current_period_end,b.cancel_at_period_end FROM users u LEFT JOIN billing_accounts b ON b.user_id=u.id WHERE u.role IN ('admin','editor','club') ORDER BY u.id")->fetchAll(PDO::FETCH_ASSOC);
+  $rows=$pdo->query("SELECT u.id,u.role,b.user_id AS row_id,b.billing_exempt,b.exempt_reason,b.exempt_by,b.exempt_until,b.livemode,b.sub_status,b.current_period_start,b.current_period_end,b.cancel_at_period_end FROM users u LEFT JOIN billing_accounts b ON b.user_id=u.id WHERE u.role IN ('admin','editor','club') ORDER BY u.id")->fetchAll(PDO::FETCH_ASSOC);
   foreach($rows as $r){
    $row=$r['row_id']===null?null:$r;$a=Access::compute($row,['id'=>$r['id'],'role'=>$r['role']],$cfg,$now);
-   $out[$r['id']]=['state'=>$a['state'],'exempt'=>$r['role']==='admin'||$row===null||(!empty($row['billing_exempt'])&&($row['exempt_until']===null||(int)$row['exempt_until']>$now)),
-    'until'=>$a['until'],'reason'=>$row===null?($r['role']==='admin'?null:'staff-default'):$row['exempt_reason']];
+   $out[$r['id']]=['state'=>$a['state'],'exempt'=>$r['role']==='admin'||$row===null&&$a['state']==='free'||(!empty($row['billing_exempt'])&&($row['exempt_until']===null||(int)$row['exempt_until']>$now)),
+    'until'=>$a['until'],'reason'=>$row===null?($r['role']==='admin'||$a['state']!=='free'?null:'staff-default'):$row['exempt_reason']];
   }
   return ['users'=>(object)$out];
  }
  /** One account for the Admin form (admin-billing?userId=): plan state, subscription, sync and Stripe ids. */
  public static function account(PDO $pdo,array $c,array $u):array {
-  $row=Access::row($pdo,$u['id']);$now=time();$a=Access::compute($row,$u,['billing_enforce'=>true]+$c,$now);$staff=in_array($u['role'],['admin','editor','club'],true);
+  $row=Access::row($pdo,$u['id']);$now=time();$a=Access::compute($row,Access::withTypes($pdo,$u,['billing_enforce'=>true]+$c),['billing_enforce'=>true]+$c,$now);$staff=in_array($u['role'],['admin','editor','club'],true)&&($u['role']==='admin'||!Permissions::paid([$u['role']],$c['permissions']??null));
   $cus=$row['stripe_customer_id']??null;$livemode=$row!==null&&(int)$row['livemode']===1;$int=fn($v)=>$v===null?null:(int)$v;
   return ['userId'=>$u['id'],'role'=>$u['role'],'active'=>$u['active'],'state'=>$a['state'],'full'=>$a['full'],'until'=>$a['until'],
    'exempt'=>$u['role']==='admin'||($row===null?$staff:!empty($row['billing_exempt'])&&($row['exempt_until']===null||(int)$row['exempt_until']>$now)),
@@ -383,8 +385,9 @@ final class Billing {
   }
   $u=self::target($pdo,$b['userId']??null);$uid=$u['id'];$row=Access::row($pdo,$uid);
   if($row&&$row['deleted_at']!==null)throw new AppError('Konto nie istnieje.',404);
-  $before=Access::compute($row,$u,['billing_enforce'=>true]+$c,$now)['state'];$extra=[];
-  $after=function()use($pdo,$c,$u,$now):string{return Access::compute(Access::row($pdo,$u['id']),$u,['billing_enforce'=>true]+$c,$now)['state'];};
+  $who=Access::withTypes($pdo,$u,['billing_enforce'=>true]+$c);
+  $before=Access::compute($row,$who,['billing_enforce'=>true]+$c,$now)['state'];$extra=[];
+  $after=function()use($pdo,$c,$who,$now):string{return Access::compute(Access::row($pdo,$who['id']),$who,['billing_enforce'=>true]+$c,$now)['state'];};
   switch($action){
    case 'exempt':
     $reason=Text::clean($b['reason']??null);if($reason===null||$reason===''||mb_strlen($reason)>200)throw new AppError('Podaj powód darmowego konta.',422);

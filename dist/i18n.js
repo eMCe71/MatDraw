@@ -19,6 +19,7 @@ import ORGANIZER from './i18n/organizer-en.js';
 import ATHLETE from './i18n/athlete-en.js';
 import SETTINGS from './i18n/settings-en.js';
 import MATERIALS from './i18n/materials-en.js';
+import PERMISSIONS from './i18n/permissions-en.js';
 
 const same=(a,b)=>a===b||(a&&b&&typeof a==='object'&&typeof b==='object'&&JSON.stringify(a)===JSON.stringify(b));
 /** Merges per-feature dictionaries, first one wins. A key repeated with a different value is not fatal (one phrase must not stop
@@ -32,7 +33,7 @@ export function mergeDictionaries(sources){
  return {dictionary,collisions};
 }
 export const DICTIONARY_SOURCES=[['i18n-en.js',BASE],['i18n/shell-en.js',SHELL],['i18n/accounts-en.js',ACCOUNTS],['i18n/chat-en.js',CHAT],['i18n/moderation-en.js',MODERATION],['i18n/members-en.js',MEMBERS],['i18n/billing-en.js',BILLING],['i18n/home-en.js',HOME],['i18n/pwa-en.js',PWA],
- ['i18n/server-domain-en.js',SERVER_DOMAIN],['i18n/server-settings-en.js',SERVER_SETTINGS],['i18n/server-accounts-en.js',SERVER_ACCOUNTS],['i18n/server-athletes-en.js',SERVER_ATHLETES],['i18n/organizer-en.js',ORGANIZER],['i18n/athlete-en.js',ATHLETE],['i18n/settings-en.js',SETTINGS],['i18n/materials-en.js',MATERIALS]];
+ ['i18n/server-domain-en.js',SERVER_DOMAIN],['i18n/server-settings-en.js',SERVER_SETTINGS],['i18n/server-accounts-en.js',SERVER_ACCOUNTS],['i18n/server-athletes-en.js',SERVER_ATHLETES],['i18n/organizer-en.js',ORGANIZER],['i18n/athlete-en.js',ATHLETE],['i18n/settings-en.js',SETTINGS],['i18n/materials-en.js',MATERIALS],['i18n/permissions-en.js',PERMISSIONS]];
 const merged=mergeDictionaries(DICTIONARY_SOURCES);
 /** All English entries (i18n-en.js and dist/i18n/*-en.js). */
 export const DICTIONARY=merged.dictionary;

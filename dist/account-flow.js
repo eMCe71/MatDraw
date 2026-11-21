@@ -400,7 +400,7 @@ function planView(m,{signup=false}={}){
  // days, or a stale cache). A second Checkout is refused, so the way forward is the Customer Portal (update the card, see the state).
  if(S.portal&&!a.full)return h`<section class="acct-plan panel"><h2>${S.portal}</h2><p class="acct-lead">${T('Zaktualizuj kartę lub sprawdź stan subskrypcji w panelu Stripe.')}</p><div class="form-error" role="alert"></div><div class="acct-actions"><button type="button" class="btn primary" data-acct-act="portal">${icon('external')} ${T('Zarządzaj subskrypcją')}</button></div><p class="acct-fine">${T('Otworzy się bezpieczna strona Stripe.')}</p>${back}</section>`;
  if(a.full&&['active','ending','past_due'].includes(a.state))return h`<section class="acct-plan panel"><h2>${T('Masz już aktywną subskrypcję.')}</h2><p class="acct-lead">${subscriptionState(m).text}</p><div class="form-error" role="alert"></div><div class="acct-actions"><button type="button" class="btn primary" data-acct-act="portal">${icon('external')} ${T('Zarządzaj subskrypcją')}</button></div><p class="acct-fine">${T('Otworzy się bezpieczna strona Stripe.')}</p>${back}</section>`;
- if(a.full&&(a.state!=='free'||!a.until)&&a.state!=='grace')return h`<section class="acct-plan panel"><h2>${T('Masz pełny dostęp.')}</h2><p class="acct-lead">${subscriptionState(m).text}</p>${back}</section>`;
+ if(a.full&&(a.state!=='free'||!a.until)&&a.state!=='grace'&&a.state!=='partial')return h`<section class="acct-plan panel"><h2>${T('Masz pełny dostęp.')}</h2><p class="acct-lead">${subscriptionState(m).text}</p>${back}</section>`;
  if(!cur||!amount)return h`<section class="acct-plan panel"><h2>${T('Wybierz kraj w profilu, aby wybrać plan.')}</h2><p class="acct-lead">${T('Cena i waluta zależą od kraju: Polska płaci w złotych, inne kraje w dolarach.')}</p><div class="acct-actions"><button type="button" class="btn primary" data-acct-act="go-profile">${T('Uzupełnij profil')}</button></div>${back}</section>`;
  return h`<section class="acct-plan panel" aria-labelledby="acct-plan-title"><div class="acct-plan-head"><div><span class="eyebrow">${T('PLAN MIESIĘCZNY')}</span><h2 id="acct-plan-title">${T('Konto MatBravo')}</h2></div><p class="acct-price"><b>${formatPrice(amount,cur)}</b><span>${T('miesięcznie')}</span></p></div>
 <p class="acct-currency">${icon('globe')}<span>${T('Waluta')}: <strong>${cur==='pln'?T('PLN · Polska'):T('USD · inne kraje')}</strong>. ${T('Waluta wynika z kraju w profilu.')}</span></p>
@@ -417,6 +417,7 @@ export function subscriptionState(m){
   case 'staff':return {text:T('Konto zespołu MatBravo'),tone:'teal'};
   case 'free':return {text:a.until?T('Konto darmowe do {date}',{date}):T('Konto darmowe (przyznane przez Administratora)'),tone:'teal',activate:!!a.until};
   case 'open':return {text:T('Pełny dostęp bez opłat.'),tone:'teal'};
+  case 'partial':return {text:T('Bez subskrypcji korzystasz z dyscyplin, w których Twoje konto jest darmowe. W pozostałych potrzebna jest subskrypcja.'),tone:'teal',activate:true};
   case 'grace':return {text:T('Karencja do {date}.',{date}),tone:'warning',activate:true};
   case 'active':return {text:T('Aktywna do {date}',{date}),tone:'success',manage:true};
   case 'ending':return {text:T('Kończy się {date}',{date}),tone:'warning',manage:true};

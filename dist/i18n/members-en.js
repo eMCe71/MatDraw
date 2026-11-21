@@ -40,6 +40,7 @@ export default {
  'Bez płatności':'Never pays',
  'Darmowe':'Free',
  'Darmowe (domyślnie)':'Free (default)',
+ 'Darmowe w części dyscyplin':'Free in some disciplines',
  'Darmowe do {date}':'Free until {date}',
  'Karencja':'Grace period',
  'Karencja do {date}':'Grace period until {date}',

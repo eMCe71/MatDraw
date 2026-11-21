@@ -12,7 +12,8 @@
  *   no materials over for a tournament whose creator is closed (the material route refuses its files). */
 import {resolveDraw} from './engine.js';
 import {categoryList,publicMaterials} from './guest-view.js';
-import {ADULT_AGE,UNAFFILIATED,ageAt,community,trusted,closedCreator,currentClub,resolveClub} from './workspace.js';
+import {ADULT_AGE,UNAFFILIATED,ageAt,community,trusted,closedCreator,currentClub,resolveClub,selfAllowed} from './workspace.js';
+import {tournamentSport} from './sports.js';
 
 export const RECENT_DAYS=30,ENTRY_LIMIT=100,OPEN_LIMIT=50,WITHDRAWN_LIMIT=100,CLUBS_LIMIT=2000;
 export const BY=['organizer','admin','system'];
@@ -70,7 +71,9 @@ export function projectAthleteView(profiles,tournaments,withdrawals,today,organi
  const gone=withdrawals.filter(w=>own.has(String(w.profileId??''))&&BY.includes(w.by)&&!entered.has((w.tournament?.id??'')+'/'+w.profileId))
   .sort((a,b)=>(Math.trunc(b.at)-Math.trunc(a.at))||cmp(String(a.tournament.id),String(b.tournament.id))||cmp(String(a.profileId),String(b.profileId)));
  for(const w of gone.slice(0,WITHDRAWN_LIMIT))out.withdrawn.push({profileId:w.profileId,tournament:{id:w.tournament.id,name:w.tournament.name,date:w.tournament.date},by:w.by,at:Math.trunc(w.at)});
- const open=tournaments.filter(t=>t.status==='open'&&t.selfEntry===true&&(t.hiddenBy??null)===null&&typeof t.date==='string'&&t.date>=today).sort(byDate(false));
+ // The Administrator's matrix (permissions.js, entries.self per discipline), as AthleteView::project: a tournament none of the own profiles may enter is not offered.
+ const live=profiles.filter(a=>!a.archived),allowed=t=>!live.length||live.some(a=>selfAllowed(a,t));
+ const open=tournaments.filter(t=>t.status==='open'&&t.selfEntry===true&&(t.hiddenBy??null)===null&&typeof t.date==='string'&&t.date>=today&&allowed(t)).sort(byDate(false));
  const shown=open.slice(0,OPEN_LIMIT);if(include!=null&&!shown.some(t=>t.id===include))shown.push(...open.filter(t=>t.id===include));
  for(const t of shown){
   const inside=new Set((t.entries||[]).map(e=>String(e.profileId??''))),keys=Object.keys(isObj(t.draws)?t.draws:{}).sort();
@@ -84,7 +87,7 @@ export function projectAthleteView(profiles,tournaments,withdrawals,today,organi
 export function athleteView(db,user,today,{withdrawals=null,organizers={},include=null}={}){
  const clubs=db.clubs||[],byId=new Map(db.tournaments.map(t=>[t.id,t]));
  const profiles=db.profiles.filter(a=>a.ownerId!=null&&a.ownerId===user.id).map(a=>{const c=resolveClub(clubs,a.clubId??null);return {...a,clubRow:c?{id:c.id,name:c.name,verified:c.verified!==false}:null};});
- const tournaments=db.tournaments.map(t=>({id:t.id,name:t.name,city:t.city,date:t.date,status:t.status,selfEntry:t.selfEntry===true,hiddenBy:t.hiddenBy??null,createdBy:t.createdBy??null,community:community(db,t),trusted:trusted(db,t),closed:closedCreator(db,t),
+ const tournaments=db.tournaments.map(t=>({id:t.id,name:t.name,city:t.city,date:t.date,status:t.status,sport:tournamentSport(t),selfEntry:t.selfEntry===true,hiddenBy:t.hiddenBy??null,createdBy:t.createdBy??null,community:community(db,t),trusted:trusted(db,t),closed:closedCreator(db,t),
   entries:t.entries.map(e=>({...e,currentClub:currentClub(clubs,e.clubId??null)})),draws:t.draws,...(t.materials&&!closedCreator(db,t)?{materials:t.materials}:{})}));
  const gone=[];for(const w of withdrawals??db.withdrawals??[]){const t=byId.get(w.tournamentId);if(t)gone.push({profileId:w.profileId,tournament:{id:t.id,name:t.name,date:t.date},by:w.by,at:Math.trunc(w.at)});}
  return projectAthleteView(profiles,tournaments,gone,today,organizers,include);

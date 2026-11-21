@@ -1,6 +1,6 @@
 <?php
 declare(strict_types=1);
-use MatDraw\{Access,Accounts,Actors,ApiError,AppError,Auth,Domain,GuestView,MemberTx,Members,RateLimit,Repository,Routes,Settings,Sports};
+use MatDraw\{Access,Accounts,Actors,ApiError,AppError,Auth,Domain,GuestView,MemberTx,Members,Permissions,RateLimit,Repository,Routes,Settings,Sports};
 ini_set('display_errors','0');ini_set('log_errors','1');
 // In the release: public/api/index.php and backend/ are siblings of public/.
 require dirname(__DIR__,2).'/backend/bootstrap.php';
@@ -72,6 +72,7 @@ try {
  if($method!==$methods[$route]){header('Allow: '.$methods[$route]);throw new AppError('Niedozwolona metoda.',405);}
  // The effective configuration (database switches over config.php, PLAN-REJESTRACJA-ROLE §3.2) right after the connection opens.
  Auth::start($config);Routes::withCsrf();$pdo=matdraw_database($config);$config=Settings::effective($pdo,$config);$flags=Settings::flags($config);
+ Permissions::use(is_array($config['permissions']??null)?$config['permissions']:null);
  $p=$method==='POST'?(function()use($config){Auth::requireCsrf($config);return Routes::json(65536);})():[];
  if($route==='logout'){Auth::clear();Routes::respond(['csrf'=>$_SESSION['csrf'],'ok'=>true]);}
  if($route==='login'){
@@ -116,7 +117,7 @@ try {
   if(!$actor['caps']['organizer']||!in_array($p['type'],Domain::ORGANIZER_TYPES,true))throw new AppError('Brak uprawnień.',403);
   Auth::stepUp($config);
   organizer_limit($pdo,$config,'organizer-command-minute',$u['id'],60,60);organizer_limit($pdo,$config,'organizer-command-hour',$u['id'],1200,3600);
-  if(!in_array($p['type'],['entry.remove','profile.forget'],true)&&!Access::of($pdo,$u,$config)['full'])throw new ApiError('Ta funkcja wymaga aktywnej subskrypcji.',402);
+  if(!in_array($p['type'],['entry.remove','profile.forget'],true)&&!Access::of($pdo,$u,$config,null,Access::commandSport($pdo,$config,$p['type'],$p['payload']))['full'])throw new ApiError('Ta funkcja wymaga aktywnej subskrypcji.',402);
   $budget=!MemberTx::exempt($p['type']);if($budget)MemberTx::check($pdo,$config,$u['id']);
   $out=(new Repository($pdo))->transaction(function(array &$db)use($pdo,$p,$u){
    // The role again under the workspace lock: a block by the Administrator or the person's own switch-off committed since Actors::of above wins.
@@ -128,7 +129,7 @@ try {
   Routes::respond($out);
  }
  // Staff without full access only change their own password (402 otherwise).
- if($p['type']!=='account.password'&&!Access::of($pdo,$u,$config)['full'])throw new ApiError('Ta funkcja wymaga aktywnej subskrypcji.',402);
+ if($p['type']!=='account.password'&&!Access::of($pdo,$u,$config,null,Access::commandSport($pdo,$config,$p['type'],$p['payload']))['full'])throw new ApiError('Ta funkcja wymaga aktywnej subskrypcji.',402);
  $out=(new Repository($pdo))->transaction(function(array &$db)use($p,$pdo){
   $u=Auth::current($db);$before=$db;$result=Domain::execute($db,$u['id'],$p['type'],$p['payload'],$p['expectedRevision']);
   if($u['role']==='admin')admin_audit($pdo,$before,$db,$u['id'],$p['type'],$p['payload'],$result);

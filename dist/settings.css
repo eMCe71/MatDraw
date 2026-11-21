@@ -100,3 +100,42 @@
  .tadm-reason{text-align:left}
 }
 @media print{.set-page,.clb-page,.tadm{display:none}}
+/* Page "Uprawnienia" (#permissions, prefix prm-): the permission matrix, rows = account types, columns = permissions; the table
+   scrolls sideways on narrow screens with the account type column kept in view. */
+.prm-page{max-width:1180px}
+.prm-tabs{display:flex;flex-wrap:wrap;gap:6px}
+.prm-tab{border:1px solid #d4e0eb;background:#fff;border-radius:999px;padding:6px 12px;font-size:12px;font-weight:600;color:#345675;cursor:pointer;min-height:32px}
+.prm-tab:hover{border-color:#9cc3e0}
+.prm-tab.is-active{background:#0072bc;border-color:#0072bc;color:#fff}
+.prm-tab:focus-visible{outline:3px solid #00aeef;outline-offset:2px}
+.prm-dot{font-size:9px;vertical-align:1px;color:#e08a00}
+.prm-tab.is-active .prm-dot{color:#ffd27a}
+.prm-scroll{overflow-x:auto;border:1px solid #d4e0eb;border-radius:8px;max-width:100%}
+.prm-scroll:focus-visible{outline:3px solid #00aeef;outline-offset:2px}
+.prm-table{border-collapse:separate;border-spacing:0;width:100%;min-width:900px;font-size:12px}
+.prm-table th,.prm-table td{border-bottom:1px solid #e6edf4;padding:9px 8px;vertical-align:middle}
+.prm-table thead th{background:#f4f8fb;color:#18334f;font-weight:650;text-align:center;vertical-align:bottom;line-height:1.35}
+.prm-table thead th span{display:block}
+.prm-table thead th small,.prm-table tbody th small{display:block;font-weight:400;color:#687e9b;font-size:10.5px;margin-top:3px;line-height:1.35}
+.prm-table .prm-global{color:#8c6c37}
+.prm-table tbody th{text-align:left;background:#fff;min-width:170px;max-width:220px}
+.prm-table tbody th strong{color:#18334f;font-size:12.5px}
+.prm-table th:first-child{position:sticky;left:0;z-index:1;box-shadow:1px 0 0 #e6edf4}
+.prm-table thead th:first-child{background:#f4f8fb;text-align:left}
+.prm-table tbody tr:last-child>*{border-bottom:0}
+.prm-table tbody tr:hover>td{background:#f9fbfd}
+.prm-cell{text-align:center;min-width:92px}
+.prm-check{display:inline-flex;align-items:center;justify-content:center;gap:3px;cursor:pointer;padding:4px}
+.prm-check input{width:18px;height:18px;min-height:0;margin:0;accent-color:#0072bc;cursor:pointer}
+.prm-check input:disabled{cursor:not-allowed}
+.prm-cell.is-fixed .prm-check,.prm-cell.is-inherited .prm-check{cursor:not-allowed}
+.prm-cell.is-fixed{background:#fafbfc}
+.prm-cell.is-inherited input{opacity:.55}
+.prm-table .prm-billing{border-left:2px solid #c9d6e3;background:#fbf8ef}
+.prm-table thead th.prm-billing{background:#f6efdc}
+.prm-lock{font-size:10px;opacity:.6}
+.prm-hint{display:block;font-size:10.5px;color:#5c708a;margin-top:1px}
+.prm-actions{margin-top:2px}
+.prm-notes{margin:0;padding-left:18px;display:grid;gap:6px;font-size:12px;line-height:1.55;color:#34506f}
+@media (max-width:650px){.prm-actions .btn{flex:1 1 100%}.prm-table tbody th{min-width:130px}}
+@media print{.prm-page{display:none}}

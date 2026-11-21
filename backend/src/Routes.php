@@ -92,6 +92,8 @@ final class Routes {
    }
    $pdo=null;$eff=$c;
    if(self::needsSettings($name,$r,$_COOKIE[Auth::COOKIE]??null)){$pdo=\matdraw_database($c);$eff=Settings::effective($pdo,$c);}
+   // The Administrator's permission matrix of this request (Permissions; none for guest routes without a cookie).
+   Permissions::use(is_array($eff['permissions']??null)?$eff['permissions']:null);
    $ctx=new RouteContext($name,$r,$eff,$body,$raw,$pdo,$c);
    self::requireUser($ctx,$r['user']);
    $out=($r['handler'])($ctx);

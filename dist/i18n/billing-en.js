@@ -72,6 +72,7 @@ export default {
  'Konto darmowe do {date}':'Free account until {date}',
  'Konto zespołu MatBravo':'MatBravo team account',
  'Pełny dostęp bez opłat.':'Full access without payment.',
+ 'Bez subskrypcji korzystasz z dyscyplin, w których Twoje konto jest darmowe. W pozostałych potrzebna jest subskrypcja.':'Without a subscription you can use the disciplines where your account is free. The others need a subscription.',
  'Płatność w toku':'Payment in progress',
  'Brak aktywnej subskrypcji':'No active subscription',
  'Aktywuj':'Activate',

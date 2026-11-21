@@ -137,7 +137,7 @@ final class Settings {
   return ['version'=>$v,'data'=>self::normalize($raw,$c),'stored'=>$raw,'updatedAt'=>$r&&$v>0?(int)$r['updated_at']:null,'updatedBy'=>$r&&$v>0?$r['updated_by']:null];
  }
  public static function effective(?PDO $pdo,array $c):array {
-  $s=self::normalize($pdo?json_decode((string)(self::row($pdo)['data']??''),true):null,$c);$eff=$c;
+  $raw=$pdo?json_decode((string)(self::row($pdo)['data']??''),true):null;$s=self::normalize($raw,$c);$eff=$c;
   $eff['signup_enabled']=$s['signup']==='on'&&empty($c['signup_force_off']);
   $eff['billing_enforce']=$s['payments']==='paid';
   if($eff['billing_enforce']&&empty($c['billing_enabled'])){$eff['billing_enforce']=false;$eff['signup_enabled']=false;$eff['settings_degraded']='billing-missing';}
@@ -153,9 +153,12 @@ final class Settings {
   $eff['organizers']=$s['organizers'];
   $eff['organizers_trust_required']=$s['trustRequired'];
   $eff['signup_mode']=!$eff['signup_enabled']?'off':($eff['billing_enforce']?'paid':'free');
+  // The permission matrix of the panel "Uprawnienia" (Permissions), read from the same row; no key without a stored matrix.
+  unset($eff['permissions']);if(is_array($raw)&&($m=Permissions::normalize($raw['permissions']??null))!==null)$eff['permissions']=$m;
   return $eff;
  }
- public static function flags(array $eff):array{return ['organizers'=>($eff['organizers']??'on')==='paused'?'paused':'on','trustRequired'=>($eff['organizers_trust_required']??false)===true];}
+ /** Domain's read-only $db['flags']: {organizers, trustRequired} and, only when the Administrator stored one, perms (Permissions). */
+ public static function flags(array $eff):array{return ['organizers'=>($eff['organizers']??'on')==='paused'?'paused':'on','trustRequired'=>($eff['organizers_trust_required']??false)===true]+(is_array($eff['permissions']??null)?['perms'=>$eff['permissions']]:[]);}
  /** For diagnostics (§8.1): {mode, degraded, version, source:'db'|'config'} of the raw config.php $file. */
  public static function diagnostics(PDO $pdo,array $file):array {
   $s=self::get($pdo,$file);$eff=self::effective($pdo,$file);
@@ -264,6 +267,17 @@ final class Settings {
    if($own)$pdo->commit();
   }catch(\Throwable $e){if($own&&$pdo->inTransaction())$pdo->rollBack();self::forget($pdo);throw $e;}
   self::forget($pdo);
+  return $data;
+ }
+ /**
+  * A write of other keys of the row (Permissions: data.permissions) that leaves the settings version, updated_at and
+  * updated_by alone, so the settings panel does not go stale: $fn(raw) returns the new raw data; $after runs in the same
+  * transaction once the row is written (the audit line). Unknown keys stay, as in save().
+  */
+ public static function writeRaw(PDO $pdo,callable $fn,int $now,?callable $after=null):array {
+  $pdo->beginTransaction();
+  try{$data=self::write($pdo,fn(array $raw,int $v)=>[$v,$fn($raw),false],$now,null);if($after)$after();$pdo->commit();}
+  catch(\Throwable $e){if($pdo->inTransaction())$pdo->rollBack();self::forget($pdo);throw $e;}
   return $data;
  }
  /**

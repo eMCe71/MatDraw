@@ -7,8 +7,10 @@ import {readFile,writeFile,readdir} from 'node:fs/promises';import {createHash} 
 // Never precached: demo-only and documentation files (demo/: the demo tournament's poster and rules, PLAN-MATERIALY), large images not needed offline
 // (brand/sports/: the character of every martial art, only the chosen sport's figure is fetched), server-side and private paths, any PHP script
 // (its executed output would never match the source checksum and every install would fail), dotfiles, and the worker's own update probes.
-// Manifests and offline.html are part of the shell.
-export const DENY=[/^architecture\./,/^promo\//,/^demo\//,/^vendor\//,/^brand\/og-image\./,/^brand\/sports\//,/^fonts\/OFL/,/^screenshots\//,/^(?:api|u|live)(?:\/|$)/,/\.(?:php\d?|phtml|phar)$/i,/(?:^|\/)\./,/^favicon\.ico$/,/^sw\.js$/,/^version\.json$/];
+// Manifests and offline.html are part of the shell. The Administrator's server-only panels "Ustawienia" and "Uprawnienia" (admin-settings.js,
+// admin-permissions.js: lazy modules that show nothing without the server) are fetched when opened, which keeps the precache under its budget.
+// Their imports (registry, client, i18n, sports, permissions) stay in the shell.
+export const DENY=[/^architecture\./,/^promo\//,/^demo\//,/^vendor\//,/^brand\/og-image\./,/^brand\/sports\//,/^fonts\/OFL/,/^screenshots\//,/^(?:api|u|live)(?:\/|$)/,/\.(?:php\d?|phtml|phar)$/i,/(?:^|\/)\./,/^favicon\.ico$/,/^sw\.js$/,/^version\.json$/,/^admin-(?:settings|permissions)\.js$/];
 export const REQUIRED=['index.html','offline.html','manifest.webmanifest','manifest.en.webmanifest','app.js','runtime-config.js','lang-boot.js'];
 export const LIMIT=1.5*1024*1024;
 const BUILD_MARK="/*@build*/'dev'",LIST_MARK='/*@precache*/[]';

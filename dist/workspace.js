@@ -3,6 +3,7 @@ import {cleanText,clubKey} from './profile-data.js';
 import {initials,warsawToday} from './guest-view.js';
 import {inviteCheck,inviteJson} from './invite-data.js';
 import {SPORT_IDS,DEFAULT_SPORT,federationOf,tournamentSport,tournamentFederation} from './sports.js';
+import {actor as permActor,allows as permAllows,usePermissions} from './permissions.js';
 /* Workspace rules of the browser demo: mirror of backend/src/Domain.php and backend/src/Clubs.php (plan §5–§7 of
  * PLAN-REJESTRACJA-ROLE). tests/roles-parity.test.mjs runs the same commands through both and compares statuses, messages of
  * the new paths and the normalised state; Domain::forgetMember and Domain::retain are PHP only. Members of the demo live in
@@ -151,20 +152,30 @@ export function closedCreator(db,t){
  if(!o){const u=db.users.find(x=>x.id===t.createdBy&&x.role==='member');if(u)o={blocked:isset(u.organizerBlockedAt),active:u.active!==false};}
  return !!o&&(!!o.blocked||o.active===false);
 }
-export const manages=(user,t)=>!!user&&!!t&&(user.role==='admin'||(user.role==='editor'||organizer(user))&&t.createdBy===user.id);
+/* Permission matrix (panel "Uprawnienia", permissions.js), as Domain: every rule first asks what the code allowed before the panel,
+ * then the matrix for the actor's account type and the tournament's discipline; without a stored matrix it answers yes. */
+const can=(u,perm,sport=null)=>permActor(u,perm,sport,organizer(u));
+export const manages=(user,t)=>!!user&&!!t&&(user.role==='admin'||(user.role==='editor'||organizer(user))&&t.createdBy===user.id&&can(user,'tournament.manage',tournamentSport(t)));
 export const managesTournament=manages;
 export function managesProfile(user,a,db){
  if(!user||!a)return false;if(user.role==='admin')return true;
  if(isset(a.ownerId))return a.ownerId===user.id;
- if(user.role==='club')return staffProfile(db,a)&&a.clubId===user.clubId;
- return (user.role==='editor'||organizer(user))&&a.createdBy===user.id;
+ if(user.role==='club')return staffProfile(db,a)&&a.clubId===user.clubId&&can(user,'athletes.manage');
+ return (user.role==='editor'||organizer(user))&&a.createdBy===user.id&&can(user,'athletes.manage');
 }
-export const outsideEntry=(user,t,db)=>!!user&&!!t&&t.status==='open'&&trusted(db,t)&&(user.role==='club'||user.role==='editor'||organizer(user)&&t.selfEntry===true);
+export const outsideEntry=(user,t,db)=>!!user&&!!t&&t.status==='open'&&trusted(db,t)&&(user.role==='club'||user.role==='editor'||organizer(user)&&t.selfEntry===true)&&can(user,'entries.submit',tournamentSport(t));
 export const canEnter=(user,t,db)=>!!user&&!!t&&t.status!=='finished'&&(manages(user,t)||outsideEntry(user,t,db));
 /** canEnter for a NEW entry (entry.save without an entry yet): not into a tournament whose creator is closed (closedCreator) unless
  * user manages it. Corrections and withdrawals keep canEnter (R2.1). */
 export const canAddEntry=(user,t,db)=>canEnter(user,t,db)&&(manages(user,t)||!closedCreator(db,t));
-export const canCreateTournament=user=>!!user&&(user.role==='admin'||user.role==='editor'||organizer(user));
+/** Domain::creator: an account type that creates tournaments at all, whatever the matrix says. */
+export const creator=user=>!!user&&(user.role==='admin'||user.role==='editor'||organizer(user));
+/** Domain::canCreateTournament: creator() allowed by the matrix in sport; without sport in at least one discipline. */
+export const canCreateTournament=(user,sport=null)=>creator(user)&&(sport!=null?can(user,'tournament.create',sport):SPORT_IDS.some(s=>can(user,'tournament.create',s)));
+/** Domain::selfAllowed: the matrix lets the owner of profile a enter it into t (entries.self of athlete for relation self, else guardian). */
+export const selfAllowed=(a,t)=>permAllows(a?.relation==='self'?'athlete':'guardian','entries.self',tournamentSport(t));
+/** Domain::permissions: db.flags.perms becomes the active matrix; a db without flags keeps the current one. */
+const activate=db=>{if(isObj(db?.flags))usePermissions(isObj(db.flags.perms)?db.flags.perms:null);};
 const byId=rows=>new Map(rows.map(r=>[r.id,r]));
 /** Club of a snapshot read through the Administrator's merges (roots: clubRoots), as Domain::entryVisible (final review B7). */
 function entryVisible(db,u,t,e,profiles,roots){
@@ -185,7 +196,10 @@ function profileVisible(db,u,a){return u.role==='admin'?true:u.role==='editor'?s
 const publicUser=u=>{const {passwordHash,passwordSalt,authVersion,...safe}=u;return safe;};
 /** The workspace of user (§5.2 matrix), equal to Domain::publicData; a member without the organizer role gets the empty shape. */
 export function publicWorkspace(db,user){
+ activate(db);
  const role=user.role,admin=role==='admin',out={schemaVersion:2,revision:db.revision,user:publicUser(user),clubs:[],users:[],profiles:[],tournaments:[]};
+ // The Administrator's matrix (only when one is stored), as Domain::publicData.
+ if(isObj(db.flags?.perms))out.perms={global:isObj(db.flags.perms.global)?db.flags.perms.global:{},sports:isObj(db.flags.perms.sports)?db.flags.perms.sports:{}};
  if(role==='member'&&!organizer(user))return out;
  const profiles=byId(db.profiles),used=new Set(),roots=role==='club'?clubRoots(db.clubs):null;
  for(const t of db.tournaments){
@@ -438,7 +452,7 @@ function apply(db,user,type,p){
   return {id:next.id};
  }
  if(type==='tournament.save'){
-  if(!canCreateTournament(user))fail('Nie możesz tworzyć turniejów.',403);
+  if(!creator(user))fail('Nie możesz tworzyć turniejów.',403);
   const t=isset(p.id)?tour(db,user,p.id):null;
   if(t&&!manages(user,t))fail('Możesz edytować tylko własne turnieje.',403);
   if(!dateValid(p.date))fail('Podaj poprawną datę turnieju.');
@@ -453,6 +467,9 @@ function apply(db,user,type,p){
   data.sport=has(p,'sport')?p.sport:t?tournamentSport(t):DEFAULT_SPORT;if(!SPORT_IDS.includes(data.sport))fail('Wybierz sztukę walki z listy.');
   let fed=has(p,'federation')?p.federation:t&&tournamentSport(t)===data.sport?tournamentFederation(t):null;
   if(fed==='')fed=null;if(fed!==null&&(typeof fed!=='string'||!federationOf(data.sport,fed)))fail('Wybierz federację z listy.');data.federation=fed;
+  // The matrix (permissions.js), as Domain: a new tournament needs tournament.create in its discipline, a move tournament.manage there.
+  if(!t&&!canCreateTournament(user,data.sport))fail('Administrator wyłączył tworzenie turniejów w tej dyscyplinie dla Twojego rodzaju konta.',403);
+  if(t&&data.sport!==tournamentSport(t)&&!manages(user,{createdBy:t.createdBy??null,sport:data.sport}))fail('Nie możesz przenieść turnieju do dyscypliny, w której nie prowadzisz turniejów.',403);
   if(t){Object.assign(t,data);audit(t,'Zaktualizowano ustawienia turnieju.');return {id:t.id};}
   const next={id:id(),createdBy:user.id,createdAt:now,...data,entries:[],draws:{},activity:[]};audit(next,'Utworzono turniej.');db.tournaments.push(next);return {id:next.id};
  }
@@ -469,6 +486,7 @@ function apply(db,user,type,p){
  if(type==='profile.save'){
   const old=isset(p.id)?prof(db,user,p.id):null;
   if(!old&&member&&!organizer(user))fail('Brak uprawnień.',403);
+  if(!old&&!can(user,'athletes.manage'))fail('Administrator wyłączył dodawanie zawodników dla Twojego rodzaju konta.',403);
   if(old&&(!managesProfile(user,old,db)||isset(old.ownerId)&&!admin))fail('Nie możesz edytować tej kartoteki zawodnika.',403);
   let pick=null,choice={},clubId;
   if(user.role==='club'){clubId=user.clubId;find(db.clubs,clubId,'Klub');}
@@ -627,6 +645,8 @@ function selfEntry(db,user,p,owned){
  const t=db.tournaments.find(x=>x.id===p.tournamentId&&x.status!=='draft');if(!t)fail('Turniej nie jest dostępny.',404);
  const old=t.entries.find(e=>e.profileId===a.id)??null,update=p.update===true;
  if(t.status!=='open'||t.selfEntry!==true||t.date<warsawToday()||!old&&closedCreator(db,t))fail('Zapisy do tego turnieju są zamknięte.',403);
+ // The matrix (permissions.js), as Domain: a new self-entry needs entries.self of the profile's kind in the tournament's discipline.
+ if(!old&&!selfAllowed(a,t))fail('Administrator wyłączył zgłoszenia własne w tej dyscyplinie.',403);
  if(old&&!update)fail('Jesteś już zgłoszony do tego turnieju.',409);if(!old&&update)fail('Zgłoszenie nie istnieje.',404);
  keepDraws(t,old,null,'');
  if(!trusted(db,t)&&(a.relation!=='self'||ageAt(String(a.birthDate),t.date)<ADULT_AGE))fail('Zgłoszenia osób niepełnoletnich do tego turnieju będą możliwe, gdy MatBravo potwierdzi organizatora.',409);
@@ -642,6 +662,7 @@ function selfEntry(db,user,p,owned){
  unWithdraw(db,a.id,t.id);return {id:entry.id,tournamentId:t.id};
 }
 export function execute(db,actorId,type,p={},expectedRevision=db.revision){
+ activate(db);
  const user=find(db.users,actorId,'Konto');if(!user.active)fail('Konto jest zablokowane.',403);
  if(stale(db,type,p,expectedRevision,user.id))fail('Dane zmieniły się w innej sesji. Odśwież widok i ponów zapis.',409);
  const next=structuredClone(db);next.withdrawals??=[];const actor=find(next.users,actorId,'Konto');const result=apply(next,actor,type,p);stamp(db,next);

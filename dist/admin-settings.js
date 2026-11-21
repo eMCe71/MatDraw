@@ -13,6 +13,7 @@ import * as Client from './client.js';
 import {t as T,translateMessage} from './i18n.js';
 import {warsawToday} from './guest-view.js';
 import {ROLES} from './workspace.js';
+import {permissionsNote} from './admin-permissions.js';
 import {validateRequireFrom,dayAdd,fmtYmd,fmtTime,secToYmd,BULK_MIN_DAYS} from './admin-members.js';
 
 export const MODES=['off','free','paid'];
@@ -95,7 +96,7 @@ export function actorLabel(actor){
  if(actor==='system')return T('System');if(actor==='self')return T('Sam użytkownik');
  if(typeof actor!=='string'||!actor)return '—';return ROLE_LABELS.has(actor)?T(actor):actor;
 }
-const ACTIONS={'settings.save':()=>T('Zmiana ustawień'),'settings.support':()=>T('Zmiana adresu pomocy'),'settings.freePeriod':()=>T('Płatność kont z okresu bezpłatnego'),
+const ACTIONS={'settings.save':()=>T('Zmiana ustawień'),'settings.permissions':()=>T('Zmiana uprawnień'),'settings.support':()=>T('Zmiana adresu pomocy'),'settings.freePeriod':()=>T('Płatność kont z okresu bezpłatnego'),
  'organizer.trust':()=>T('Potwierdzenie organizatora'),'organizer.untrust':()=>T('Cofnięcie potwierdzenia organizatora'),'organizer.block':()=>T('Odebranie roli organizatora'),'organizer.unblock':()=>T('Przywrócenie roli organizatora'),
  'tournament.hide':()=>T('Ukrycie lub przywrócenie turnieju'),'profile.forget':()=>T('Usunięcie danych zawodnika'),'club.save':()=>T('Zmiana klubu'),'club.merge':()=>T('Scalenie klubów'),'club.adopt':()=>T('Klub z oczekującej nazwy')};
 export const actionLabel=action=>ACTIONS[action]?.()||String(action??'');
@@ -111,6 +112,7 @@ export function noteText(action,note){
   m=/^([ab])=(\d+)$/.exec(token);if(m)return m[1]==='a'?T('grupa A: {n}',{n:Number(m[2])}):T('grupa B: {n}',{n:Number(m[2])});
   return token;
  }).filter(Boolean).join(' · ');
+ if(action==='settings.permissions')return permissionsNote(s);
  let m=/^(hidden|restored) \S+ · ([\s\S]*)$/.exec(s);if(action==='tournament.hide'&&m)return m[1]==='hidden'?T('Ukryto: {name}',{name:m[2]}):T('Przywrócono: {name}',{name:m[2]});
  m=/^\S+ (deleted|anonymized)$/.exec(s);if(action==='profile.forget'&&m)return m[1]==='deleted'?T('Dane usunięte'):T('Dane zanonimizowane');
  if(action.startsWith?.('club.')){m=/^(?:\S+ → )?\S+ · ([\s\S]*?)(?: · profiles=(\d+))?$/.exec(s);if(m)return m[2]?T('{name} · zawodnicy: {n}',{name:m[1],n:Number(m[2])}):m[1];}

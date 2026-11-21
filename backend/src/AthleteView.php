@@ -9,7 +9,7 @@ use PDO;
  *  project(profiles, tournaments, withdrawals, today, organizers) is pure:
  *   profiles     the account's own profiles (workspace shape) with clubRow {id, name, verified} (the current club, merged →
  *                target, raw name) or null;
- *   tournaments  {id, name, city, date, status, selfEntry, hiddenBy, createdBy, community, trusted, closed, entries, draws}
+ *   tournaments  {id, name, city, date, status, sport, selfEntry, hiddenBy, createdBy, community, trusted, closed, entries, draws}
  *                (closed: Domain::closedCreator, the creator blocked as organizer or deactivated: no new self-entry); every
  *                entry snapshot carries currentClub {id, name} as Repository::guestTournaments gives it (name null for an
  *                unverified club, '' for 'unaffiliated'); old tournaments may hold only the own entries;
@@ -114,7 +114,9 @@ final class AthleteView {
   $gone=array_values(array_filter($withdrawals,fn($w)=>isset($own[(string)($w['profileId']??'')])&&in_array($w['by']??null,self::BY,true)&&!isset($entered[($w['tournament']['id']??'').'/'.$w['profileId']])));
   usort($gone,fn($a,$b)=>(int)$b['at']<=>(int)$a['at']?:strcmp((string)$a['tournament']['id'],(string)$b['tournament']['id'])?:strcmp((string)$a['profileId'],(string)$b['profileId']));
   foreach(array_slice($gone,0,self::WITHDRAWN_LIMIT) as $w)$out['withdrawn'][]=['profileId'=>$w['profileId'],'tournament'=>['id'=>$w['tournament']['id'],'name'=>$w['tournament']['name'],'date'=>$w['tournament']['date']],'by'=>$w['by'],'at'=>(int)$w['at']];
-  $open=array_values(array_filter($tournaments,fn($t)=>($t['status']??null)==='open'&&($t['selfEntry']??false)===true&&($t['hiddenBy']??null)===null&&is_string($t['date']??null)&&$t['date']>=$today));
+  // The Administrator's matrix (Permissions, entries.self per discipline): a tournament none of the own profiles may enter is not offered.
+  $live=array_filter($profiles,fn($a)=>empty($a['archived']));$allowed=fn($t)=>!$live||(bool)array_filter($live,fn($a)=>Domain::selfAllowed($a,$t));
+  $open=array_values(array_filter($tournaments,fn($t)=>($t['status']??null)==='open'&&($t['selfEntry']??false)===true&&($t['hiddenBy']??null)===null&&is_string($t['date']??null)&&$t['date']>=$today&&$allowed($t)));
   usort($open,fn($a,$b)=>self::byDate($a,$b,false));$shown=array_slice($open,0,self::OPEN_LIMIT);
   if($include!==null&&!in_array($include,array_column($shown,'id'),true))foreach($open as $t)if($t['id']===$include)$shown[]=$t;
   foreach($shown as $t){
@@ -131,7 +133,7 @@ final class AthleteView {
   foreach($db['profiles'] as $a){if(($a['ownerId']??null)===null||$a['ownerId']!==$u['id'])continue;$c=Clubs::resolve($clubs,$a['clubId']??null);$a['clubRow']=$c===null?null:['id'=>$c['id'],'name'=>$c['name'],'verified'=>($c['verified']??true)!==false];$profiles[]=$a;}
   foreach($db['tournaments'] as $t){
    $byId[$t['id']]=$t;
-   $tournaments[]=['id'=>$t['id'],'name'=>$t['name'],'city'=>$t['city'],'date'=>$t['date'],'status'=>$t['status'],'selfEntry'=>($t['selfEntry']??false)===true,'hiddenBy'=>$t['hiddenBy']??null,'createdBy'=>$t['createdBy']??null,'community'=>Domain::community($db,$t),'trusted'=>Domain::trusted($db,$t),'closed'=>Domain::closedCreator($db,$t),
+   $tournaments[]=['id'=>$t['id'],'name'=>$t['name'],'city'=>$t['city'],'date'=>$t['date'],'status'=>$t['status'],'sport'=>Sports::of($t),'selfEntry'=>($t['selfEntry']??false)===true,'hiddenBy'=>$t['hiddenBy']??null,'createdBy'=>$t['createdBy']??null,'community'=>Domain::community($db,$t),'trusted'=>Domain::trusted($db,$t),'closed'=>Domain::closedCreator($db,$t),
     'entries'=>array_map(fn($e)=>array_replace($e,['currentClub'=>self::currentClub($clubs,$e['clubId']??null)]),$t['entries']),'draws'=>$t['draws']]+(isset($t['materials'])?['materials'=>$t['materials']]:[]);
   }
   $gone=[];foreach($withdrawals??($db['withdrawals']??[]) as $w){$t=$byId[$w['tournamentId']??'']??null;if($t)$gone[]=['profileId'=>$w['profileId'],'tournament'=>['id'=>$t['id'],'name'=>$t['name'],'date'=>$t['date']],'by'=>$w['by'],'at'=>(int)$w['at']];}
@@ -159,12 +161,12 @@ final class AthleteView {
    if($include!==null&&!in_array($include,$open,true)){$q=$pdo->prepare("SELECT id FROM tournaments WHERE id=? AND status='open' AND self_entry=1 AND hidden_by IS NULL AND event_date>=?");$q->execute([$include,$today]);if(($x=$q->fetchColumn())!==false)$open[]=$x;}
    $all=array_values(array_unique([...$mine,...$open]));$tournaments=[];$full=[];$part=[];$creators=[];
    if($all){
-    $q=$pdo->prepare('SELECT t.id,t.name,t.city,t.event_date,t.status,t.self_entry,t.hidden_by,t.created_by,t.materials,u.role,u.active,u.organizer_trusted_at,u.organizer_blocked_at FROM tournaments t LEFT JOIN users u ON u.id=t.created_by WHERE t.id IN ('.self::in($all).')');$q->execute($all);
+    $q=$pdo->prepare('SELECT t.id,t.name,t.city,t.event_date,t.status,t.sport,t.self_entry,t.hidden_by,t.created_by,t.materials,u.role,u.active,u.organizer_trusted_at,u.organizer_blocked_at FROM tournaments t LEFT JOIN users u ON u.id=t.created_by WHERE t.id IN ('.self::in($all).')');$q->execute($all);
     foreach($q->fetchAll(PDO::FETCH_ASSOC) as $t){
      $community=!in_array($t['role'],Domain::STAFF,true);$trusted=!$community||$t['role']==='member'&&$t['organizer_blocked_at']===null&&($t['organizer_trusted_at']!==null||$any);
      // closed as Domain::closedCreator over Repository::organizers: a member creator blocked as organizer or deactivated.
      $closed=$t['role']==='member'&&($t['organizer_blocked_at']!==null||(int)$t['active']!==1);
-     $tournaments[$t['id']]=['id'=>$t['id'],'name'=>$t['name'],'city'=>$t['city'],'date'=>$t['event_date'],'status'=>$t['status'],'selfEntry'=>(bool)$t['self_entry'],'hiddenBy'=>$t['hidden_by'],'createdBy'=>$t['created_by'],'community'=>$community,'trusted'=>$trusted,'closed'=>$closed,'entries'=>[],'draws'=>[]]
+     $tournaments[$t['id']]=['id'=>$t['id'],'name'=>$t['name'],'city'=>$t['city'],'date'=>$t['event_date'],'status'=>$t['status'],'sport'=>Sports::of($t),'selfEntry'=>(bool)$t['self_entry'],'hiddenBy'=>$t['hidden_by'],'createdBy'=>$t['created_by'],'community'=>$community,'trusted'=>$trusted,'closed'=>$closed,'entries'=>[],'draws'=>[]]
       +(($m=Materials::decode($t['materials']))!==null?['materials'=>$m]:[]);
      if(in_array($t['id'],$mine,true)){if($t['event_date']>=$recent||in_array($t['status'],['open','closed'],true))$full[]=$t['id'];else $part[]=$t['id'];}
      if($community&&in_array($t['id'],$open,true))$creators[]=$t['created_by'];
