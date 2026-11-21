@@ -14,6 +14,9 @@ import {readFile} from 'node:fs/promises';
 import {createRequire} from 'node:module';
 import {extname,join,normalize} from 'node:path';
 import {fileURLToPath} from 'node:url';
+// The static demo's seed (dist/workspace.js) has fixed tournament dates written on 2026-11-10; the browser's clock starts
+// on that day so the demo tournaments stay upcoming whatever day CI runs (time still moves, timers are real).
+const DEMO_NOW=new Date('2026-11-10T12:00:00+01:00');
 
 class MemoryStorage{#m=new Map();get length(){return this.#m.size;}key(i){return [...this.#m.keys()][i]??null;}getItem(k){return this.#m.has(k)?this.#m.get(k):null;}setItem(k,v){this.#m.set(k,String(v));}removeItem(k){this.#m.delete(k);}clear(){this.#m.clear();}}
 globalThis.localStorage??=new MemoryStorage();globalThis.sessionStorage??=new MemoryStorage();
@@ -369,7 +372,7 @@ test('demo in a browser (PL 1440, EN 390): #starts, the entry window by keyboard
  const {server,url}=await serve(),browser=await chromium.launch().catch(e=>{server.close();throw e;}),problems=[];
  try{
   for(const [w,hh,lang] of [[1440,900,'pl'],[390,844,'en']]){
-   const ctx=await browser.newContext({viewport:{width:w,height:hh},locale:lang==='pl'?'pl-PL':'en-GB',serviceWorkers:'block'});
+   const ctx=await browser.newContext({viewport:{width:w,height:hh},locale:lang==='pl'?'pl-PL':'en-GB',serviceWorkers:'block'});await ctx.clock.setSystemTime(DEMO_NOW);
    await ctx.addInitScript(()=>{window.__csp=[];document.addEventListener('securitypolicyviolation',e=>window.__csp.push(e.violatedDirective));});
    const page=await ctx.newPage();page.on('pageerror',e=>problems.push(w+': '+e.message));page.on('console',m=>{if(m.type()==='error')problems.push(w+': '+m.text());});
    // Signing in keeps the home page (owner 2026-11-10); its account card links "Moje starty" (once me arrives), also on a phone.
@@ -445,7 +448,7 @@ test('demo in a browser (PL 1440, EN 390): #starts, the entry window by keyboard
    await ctx.close();
   }
   // A member without an athlete profile (the demo organizer): "add athlete data" only where self-entries are on.
-  const ctx=await browser.newContext({viewport:{width:1440,height:900},locale:'pl-PL',serviceWorkers:'block'}),page=await ctx.newPage();
+  const ctx=await browser.newContext({viewport:{width:1440,height:900},locale:'pl-PL',serviceWorkers:'block'}),page=await ctx.newPage();await ctx.clock.setSystemTime(DEMO_NOW);
   page.on('pageerror',e=>problems.push('organizer: '+e.message));page.on('console',m=>{if(m.type()==='error')problems.push('organizer: '+m.text());});
   await page.goto(url);await page.click('[data-action="demo-login"][data-role="organizer"]');await page.waitForSelector('#home-account');
   await page.goto(url+'#guest?t=t-winter-2027');await page.waitForSelector('.ath-cta');
@@ -475,7 +478,7 @@ test('API mode in a browser: 402 of athlete-entry leads to #billing; a correctio
   return [404,{error:'Nie ma takiej operacji.'}];};
  const {server,url}=await serve(api),browser=await chromium.launch().catch(e=>{server.close();throw e;}),problems=[];
  try{
-  const ctx=await browser.newContext({viewport:{width:1440,height:900},locale:'pl-PL',serviceWorkers:'block'}),page=await ctx.newPage();page.on('pageerror',e=>problems.push(e.message));
+  const ctx=await browser.newContext({viewport:{width:1440,height:900},locale:'pl-PL',serviceWorkers:'block'}),page=await ctx.newPage();await ctx.clock.setSystemTime(DEMO_NOW);page.on('pageerror',e=>problems.push(e.message));
   await page.goto(url+'#starts');await page.waitForSelector('.ath-card');
   // A correction of the own entry (no new events) works without full access (R12).
   await page.click('.ath-card [data-action="athlete-edit"]');await page.waitForSelector('#ath-entry-form[data-update="yes"]');

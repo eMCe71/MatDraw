@@ -14,6 +14,9 @@ import {fileURLToPath} from 'node:url';
 import {inviteField,inviteCheck,inviteJson,inviteFields,INVITE_FIELDS,INVITE_KEYS,INVITE_STYLES} from '../dist/invite-data.js';
 import {initialWorkspace,execute,publicWorkspace,materialMeta,materialsView} from '../dist/workspace.js';
 import {publicMaterials} from '../dist/guest-view.js';
+// The static demo's seed (dist/workspace.js) has fixed tournament dates written on 2026-11-10; the browser's clock starts
+// on that day so the demo tournaments stay upcoming whatever day CI runs (time still moves, timers are real).
+const DEMO_NOW=new Date('2026-11-10T12:00:00+01:00');
 
 const php=process.env.PHP_BIN,skip=!php;
 const DIST=fileURLToPath(new URL('../dist/',import.meta.url));
@@ -111,7 +114,7 @@ test('static demo: create an invitation in the dialog, pick a style, unsaved cha
  const {server,url}=await serve(),browser=await chromium.launch();
  try{
   for(const options of [{viewport:{width:1440,height:900}},PHONE]){
-   const phone=!!options.isMobile,ctx=await browser.newContext({...options,locale:'pl-PL',serviceWorkers:'block'});
+   const phone=!!options.isMobile,ctx=await browser.newContext({...options,locale:'pl-PL',serviceWorkers:'block'});await ctx.clock.setSystemTime(DEMO_NOW);
    await ctx.addInitScript(()=>{try{localStorage.setItem('matdraw.language','pl');}catch{}});
    const page=await ctx.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));page.on('console',m=>{if(m.type()==='error')errors.push(m.text());});page.on('dialog',d=>{errors.push('dialog '+d.message());d.dismiss();});
    // Signing in keeps the home page (owner 2026-11-10): the account card's "Turnieje" opens the tournaments.
