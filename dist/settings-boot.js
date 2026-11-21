@@ -1,4 +1,5 @@
-/* Administrator's settings and clubs pages (PLAN-REJESTRACJA-ROLE §10.5), static part: registers #settings and #clubs (nav 'admin')
+/* Administrator's settings, clubs and permissions pages (PLAN-REJESTRACJA-ROLE §10.5), static part: registers #settings, #clubs and
+ * #permissions (nav 'admin'; #permissions: after 'painted' admin-permissions.js draws the matrix into [data-permissions-root], server only)
  * and wakes the lazy modules for the Administrator only:
  *  - #settings: after 'painted' admin-settings.js draws the panel into [data-settings-root] (server only; the demo gets the demo message);
  *  - #clubs: after 'painted' admin-clubs.js draws the clubs table into [data-clubs-root] (workspace commands, works in the demo too);
@@ -10,7 +11,7 @@ import {registry,h} from './registry.js';
 import {onMe} from './me.js';
 import {t as T} from './i18n.js';
 
-const settings=()=>import('./admin-settings.js'),clubs=()=>import('./admin-clubs.js');
+const settings=()=>import('./admin-settings.js'),clubs=()=>import('./admin-clubs.js'),permissions=()=>import('./admin-permissions.js');
 const isAdmin=()=>registry.use('ui')?.getWorkspace?.()?.user?.role==='admin';
 const log=error=>{try{console.error('MatBravo settings module failed',error);}catch{}};
 /** The number on the "Members" menu item: organizers waiting for the Administrator's confirmation (0 for anyone else). */
@@ -27,10 +28,17 @@ registry.registerPage({
  render:()=>registry.use('ui').shell(h`<div class="set-page" data-settings-root><p class="muted" role="status">${T('Wczytuję ustawienia…')}</p></div>`,T('Ustawienia'),T('Rejestracja, płatności, organizatorzy i adres pomocy'))
 });
 
+registry.registerPage({
+ id:'permissions',icon:'lock',nav:'admin',roles:['admin'],order:95,
+ label:()=>T('Uprawnienia'),title:()=>T('Uprawnienia'),
+ render:()=>registry.use('ui').shell(h`<div class="set-page prm-page" data-permissions-root><p class="muted" role="status">${T('Wczytuję uprawnienia…')}</p></div>`,T('Uprawnienia'),T('Kto co może: rodzaje kont, uprawnienia i dyscypliny'))
+});
+
 registry.on('painted',({view,page})=>{
  if(view!=='app'||!isAdmin())return;
  if(page==='settings')settings().then(m=>m.mountSettingsPage()).catch(log);
  else if(page==='clubs')clubs().then(m=>m.mountClubsPage()).catch(log);
+ else if(page==='permissions')permissions().then(m=>m.mountPermissionsPage()).catch(log);
  else if(page==='tournaments'&&typeof document!=='undefined'&&document.querySelector('[data-tournament-admin]'))clubs().then(m=>m.mountTournamentTools()).catch(log);
 });
 onMe(me=>registry.setBadge('members',pendingOrganizers(me)));

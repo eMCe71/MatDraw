@@ -4,6 +4,14 @@ Dokument jest pisany dla właściciela, który nie jest programistą, i dla każ
 
 Rozmawiaj po polsku. Repozytorium: `eMCe71/MatDraw`. Domena: `matbravo.com`.
 
+## 00. Strona „Uprawnienia” (tabela: kto co może)
+
+Administrator → **Uprawnienia**. Tabela: w wierszach rodzaje kont (Administrator, Edytor, Klub, Organizator, Zawodnik, Opiekun, Członek, Gość), w kolumnach uprawnienia, na przecięciu pole wyboru. Zmiana działa **od razu po kliknięciu „Zapisz uprawnienia”**, bez wdrożenia, a serwer sprawdza ją przy każdej operacji.
+- **Dyscypliny.** Zakładka „Wszystkie dyscypliny” to ustawienia domyślne. W zakładce danej dyscypliny wybierz „Własny zestaw”, żeby ustawić ją inaczej (np. w boksie organizatorzy nie tworzą turniejów). „Jak domyślnie” wraca do wspólnych ustawień.
+- **Pola z kłódką są stałe**: Administrator ma zawsze pełny dostęp (nie da się go zablokować), a reszty kod nie przewiduje dla danego rodzaju konta. Dodawanie i edycja zawodników, moderacja i administracja są wspólne dla wszystkich dyscyplin.
+- **Po wdrożeniu nic się nie zmienia**: dopóki nie zapiszesz tabeli, wszystko działa jak wcześniej. Wycofanie i poprawka złożonego zgłoszenia oraz usunięcie własnych danych działają zawsze.
+- Każdy zapis jest w **Ustawienia → Historia zmian** („Zmiana uprawnień”). Przycisk „Przywróć domyślne” ustawia wszystko jak na starcie (trzeba jeszcze zapisać).
+
 ## 0. Wydanie z rolami „Organizator” i „Zawodnik” — zacznij tutaj
 
 To wydanie dodaje otwartą rejestrację z dwiema rolami i samodzielne zgłoszenia do turniejów. **Po wdrożeniu nic się nie zmienia dla nikogo**, dopóki Ty, jako Administrator, nie otworzysz rejestracji w panelu, z jednym wyjątkiem: **od wdrożenia panel „Nie pamiętasz hasła?” na ekranie logowania pokazuje adres `hello@matbravo.com`** (patrz sekcja 0.7, więc skrzynka musi istnieć przed scaleniem). Dotyczy to także kont członków, które już istnieją: **role „Organizator turnieju” i nowy profil zawodnika da się włączyć dopiero po otwarciu rejestracji** (dopóki jest „Wyłączona”, zakładka Role tego nie pozwala, a serwer odmawia); wyłączyć rolę albo poprawić czy usunąć istniejące dane można zawsze. Do `config.php` nie musisz niczego dopisywać.

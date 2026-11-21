@@ -82,16 +82,29 @@ final class Domain {
   * draft, not hidden by the Administrator and the creator not closed (closedCreator: a member blocked as organizer or deactivated).
   */
  public static function materialsPublic(?array $db,array $t):bool{return ($t['status']??null)!=='draft'&&($t['hiddenBy']??null)===null&&!self::closedCreator($db,$t);}
- public static function manages(array $u,array $t):bool{return $u['role']==='admin'||($u['role']==='editor'||self::organizer($u))&&($t['createdBy']??null)===$u['id'];}
+ /**
+  * Permission matrix (panel "Uprawnienia", Permissions): every rule below first asks what the code allowed before the panel,
+  * then the Administrator's matrix for the actor's account type and the tournament's discipline (Sports::of). Without a
+  * stored matrix Permissions answers yes, so these rules are exactly those of the release before the panel. The Administrator
+  * is never limited (fixed cells).
+  */
+ public static function manages(array $u,array $t):bool{return $u['role']==='admin'||($u['role']==='editor'||self::organizer($u))&&($t['createdBy']??null)===$u['id']&&Permissions::actor($u,'tournament.manage',Sports::of($t));}
  public static function managesProfile(array $u,array $a,?array $db=null):bool {
   if($u['role']==='admin')return true;
   if(($a['ownerId']??null)!==null)return $a['ownerId']===$u['id'];
-  if($u['role']==='club')return self::staffProfile($db,$a)&&($a['clubId']??null)===$u['clubId'];
-  return ($u['role']==='editor'||self::organizer($u))&&($a['createdBy']??null)===$u['id'];
+  if($u['role']==='club')return self::staffProfile($db,$a)&&($a['clubId']??null)===$u['clubId']&&Permissions::actor($u,'athletes.manage');
+  return ($u['role']==='editor'||self::organizer($u))&&($a['createdBy']??null)===$u['id']&&Permissions::actor($u,'athletes.manage');
  }
- public static function outsideEntry(array $u,array $t,?array $db=null):bool{return ($t['status']??null)==='open'&&self::trusted($db,$t)&&($u['role']==='club'||$u['role']==='editor'||self::organizer($u)&&($t['selfEntry']??false)===true);}
+ public static function outsideEntry(array $u,array $t,?array $db=null):bool{return ($t['status']??null)==='open'&&self::trusted($db,$t)&&($u['role']==='club'||$u['role']==='editor'||self::organizer($u)&&($t['selfEntry']??false)===true)&&Permissions::actor($u,'entries.submit',Sports::of($t));}
  public static function canEnter(array $u,array $t,?array $db=null):bool{return ($t['status']??null)!=='finished'&&(self::manages($u,$t)||self::outsideEntry($u,$t,$db));}
- public static function canCreateTournament(array $u):bool{return $u['role']==='admin'||$u['role']==='editor'||self::organizer($u);}
+ /** An account type that creates tournaments at all (admin, editor, organizer), whatever the matrix says. */
+ public static function creator(array $u):bool{return $u['role']==='admin'||$u['role']==='editor'||self::organizer($u);}
+ /** creator() allowed by the matrix in discipline $sport; without $sport: in at least one discipline (the "Nowy turniej" button). */
+ public static function canCreateTournament(array $u,?string $sport=null):bool {
+  if(!self::creator($u))return false;if($sport!==null)return Permissions::actor($u,'tournament.create',$sport);
+  foreach(array_keys(Sports::FEDERATIONS) as $s)if(Permissions::actor($u,'tournament.create',$s))return true;
+  return false;
+ }
  /**
   * An entry of tournament $t that $u (not its manager) may see: club → own club and staff profile; editor → every entry in
   * staff tournaments, own profiles in community ones; organizer → own profiles. The club of a snapshot is read through the
@@ -118,7 +131,10 @@ final class Domain {
  public static function safeUser(array $u):array{unset($u['passwordHash'],$u['passwordSalt'],$u['authVersion']);return $u;}
  /** The workspace of $u (§5.2 matrix); a member without the organizer role gets the empty shape. */
  public static function publicData(array $db,array $u):array {
+  self::permissions($db);
   $role=$u['role'];$admin=$role==='admin';$out=['schemaVersion'=>2,'revision'=>$db['revision'],'user'=>self::safeUser($u),'clubs'=>[],'users'=>[],'profiles'=>[],'tournaments'=>[]];
+  // The Administrator's matrix (only when one is stored), so the browser offers only what the server allows (dist/permissions.js).
+  if(is_array($db['flags']['perms']??null))$out['perms']=['global'=>(object)($db['flags']['perms']['global']??[]),'sports'=>(object)($db['flags']['perms']['sports']??[])];
   if($role==='member'&&!self::organizer($u))return $out;
   $profiles=self::byId($db['profiles']);$used=[];$roots=$role==='club'?Clubs::roots($db['clubs']):null;
   foreach($db['tournaments'] as $t){
@@ -207,10 +223,13 @@ final class Domain {
  private static function reconcile(array &$t,array $entries):void{$cats=Rules::categories($entries);foreach($t['draws'] as $key=>$d){$c=$cats[$key]??null;if(!$c||count($c['athletes'])<3||Rules::signature($c['athletes'])!==$d['signature']){if(count($d['results']))throw new AppError('Ta zmiana narusza kategorię z wynikami. Najpierw wycofaj zależne wyniki.',409);unset($t['draws'][$key]);}}$t['entries']=array_values($entries);}
  public static function password(string $password):string{if(strlen($password)<12||strlen($password)>72)throw new AppError('Hasło musi mieć od 12 do 72 bajtów.');return password_hash($password,defined('PASSWORD_ARGON2ID')?PASSWORD_ARGON2ID:PASSWORD_DEFAULT);}
  public static function execute(array &$db,string $actorId,string $type,array $p,int $revision):array {
+  self::permissions($db);
   $u=self::entity($db['users'],$actorId,'Konto');if(!$u['active'])throw new AppError('Konto jest zablokowane.',403);
   if(self::stale($db,$type,$p,$revision,$u['id']))throw new AppError('Dane zmieniły się w innej sesji. Odśwież widok i ponów zapis.',409);
   $db['withdrawals']??=[];$before=$db;$result=self::apply($db,$u,$type,$p);self::stamp($before,$db);return $result;
  }
+ /** The matrix of $db['flags']['perms'] becomes the active one (Permissions::use); $db without flags keeps the request's. */
+ private static function permissions(array $db):void{if(isset($db['flags'])&&is_array($db['flags']))Permissions::use(is_array($db['flags']['perms']??null)?$db['flags']['perms']:null);}
  // Lookups for members: a missing and an unseen object give the same 404 (PS-15).
  private static function &tour(array &$db,array $u,mixed $id,bool $seen=true):array {
   if($u['role']!=='member')return self::entity($db['tournaments'],$id,'Turniej');
@@ -407,7 +426,7 @@ final class Domain {
    if($old){$target=&self::entity($db['users'],$old['id'],'Konto');$target=$a;}else $db['users'][]=$a;return ['id'=>$a['id']];
   }
   if($type==='tournament.save'){
-   if(!self::canCreateTournament($u))throw new AppError('Nie możesz tworzyć turniejów.',403);$old=isset($p['id'])?self::tour($db,$u,$p['id']):null;
+   if(!self::creator($u))throw new AppError('Nie możesz tworzyć turniejów.',403);$old=isset($p['id'])?self::tour($db,$u,$p['id']):null;
    if($old&&!self::manages($u,$old))throw new AppError('Możesz edytować tylko własne turnieje.',403);$date=self::date($p['date']??null);
    if(!in_array($p['status']??null,['draft','open','closed','finished'],true))throw new AppError('Niepoprawny status turnieju.');
    if($old&&count($old['entries'])&&$date!==$old['date'])throw new AppError('Data turnieju ze zgłoszeniami jest zablokowana.',409);
@@ -420,6 +439,9 @@ final class Domain {
    $sport=array_key_exists('sport',$p)?$p['sport']:($old?Sports::of($old):Sports::DEFAULT);if(!Sports::valid($sport))throw new AppError('Wybierz sztukę walki z listy.');
    $fed=array_key_exists('federation',$p)?$p['federation']:($old&&Sports::of($old)===$sport?Sports::federationOf($old):null);
    if($fed==='')$fed=null;if($fed!==null&&!Sports::federationValid($sport,$fed))throw new AppError('Wybierz federację z listy.');
+   // The matrix (Permissions): a new tournament needs tournament.create in its discipline, a move to another discipline tournament.manage there.
+   if(!$old&&!self::canCreateTournament($u,$sport))throw new AppError('Administrator wyłączył tworzenie turniejów w tej dyscyplinie dla Twojego rodzaju konta.',403);
+   if($old&&$sport!==Sports::of($old)&&!self::manages($u,['createdBy'=>$old['createdBy']??null,'sport'=>$sport]))throw new AppError('Nie możesz przenieść turnieju do dyscypliny, w której nie prowadzisz turniejów.',403);
    $t=array_replace($old??['id'=>self::id(),'createdBy'=>$u['id'],'createdAt'=>$now,'entries'=>[],'draws'=>[],'activity'=>[]],['name'=>$name,'city'=>$city,'date'=>$date,'mat'=>$mat,'status'=>$status,'sport'=>$sport,'federation'=>$fed,'selfEntry'=>$selfEntry]);self::audit($t,$old?'Zaktualizowano ustawienia turnieju.':'Utworzono turniej.');
    if($old){$target=&self::entity($db['tournaments'],$old['id'],'Turniej');$target=$t;}else $db['tournaments'][]=$t;return ['id'=>$t['id']];
   }
@@ -436,6 +458,7 @@ final class Domain {
   if($type==='profile.save'){
    $old=isset($p['id'])?self::prof($db,$u,$p['id']):null;
    if(!$old&&$member&&!self::organizer($u))throw new AppError('Brak uprawnień.',403);
+   if(!$old&&!Permissions::actor($u,'athletes.manage'))throw new AppError('Administrator wyłączył dodawanie zawodników dla Twojego rodzaju konta.',403);
    if($old&&(!self::managesProfile($u,$old,$db)||($old['ownerId']??null)!==null&&!$admin))throw new AppError('Nie możesz edytować tej kartoteki.',403);
    $pick=null;$choice=[];if($u['role']==='club'){$clubId=$u['clubId'];self::entity($db['clubs'],$clubId,'Klub');}
    else{$choice=self::clubChoice($p);$pick=Clubs::pick($db['clubs'],$u,$choice,$now,$member?Clubs::counts($db['clubs'],$u,$now):[]);$clubId=$pick['clubId'];}
@@ -582,6 +605,8 @@ final class Domain {
   if(!empty($a['self']))self::withdrawn($db,$a,$t['id'],$u['role']==='admin'?'admin':'organizer');return ['id'=>$a['id']];
  }
  /** entry.self (§7.1–§7.2): an athlete enters an own profile; never into a category with a saved draw nor newly into a tournament of a blocked or deactivated organizer (R1.6, R2.1); minors only in trusted tournaments. */
+ /** Whether the matrix lets the owner of profile $a enter it into $t (entries.self of athlete for relation self, else guardian). */
+ public static function selfAllowed(array $a,array $t):bool{return Permissions::allows(($a['relation']??null)==='self'?'athlete':'guardian','entries.self',Sports::of($t));}
  private static function selfEntry(array &$db,array $u,array $p,callable $owned):array {
   if(!is_string($p['profileId']??null)||$p['profileId']==='')throw new AppError('Najpierw uzupełnij dane zawodnika.',409);
   $a=$owned($p['profileId']);if(!$a)throw new AppError('Zawodnik nie istnieje.',404);if($a['archived'])throw new AppError('Najpierw uzupełnij dane zawodnika.',409);
@@ -589,6 +614,9 @@ final class Domain {
   $old=null;foreach($t['entries'] as $e)if($e['profileId']===$a['id'])$old=$e;$update=($p['update']??null)===true;
   // R1.6, R2.1: a blocked or deactivated organizer's tournament takes no new self-entry; a correction of one already made does.
   if($t['status']!=='open'||($t['selfEntry']??false)!==true||$t['date']<date('Y-m-d')||!$old&&self::closedCreator($db,$t))throw new AppError('Zapisy do tego turnieju są zamknięte.',403);
+  // The matrix (Permissions): a new self-entry needs entries.self of the profile's kind (athlete: self, guardian: a child) in the
+  // tournament's discipline; corrections and withdrawals of entries already made stay possible.
+  if(!$old&&!self::selfAllowed($a,$t))throw new AppError('Administrator wyłączył zgłoszenia własne w tej dyscyplinie.',403);
   if($old&&!$update)throw new AppError('Jesteś już zgłoszony do tego turnieju.',409);if(!$old&&$update)throw new AppError('Zgłoszenie nie istnieje.',404);
   self::keepDraws($t,$old,null,'');
   if(!self::trusted($db,$t)&&(($a['relation']??null)!=='self'||self::ageAt((string)$a['birthDate'],$t['date'])<self::ADULT_AGE))throw new AppError('Zgłoszenia osób niepełnoletnich do tego turnieju będą możliwe, gdy MatBravo potwierdzi organizatora.',409);

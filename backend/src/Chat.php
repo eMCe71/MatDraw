@@ -240,7 +240,7 @@ final class Chat {
   return $out;
  }
  /** Columns of a tournament row with its creator's role and confirmation (organizerFlag). */
- private const TOURNAMENT='t.id,t.name,t.city,t.event_date,t.status,t.created_by,u.role AS creator_role,u.organizer_trusted_at,u.organizer_blocked_at FROM tournaments t LEFT JOIN users u ON u.id=t.created_by';
+ private const TOURNAMENT='t.id,t.name,t.city,t.event_date,t.status,t.sport,t.created_by,u.role AS creator_role,u.organizer_trusted_at,u.organizer_blocked_at FROM tournaments t LEFT JOIN users u ON u.id=t.created_by';
  /** The tournaments behind the tournament channels of $channels, in one query: id => {id, name, city, event_date, status, created_by, creator_role, organizer_trusted_at, organizer_blocked_at}. */
  public static function tournamentRows(PDO $pdo,array $channels):array {
   $ids=array_values(array_unique(array_filter(array_map(fn($c)=>$c['tournament_id'],$channels),'is_string')));if(!$ids)return [];$out=[];
@@ -359,7 +359,7 @@ final class Chat {
  }
  private static function byClientId(PDO $pdo,string $userId,string $cid):?array{return self::rows($pdo,'SELECT '.self::MSG.',channel_id FROM chat_messages WHERE user_id=? AND client_id=?',[$userId,$cid])[0]??null;}
  /**
-  * chat-send {ch | t, cid, b} (§5.5), checks in this order: 1 chat on (503), 2 signed in (401), 3 full access (402),
+  * chat-send {ch | t, cid, b} (§5.5), checks in this order: 1 chat on (503), 2 signed in (401), 3 full access (402), 8b the Administrator's matrix (403, mayWrite),
   * 4 complete profile (403), 5 no temporary password (403), 6 not muted (403 with until), 7 channel visible to this
   * person (404), 8 channel open (409), 9 text and cid (422/400), 10 limits (429). A repeated cid returns the stored
   * message (also when the first answer was lost), but only to the channel it was sent to: a cid is single-use, so the
@@ -379,6 +379,7 @@ final class Chat {
   $state=self::visibleFor($channel,$t,$viewer,$today,$grace);
   if($state===null)throw new AppError('Ten czat nie istnieje.',404);
   if($state!=='open')throw new AppError('Ten czat jest tylko do odczytu.',409);
+  if(!self::mayWrite($pdo,$viewer,$channel,$t))throw new AppError('Administrator wyłączył pisanie na tym czacie dla Twojego rodzaju konta.',403);
   $body=self::body($in['b']??null);
   $cid=$in['cid']??null;if(!is_string($cid)||!preg_match('/^[A-Za-z0-9_-]{22}$/D',$cid))throw new AppError('Niepoprawny formularz.',400);
   $again=function(array $old)use($pdo,$c,$viewer,$channel):array{if((int)$old['channel_id']!==(int)$channel['id'])throw new AppError('Niepoprawny formularz.',400);return self::sent($pdo,$old,$viewer['id'],null,$c);};
@@ -406,6 +407,18 @@ final class Chat {
   }
   ChatBus::published($id,$rev);
   return self::sent($pdo,['id'=>$mid,'rev'=>$rev,'user_id'=>$viewer['id'],'body'=>$body,'cont'=>$cont,'state'=>'visible','created_ms'=>$ms,'channel_id'=>$id],$viewer['id'],$organizer);
+ }
+ /**
+  * The Administrator's matrix (Permissions, chat.write per discipline): the sport of a tournament channel is its tournament's,
+  * of a lobby channel its Sports::LOBBY entry. A member account is every kind it is (organizer, athlete, guardian, or a
+  * plain member) and may write when any of them may (Actors::of: two queries by key, only while a matrix is stored).
+  */
+ private static function mayWrite(PDO $pdo,array $viewer,array $channel,?array $t):bool {
+  if(Permissions::active()===null||($viewer['role']??null)==='admin')return true;
+  $sport=$t!==null?Sports::of($t):(Sports::LOBBY[(string)($channel['slug']??'')][0]??null);
+  if(($viewer['role']??null)!=='member')return Permissions::allows((string)$viewer['role'],'chat.write',$sport);
+  $a=Actors::of($pdo,['id'=>$viewer['id']]);$rel=array_column(array_filter($a['athletes'],fn($x)=>!$x['archived']),'relation');
+  return Permissions::any(Permissions::types('member',$a['caps']['organizer'],$rel),'chat.write',$sport);
  }
  /** The channel a send names: {ch} (an existing channel) or {t} (a tournament; its channel is created when it may be written now). */
  private static function target(PDO $pdo,array $in,array $viewer,string $today,int $grace,int $now):array {

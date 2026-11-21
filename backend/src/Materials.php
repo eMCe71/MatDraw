@@ -277,9 +277,9 @@ final class Materials {
   $pdo=$ctx->pdo();$c=$ctx->config;$u=$ctx->user();$member=$u['role']==='member';$actor=$u;
   if($member){$actor=Actors::of($pdo,$u);if(!$actor['caps']['organizer'])throw new AppError('Brak uprawnień.',403);Auth::stepUp($c);}
   if($paid&&!Access::of($pdo,$u,$c)['full'])throw new ApiError('Ta funkcja wymaga aktywnej subskrypcji.',402);
-  $q=$pdo->prepare('SELECT created_by FROM tournaments WHERE id=?');$q->execute([$id]);$by=$q->fetchColumn();$q->closeCursor();
-  if($by===false)throw $member?new AppError('Turniej nie jest dostępny.',404):new AppError('Turniej nie istnieje.',404);
-  if(!Domain::manages($actor,['createdBy'=>$by]))throw $member?new AppError('Turniej nie jest dostępny.',404):new AppError('Możesz edytować tylko własne turnieje.',403);
+  $q=$pdo->prepare('SELECT created_by,sport FROM tournaments WHERE id=?');$q->execute([$id]);$row=$q->fetch(PDO::FETCH_ASSOC);$q->closeCursor();
+  if($row===false)throw $member?new AppError('Turniej nie jest dostępny.',404):new AppError('Turniej nie istnieje.',404);
+  if(!Domain::manages($actor,['createdBy'=>$row['created_by'],'sport'=>$row['sport']]))throw $member?new AppError('Turniej nie jest dostępny.',404):new AppError('Możesz edytować tylko własne turnieje.',403);
   return $member?$actor:null;
  }
  /**
@@ -359,21 +359,21 @@ final class Materials {
   return 'regulamin-'.($slug!==''?$slug:'turniej').'.'.$ext;
  }
  /** Whether the signed-in viewer (if any) manages a tournament created by $createdBy (Domain::manages with the member's roles). */
- private static function managedBy(RouteContext $ctx,?string $createdBy):bool {
+ private static function managedBy(RouteContext $ctx,?string $createdBy,?string $sport=null):bool {
   $u=$ctx->user();if(!$u)return false;
-  return Domain::manages($u['role']==='member'?Actors::of($ctx->pdo(),$u):$u,['createdBy'=>$createdBy]);
+  return Domain::manages($u['role']==='member'?Actors::of($ctx->pdo(),$u):$u,['createdBy'=>$createdBy,'sport'=>$sport]);
  }
  /** The material route (GET ?t, k, s (poster: sm|lg), v): the file or text, or the same 404 for every refusal (see the class comment). */
  public static function serve(RouteContext $ctx):never {
   $missing=static fn()=>throw new AppError('Turniej nie jest dostępny.',404);
   $id=$ctx->query('t');$k=$ctx->query('k');$s=$ctx->query('s');$v=$ctx->query('v');
   if(!is_string($id)||!preg_match(self::ID,$id)||!in_array($k,self::KINDS,true)||!is_string($v)||!preg_match('/^[0-9a-f]{12}$/D',$v)||($k==='poster'?!in_array($s,['sm','lg'],true):$s!==null))$missing();
-  $q=$ctx->pdo()->prepare('SELECT t.name,t.status,t.hidden_by,t.created_by,t.materials,u.role,u.active,u.organizer_blocked_at FROM tournaments t LEFT JOIN users u ON u.id=t.created_by WHERE t.id=?');
+  $q=$ctx->pdo()->prepare('SELECT t.name,t.status,t.sport,t.hidden_by,t.created_by,t.materials,u.role,u.active,u.organizer_blocked_at FROM tournaments t LEFT JOIN users u ON u.id=t.created_by WHERE t.id=?');
   $q->execute([$id]);$t=$q->fetch(PDO::FETCH_ASSOC);$q->closeCursor();if(!$t)$missing();
   $meta=self::meta($k,self::decode($t['materials'])[$k]??null,false);$view=self::view([$k=>$meta])[$k]??null;
   if(!$meta||!$view||!hash_equals($view['v'],$v))$missing();
   $public=$t['status']!=='draft'&&$t['hidden_by']===null&&!($t['role']==='member'&&($t['organizer_blocked_at']!==null||(int)$t['active']!==1));
-  if(!$public&&!self::managedBy($ctx,$t['created_by']))$missing();
+  if(!$public&&!self::managedBy($ctx,$t['created_by'],$t['sport']))$missing();
   $etag='"'.$v.($k==='poster'?'-'.$s:'').'"';
   $headers=['Cache-Control: '.($public?'public':'private').', max-age=31536000, immutable','ETag: '.$etag,'X-Content-Type-Options: nosniff','Cross-Origin-Resource-Policy: same-origin'];
   $match=array_map('trim',explode(',',(string)($_SERVER['HTTP_IF_NONE_MATCH']??'')));
