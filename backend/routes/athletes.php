@@ -72,7 +72,7 @@ return [
  }],
  'athlete-entry'=>['method'=>'POST','auth'=>'session','user'=>'member','max'=>4096,'handler'=>function(RouteContext $ctx)use($config,$fields,$run,$entryLimit,$view,$correction):array{
   $c=$config($ctx);$entryLimit($ctx,$c);
-  if(!Access::of($ctx->pdo(),$ctx->user(),$c)['full']&&!$correction($ctx))throw new ApiError('Zgłoszenia do turniejów wymagają aktywnego konta.',402);
+  if(!Access::of($ctx->pdo(),$ctx->user(),$c,null,Access::tournamentSport($ctx->pdo(),$c,$ctx->input('tournamentId')))['full']&&!$correction($ctx))throw new ApiError('Zgłoszenia do turniejów wymagają aktywnego konta.',402);
   $r=$run($ctx,$c,Actors::of($ctx->pdo(),$ctx->user()),'entry.self',$fields($ctx->body,['tournamentId','profileId','events','weight','height','gradeType','grade','saveToProfile','update']));
   $entry=null;foreach($view($ctx,$c)['entries'] as $e)if($e['profileId']===$r['id']&&$e['tournament']['id']===$r['tournamentId'])$entry=$e;
   return ['ok'=>true,'entry'=>$entry];

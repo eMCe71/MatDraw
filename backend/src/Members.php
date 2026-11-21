@@ -317,7 +317,7 @@ final class Members {
   $page=$in['page']??1;$page=is_int($page)&&$page>=1&&$page<=100000?$page:1;
   $owner=$in['ownerOf']??null;if($owner!==null&&(!is_string($owner)||!preg_match('/^[A-Za-z0-9_-]{1,40}$/D',$owner)))throw new AppError('Niepoprawny formularz.',400);
   $sql="SELECT u.id,u.email,u.active,u.organizer,u.organizer_blocked_at,u.organizer_trusted_at,(SELECT COUNT(*) FROM tournaments t WHERE t.created_by=u.id) AS t_count,(SELECT COUNT(*) FROM tournaments t WHERE t.created_by=u.id AND t.event_date>=? AND t.hidden_by IS NULL) AS t_upcoming,EXISTS(SELECT 1 FROM profiles pr WHERE pr.owner_user_id=u.id AND pr.archived=0) AS athlete,
-   p.username,p.first_name,p.last_name,p.country,p.created_at,p.last_login_at,b.user_id AS b_user,b.billing_exempt,b.exempt_reason,b.exempt_until,b.livemode,b.sub_status,b.current_period_start,b.current_period_end,b.cancel_at_period_end,b.sync_error,b.stripe_redact_pending
+   p.username,p.first_name,p.last_name,p.country,p.created_at,p.last_login_at,b.user_id AS b_user,b.billing_exempt,b.exempt_reason,b.exempt_by,b.exempt_until,b.livemode,b.sub_status,b.current_period_start,b.current_period_end,b.cancel_at_period_end,b.sync_error,b.stripe_redact_pending
    FROM users u LEFT JOIN user_profiles p ON p.user_id=u.id LEFT JOIN billing_accounts b ON b.user_id=u.id WHERE u.role='member' AND b.deleted_at IS NULL".($owner!==null?' AND u.id=(SELECT t.created_by FROM tournaments t WHERE t.id=?)':'');
   $params=$owner!==null?[date('Y-m-d'),$owner]:[date('Y-m-d')];
   if($q!==''){
@@ -329,12 +329,13 @@ final class Members {
   }
   $st=$pdo->prepare($sql.' ORDER BY p.created_at DESC,u.id');$st->execute($params);$rows=$st->fetchAll(PDO::FETCH_ASSOC);
   $cfg=array_replace($c,['billing_enforce'=>true]);$now=time();$items=[];
+  $types=Access::memberTypes($pdo,array_values(array_map(fn($r)=>(string)$r['id'],$rows)),$cfg);
   foreach($rows as $r){
-   $billing=$r['b_user']===null?null:$r;$a=Access::compute($billing,['id'=>$r['id'],'role'=>'member'],$cfg,$now);
+   $billing=$r['b_user']===null?null:$r;$a=Access::compute($billing,['id'=>$r['id'],'role'=>'member']+(isset($types[(string)$r['id']])?['types'=>$types[(string)$r['id']]]:[]),$cfg,$now);
    $exempt=$a['state']==='free';$sub=Access::subStatus($billing,$c);
    $problem=in_array($a['state'],['past_due','processing'],true)||$sub==='unpaid'||!empty($r['stripe_redact_pending'])||($r['sync_error']??null)!==null;
    $caps=self::caps($r);$free=!empty($r['billing_exempt'])&&$r['exempt_reason']==='free-signup';$tournaments=(int)$r['t_count'];$upcoming=(int)$r['t_upcoming'];
-   $keep=match($filter){'paid'=>in_array($a['state'],['active','ending','past_due'],true),'free'=>in_array($a['state'],['free','grace'],true),'none'=>in_array($a['state'],['none','ended'],true),'problem'=>$problem,
+   $keep=match($filter){'paid'=>in_array($a['state'],['active','ending','past_due'],true),'free'=>in_array($a['state'],['free','partial','grace'],true),'none'=>in_array($a['state'],['none','ended'],true),'problem'=>$problem,
     'organizers'=>!empty($r['organizer'])||$caps['organizerBlocked'],'organizers-pending'=>$caps['organizer']&&!$caps['organizerTrusted']&&!empty($r['active']),'athletes'=>$caps['athlete'],'free-signup'=>$free,default=>true};
    if($keep)$items[]=['id'=>$r['id'],'email'=>$r['email'],'username'=>$r['username'],'name'=>trim(($r['first_name']??'').' '.($r['last_name']??'')),'country'=>$r['country'],
     'createdAt'=>$r['created_at']===null?null:(int)$r['created_at'],'lastLoginAt'=>$r['last_login_at']===null?null:(int)$r['last_login_at'],'active'=>(bool)$r['active'],

@@ -17,6 +17,11 @@ use PDO;
  * account type gains an ability the code was not built for. Without a stored matrix every answer is the behaviour of the
  * release before the panel (a fresh deploy changes nothing).
  *
+ * One column is not an ability: billing.required ("Płatne konto", per discipline like the others) says which account types
+ * need a subscription while payments are required in Ustawienia (Access::compute; one subscription for the whole account,
+ * required for an action in a discipline where the type pays, and by the global set for actions outside any discipline). Its defaults are those of the code before the panel: editor
+ * and club free (OFF_BY_DEFAULT), organizer, athlete, guardian and member paying; the Administrator never pays (fixed off).
+ *
  * Disciplines: permissions with scope 'sport' may differ per martial art (Sports::FEDERATIONS). A sport without its own
  * set inherits the global one; a sport with its own set holds every sport-scoped editable cell. 'global' permissions
  * (athletes, moderation, administration) have one value for all sports.
@@ -30,16 +35,22 @@ use PDO;
 final class Permissions {
  public const TYPES=['admin','editor','club','organizer','athlete','guardian','member','guest'];
  /** permission => scope ('sport': may differ per discipline; 'global': one value). */
- public const PERMS=['tournament.create'=>'sport','tournament.manage'=>'sport','athletes.manage'=>'global','entries.submit'=>'sport','entries.self'=>'sport','chat.write'=>'sport','chat.moderate'=>'global','admin.manage'=>'global'];
+ public const PERMS=['tournament.create'=>'sport','tournament.manage'=>'sport','athletes.manage'=>'global','entries.submit'=>'sport','entries.self'=>'sport','chat.write'=>'sport','chat.moderate'=>'global','admin.manage'=>'global','billing.required'=>'sport'];
  /** Cells the Administrator may switch (on by default). Every other cell is fixed (FIXED). */
  public const EDITABLE=[
-  'editor'=>['tournament.create','tournament.manage','athletes.manage','entries.submit','chat.write'],
-  'club'=>['athletes.manage','entries.submit','chat.write'],
-  'organizer'=>['tournament.create','tournament.manage','athletes.manage','entries.submit','chat.write'],
-  'athlete'=>['entries.self','chat.write'],
-  'guardian'=>['entries.self','chat.write'],
-  'member'=>['chat.write'],
+  'editor'=>['tournament.create','tournament.manage','athletes.manage','entries.submit','chat.write','billing.required'],
+  'club'=>['athletes.manage','entries.submit','chat.write','billing.required'],
+  'organizer'=>['tournament.create','tournament.manage','athletes.manage','entries.submit','chat.write','billing.required'],
+  'athlete'=>['entries.self','chat.write','billing.required'],
+  'guardian'=>['entries.self','chat.write','billing.required'],
+  'member'=>['chat.write','billing.required'],
  ];
+ /**
+  * Editable cells that are switched off by default (every other editable cell defaults to on). billing.required ("Płatne
+  * konto") is not an ability but who needs a subscription while payments are required (Ustawienia, Access::compute):
+  * by default staff accounts (editor, club) are free and every kind of member account pays, as before the panel.
+  */
+ public const OFF_BY_DEFAULT=['editor'=>['billing.required'],'club'=>['billing.required']];
  /** Fixed cells that are switched on; every other fixed cell is off. */
  public const FIXED=['admin'=>['tournament.create','tournament.manage','athletes.manage','entries.submit','chat.write','chat.moderate','admin.manage']];
  public const AUDIT='settings.permissions';
@@ -49,21 +60,31 @@ final class Permissions {
  public static function use(?array $matrix):void{self::$active=$matrix;}
  public static function active():?array{return self::$active;}
  public static function editable(string $type,string $perm):bool{return in_array($perm,self::EDITABLE[$type]??[],true);}
- /** The value of a fixed cell (or the default of an editable one: on). */
- public static function fixed(string $type,string $perm):bool{return self::editable($type,$perm)||in_array($perm,self::FIXED[$type]??[],true);}
+ /** The value of a fixed cell, or the default of an editable one (on unless OFF_BY_DEFAULT). */
+ public static function fixed(string $type,string $perm):bool{return self::editable($type,$perm)?!in_array($perm,self::OFF_BY_DEFAULT[$type]??[],true):in_array($perm,self::FIXED[$type]??[],true);}
  /**
   * Whether account type $type has permission $perm in discipline $sport (null: no particular discipline, the global set)
   * under $matrix (default: the active one).
   */
  public static function allows(string $type,string $perm,?string $sport=null,?array $matrix=null):bool {
   if(!self::editable($type,$perm))return self::fixed($type,$perm);
-  $m=func_num_args()>=4?$matrix:self::$active;if(!is_array($m))return true;
+  $m=func_num_args()>=4?$matrix:self::$active;if(!is_array($m))return self::fixed($type,$perm);
   if($sport!==null&&(self::PERMS[$perm]??null)==='sport'&&isset($m['sports'][$sport][$type][$perm]))return $m['sports'][$sport][$type][$perm]===true;
-  return ($m['global'][$type][$perm]??true)===true;
+  return ($m['global'][$type][$perm]??self::fixed($type,$perm))===true;
  }
  /** Whether any of the types $types allows $perm (a member with several kinds of account: the abilities add up). */
  public static function any(array $types,string $perm,?string $sport=null,?array $matrix=null):bool {
   foreach($types as $t)if(func_num_args()>=4?self::allows($t,$perm,$sport,$matrix):self::allows($t,$perm,$sport))return true;
+  return false;
+ }
+ /**
+  * Whether an account with the types $types needs a subscription in discipline $sport (null: an action outside any
+  * discipline, the global set) while payments are required (column "Płatne konto", $matrix: the effective configuration's
+  * 'permissions', null = defaults): it pays when any of its types pays, so taking on a second, free kind of account (e.g.
+  * switching the organizer role on) never lifts the payment of the first one.
+  */
+ public static function paid(array $types,?array $matrix,?string $sport=null):bool {
+  foreach($types as $t)if(self::allows($t,'billing.required',$sport,$matrix))return true;
   return false;
  }
  /**
@@ -106,11 +127,11 @@ final class Permissions {
   foreach(self::EDITABLE as $type=>$perms)foreach($perms as $perm){
    if($sport&&self::PERMS[$perm]!=='sport')continue;
    $v=is_array($set)?($set[$type][$perm]??null):null;
-   $out[$type][$perm]=is_bool($v)?$v:($base[$type][$perm]??true);
+   $out[$type][$perm]=is_bool($v)?$v:($base[$type][$perm]??self::fixed($type,$perm));
   }
   return $out;
  }
- /** The full default matrix (every editable cell on, no sport sets). */
+ /** The full default matrix (every editable cell at its default, no sport sets). */
  public static function defaults():array{return ['global'=>self::cells(null,false,null),'sports'=>[]];}
  /** {v, matrix, updatedAt, updatedBy} of the stored data (v 0 and the defaults when nothing is stored). */
  public static function stored(mixed $raw):array {
@@ -158,11 +179,11 @@ final class Permissions {
  /** A short code of the change for the history (admin-permissions.js permissionsNote shows it in words): "editor.tournament.create=0, karate=own, judo=inherit, karate organizer.chat.write=0". */
  public static function diff(array $old,array $new):string {
   $out=[];
-  foreach($new['global'] as $type=>$perms)foreach($perms as $perm=>$v)if(($old['global'][$type][$perm]??true)!==$v)$out[]=$type.'.'.$perm.'='.($v?1:0);
+  foreach($new['global'] as $type=>$perms)foreach($perms as $perm=>$v)if(($old['global'][$type][$perm]??self::fixed($type,$perm))!==$v)$out[]=$type.'.'.$perm.'='.($v?1:0);
   foreach(array_keys(Sports::FEDERATIONS) as $slug){
    $a=$old['sports'][$slug]??null;$b=$new['sports'][$slug]??null;
    if($a===null&&$b!==null)$out[]=$slug.'=own';elseif($a!==null&&$b===null)$out[]=$slug.'=inherit';
-   elseif($a!==null&&$b!==null)foreach($b as $type=>$perms)foreach($perms as $perm=>$v)if(($a[$type][$perm]??true)!==$v)$out[]=$slug.' '.$type.'.'.$perm.'='.($v?1:0);
+   elseif($a!==null&&$b!==null)foreach($b as $type=>$perms)foreach($perms as $perm=>$v)if(($a[$type][$perm]??self::fixed($type,$perm))!==$v)$out[]=$slug.' '.$type.'.'.$perm.'='.($v?1:0);
   }
   return implode(', ',$out);
  }

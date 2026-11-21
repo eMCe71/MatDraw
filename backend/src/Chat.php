@@ -94,14 +94,14 @@ final class Chat {
   * {id, role, authVersion, full, access, profile (row or null), pwReset, muted: null | true (no end) | int (until)}.
   */
  public static function viewer(PDO $pdo,string $userId,array $c,int $now,bool $posting=false):?array {
-  $q=$pdo->prepare('SELECT u.id,u.club_id,u.email,u.role,u.active,u.password_hash,u.auth_version,b.user_id AS b_user,b.billing_exempt,b.exempt_until,b.livemode,b.sub_status,b.current_period_start,b.current_period_end,b.cancel_at_period_end'
+  $q=$pdo->prepare('SELECT u.id,u.club_id,u.email,u.role,u.active,u.password_hash,u.auth_version,b.user_id AS b_user,b.billing_exempt,b.exempt_by,b.exempt_until,b.livemode,b.sub_status,b.current_period_start,b.current_period_end,b.cancel_at_period_end'
    .($posting?',p.user_id AS p_user,p.public_id,p.first_name,p.last_name,p.username,p.country,p.sports,p.pw_reset_at,m.user_id AS m_user,m.until_at':'')
    .' FROM users u LEFT JOIN billing_accounts b ON b.user_id=u.id'.($posting?' LEFT JOIN user_profiles p ON p.user_id=u.id LEFT JOIN chat_mutes m ON m.user_id=u.id':'').' WHERE u.id=?');
   $q->execute([$userId]);$r=$q->fetch(PDO::FETCH_ASSOC);$q->closeCursor();
   if(!$r||!(int)$r['active'])return null;
   $u=Accounts::fromRow($r);
-  $row=$r['b_user']===null?null:array_intersect_key($r,array_flip(['billing_exempt','exempt_until','livemode','sub_status','current_period_start','current_period_end','cancel_at_period_end']));
-  $access=Access::compute($row,$u,$c,$now);
+  $row=$r['b_user']===null?null:array_intersect_key($r,array_flip(['billing_exempt','exempt_by','exempt_until','livemode','sub_status','current_period_start','current_period_end','cancel_at_period_end']));
+  $access=Access::compute($row,Access::withTypes($pdo,$u,$c),$c,$now);
   $v=['id'=>$u['id'],'role'=>$u['role'],'authVersion'=>$u['authVersion'],'full'=>$access['full'],'access'=>$access];
   if($posting){
    $v['profile']=$r['p_user']===null?null:array_intersect_key($r,array_flip(['public_id','first_name','last_name','username','country','sports']));
@@ -370,7 +370,9 @@ final class Chat {
   $d=$settings['data'];
   if(!$d['on']){Routes::retryAfter(300);throw new ApiError('Czat jest chwilowo wyłączony. Spróbuj później.',503,['code'=>'chat_off']);}
   if(!$viewer)throw new AppError('Zaloguj się ponownie.',401);
-  if(!$viewer['full'])throw new ApiError('Ta funkcja wymaga aktywnej subskrypcji.',402);
+  // Payments per discipline (Access::varies): the subscription is checked below for the discipline of the channel.
+  $varies=Access::varies($c);
+  if(!$varies&&!$viewer['full'])throw new ApiError('Ta funkcja wymaga aktywnej subskrypcji.',402);
   if(!Accounts::profileComplete($viewer['profile']))throw new AppError('Uzupełnij profil, aby pisać na czacie.',403);
   if($viewer['pwReset'])throw new AppError('Najpierw zmień hasło tymczasowe.',403);
   if($viewer['muted']!==null)throw new ApiError('Moderator wstrzymał Twoje pisanie.',403,['until'=>is_int($viewer['muted'])?$viewer['muted']:null]);
@@ -379,6 +381,7 @@ final class Chat {
   $state=self::visibleFor($channel,$t,$viewer,$today,$grace);
   if($state===null)throw new AppError('Ten czat nie istnieje.',404);
   if($state!=='open')throw new AppError('Ten czat jest tylko do odczytu.',409);
+  if($varies&&!Access::of($pdo,['id'=>$viewer['id'],'role'=>$viewer['role']],$c,$now,self::sportOf($channel,$t))['full'])throw new ApiError('Ta funkcja wymaga aktywnej subskrypcji.',402);
   if(!self::mayWrite($pdo,$viewer,$channel,$t))throw new AppError('Administrator wyłączył pisanie na tym czacie dla Twojego rodzaju konta.',403);
   $body=self::body($in['b']??null);
   $cid=$in['cid']??null;if(!is_string($cid)||!preg_match('/^[A-Za-z0-9_-]{22}$/D',$cid))throw new AppError('Niepoprawny formularz.',400);
@@ -413,9 +416,11 @@ final class Chat {
   * of a lobby channel its Sports::LOBBY entry. A member account is every kind it is (organizer, athlete, guardian, or a
   * plain member) and may write when any of them may (Actors::of: two queries by key, only while a matrix is stored).
   */
+ /** The discipline of a channel: its tournament's, a lobby's own, or none (the general lobby). */
+ private static function sportOf(array $channel,?array $t):?string{return $t!==null?Sports::of($t):(Sports::LOBBY[(string)($channel['slug']??'')][0]??null);}
  private static function mayWrite(PDO $pdo,array $viewer,array $channel,?array $t):bool {
   if(Permissions::active()===null||($viewer['role']??null)==='admin')return true;
-  $sport=$t!==null?Sports::of($t):(Sports::LOBBY[(string)($channel['slug']??'')][0]??null);
+  $sport=self::sportOf($channel,$t);
   if(($viewer['role']??null)!=='member')return Permissions::allows((string)$viewer['role'],'chat.write',$sport);
   $a=Actors::of($pdo,['id'=>$viewer['id']]);$rel=array_column(array_filter($a['athletes'],fn($x)=>!$x['archived']),'relation');
   return Permissions::any(Permissions::types('member',$a['caps']['organizer'],$rel),'chat.write',$sport);

@@ -4,7 +4,10 @@
 // disciplines and global permissions in a discipline set are refused (400) and write nothing; a save stores the matrix under the
 // key 'permissions' of the app_settings row without touching the settings version, writes the history line settings.permissions
 // and takes effect on the next command (the editor cannot create tournaments, in one discipline or everywhere); a stale version is
-// refused (409 code stale); the workspace carries the matrix once one is stored. The row is removed afterwards.
+// refused (409 code stale); the workspace carries the matrix once one is stored. The column "Płatne konto" (billing.required) under
+// payments required by config.php: by default an organizer without a subscription is behind the paywall; a free kind of account
+// gets full access; an organizer free only in BJJ has partial access and creates tournaments there but gets 402 in karate. The row
+// is removed afterwards.
 import test,{before,after} from 'node:test';
 import assert from 'node:assert/strict';
 import {Client,base,fixture} from './helpers/http-client.mjs';
@@ -74,4 +77,31 @@ test('a save takes effect on the next command; the settings version stays; histo
  const v2=await save({version:1,global:defaults().global,sports:{}});assert.equal(v2.version,2);assert.deepEqual(v2.sports,{});
  assert.equal(audit().slice(-1)[0].note,'karate=inherit');
  await editor.load();await editor.cmd('tournament.save',tour('karate','Uprawnienia po'));
+});
+
+test('"Płatne konto": the account type decides who needs a subscription, per discipline; the default is the rule before the panel',{skip},async()=>{
+ const tag=`${process.pid}.${Date.now()}`;
+ const org=fixture('member',{email:`prm.org.${tag}@test.example`,password:'TestPassword2026!',profile:true});fixture('domain-organizer',{userId:org.id,organizer:true,trusted:true});
+ const plain=fixture('member',{email:`prm.plain.${tag}@test.example`,password:'TestPassword2026!',profile:true});
+ const o=new Client();await o.login(org.email);const p=new Client();await p.login(plain.email);
+ const access=async c=>{const r=await c.req('me');assert.equal(r.status,200,JSON.stringify(r.data));return r.data.access.state;};
+ const create=async(sport,status)=>{await o.load();const r=await o.req('command',{type:'tournament.save',payload:tour(sport,'Płatne '+sport),expectedRevision:o.data.revision});assert.equal(r.status,status,JSON.stringify(r.data));return r;};
+ // No matrix stored: members without a subscription pay, as before.
+ assert.equal(await access(o),'none');assert.equal(await access(p),'none');
+ assert.equal((await create('bjj',402)).data.error,'Ta funkcja wymaga aktywnej subskrypcji.');
+ // Plain members free everywhere; organizers free only in BJJ.
+ const m=defaults();m.global.member['billing.required']=false;
+ m.sports.bjj={};for(const [type,perms] of Object.entries(m.global))for(const [perm,v] of Object.entries(perms))if(perm!=='athletes.manage')(m.sports.bjj[type]??={})[perm]=v;
+ m.sports.bjj.organizer['billing.required']=false;
+ const v=await view();const saved=await save({version:v.version,global:m.global,sports:m.sports});
+ assert.equal(saved.sports.bjj.organizer['billing.required'],false);assert.equal(saved.global.organizer['billing.required'],true);
+ assert.match(audit().slice(-1)[0].note,/member\.billing\.required=0/);
+ assert.equal(await access(p),'free');assert.equal(await access(o),'partial');
+ await create('bjj',200);
+ assert.equal((await create('karate',402)).data.error,'Ta funkcja wymaga aktywnej subskrypcji.');
+ // The Administrator's fixed cell cannot be sent.
+ await save({version:saved.version,global:{admin:{'billing.required':true}},sports:{}},400);
+ // Back to the defaults.
+ await save({version:saved.version,global:defaults().global,sports:{}});
+ assert.equal(await access(o),'none');assert.equal(await access(p),'none');
 });

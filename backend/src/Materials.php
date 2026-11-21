@@ -276,8 +276,10 @@ final class Materials {
  private static function writer(RouteContext $ctx,string $id,bool $paid):?array {
   $pdo=$ctx->pdo();$c=$ctx->config;$u=$ctx->user();$member=$u['role']==='member';$actor=$u;
   if($member){$actor=Actors::of($pdo,$u);if(!$actor['caps']['organizer'])throw new AppError('Brak uprawnień.',403);Auth::stepUp($c);}
-  if($paid&&!Access::of($pdo,$u,$c)['full'])throw new ApiError('Ta funkcja wymaga aktywnej subskrypcji.',402);
+  // One cheap global check first (as before); with per-discipline payments (Access::varies) the tournament's discipline decides.
+  if($paid&&!Access::varies($c)&&!Access::of($pdo,$u,$c)['full'])throw new ApiError('Ta funkcja wymaga aktywnej subskrypcji.',402);
   $q=$pdo->prepare('SELECT created_by,sport FROM tournaments WHERE id=?');$q->execute([$id]);$row=$q->fetch(PDO::FETCH_ASSOC);$q->closeCursor();
+  if($paid&&Access::varies($c)&&!Access::of($pdo,$u,$c,null,$row===false?null:Sports::of($row))['full'])throw new ApiError('Ta funkcja wymaga aktywnej subskrypcji.',402);
   if($row===false)throw $member?new AppError('Turniej nie jest dostępny.',404):new AppError('Turniej nie istnieje.',404);
   if(!Domain::manages($actor,['createdBy'=>$row['created_by'],'sport'=>$row['sport']]))throw $member?new AppError('Turniej nie jest dostępny.',404):new AppError('Możesz edytować tylko własne turnieje.',403);
   return $member?$actor:null;

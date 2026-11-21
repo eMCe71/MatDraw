@@ -117,7 +117,7 @@ try {
   if(!$actor['caps']['organizer']||!in_array($p['type'],Domain::ORGANIZER_TYPES,true))throw new AppError('Brak uprawnień.',403);
   Auth::stepUp($config);
   organizer_limit($pdo,$config,'organizer-command-minute',$u['id'],60,60);organizer_limit($pdo,$config,'organizer-command-hour',$u['id'],1200,3600);
-  if(!in_array($p['type'],['entry.remove','profile.forget'],true)&&!Access::of($pdo,$u,$config)['full'])throw new ApiError('Ta funkcja wymaga aktywnej subskrypcji.',402);
+  if(!in_array($p['type'],['entry.remove','profile.forget'],true)&&!Access::of($pdo,$u,$config,null,Access::commandSport($pdo,$config,$p['type'],$p['payload']))['full'])throw new ApiError('Ta funkcja wymaga aktywnej subskrypcji.',402);
   $budget=!MemberTx::exempt($p['type']);if($budget)MemberTx::check($pdo,$config,$u['id']);
   $out=(new Repository($pdo))->transaction(function(array &$db)use($pdo,$p,$u){
    // The role again under the workspace lock: a block by the Administrator or the person's own switch-off committed since Actors::of above wins.
@@ -129,7 +129,7 @@ try {
   Routes::respond($out);
  }
  // Staff without full access only change their own password (402 otherwise).
- if($p['type']!=='account.password'&&!Access::of($pdo,$u,$config)['full'])throw new ApiError('Ta funkcja wymaga aktywnej subskrypcji.',402);
+ if($p['type']!=='account.password'&&!Access::of($pdo,$u,$config,null,Access::commandSport($pdo,$config,$p['type'],$p['payload']))['full'])throw new ApiError('Ta funkcja wymaga aktywnej subskrypcji.',402);
  $out=(new Repository($pdo))->transaction(function(array &$db)use($p,$pdo){
   $u=Auth::current($db);$before=$db;$result=Domain::execute($db,$u['id'],$p['type'],$p['payload'],$p['expectedRevision']);
   if($u['role']==='admin')admin_audit($pdo,$before,$db,$u['id'],$p['type'],$p['payload'],$result);

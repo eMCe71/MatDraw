@@ -5,7 +5,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {spawnSync} from 'node:child_process';
-import {TYPES,PERMS,EDITABLE,FIXED,allows,normalize,types,defaults,usePermissions,editable} from '../dist/permissions.js';
+import {TYPES,PERMS,EDITABLE,FIXED,OFF_BY_DEFAULT,allows,normalize,types,defaults,usePermissions,editable,paid} from '../dist/permissions.js';
 import {initialWorkspace,execute,publicWorkspace,canCreateTournament,manages,outsideEntry,managesProfile} from '../dist/workspace.js';
 import {projectAthleteView} from '../dist/athlete-view.js';
 import {SPORT_IDS} from '../dist/sports.js';
@@ -25,7 +25,7 @@ const day=n=>warsawToday(new Date(Date.now()+n*864e5));
 
 test('PHP and JS share the matrix: account types, permissions and their scope, editable and fixed cells, disciplines',{skip},()=>{
  const c=perm({job:'constants'});
- assert.deepEqual(c.types,TYPES);assert.deepEqual(c.perms,PERMS);assert.deepEqual(c.editable,EDITABLE);assert.deepEqual(c.fixed,FIXED);assert.deepEqual(c.sports,SPORT_IDS);
+ assert.deepEqual(c.types,TYPES);assert.deepEqual(c.perms,PERMS);assert.deepEqual(c.editable,EDITABLE);assert.deepEqual(c.fixed,FIXED);assert.deepEqual(plain(c.offByDefault),OFF_BY_DEFAULT);assert.deepEqual(c.sports,SPORT_IDS);
  // Every editable cell belongs to a known type and permission; the Administrator and guests have no editable cell (no lock-out).
  for(const [type,perms] of Object.entries(EDITABLE)){assert.ok(TYPES.includes(type));for(const p of perms)assert.ok(PERMS[p],p);}
  assert.ok(!EDITABLE.admin&&!EDITABLE.guest);
@@ -43,12 +43,60 @@ test('allows: no stored matrix = the behaviour before the panel; fixed cells nev
   assert.deepEqual(js,ph);
  }
  // Without a matrix every editable cell is on and the fixed ones keep their values: what the code allowed before the panel.
- for(const [t,p] of cases.map(([t,p])=>[t,p]))assert.equal(allows(t,p,null,null),editable(t,p)||(FIXED[t]||[]).includes(p),t+' '+p);
+ for(const [t,p] of cases.map(([t,p])=>[t,p]))assert.equal(allows(t,p,null,null),editable(t,p)?!(OFF_BY_DEFAULT[t]||[]).includes(p):(FIXED[t]||[]).includes(p),t+' '+p);
  assert.equal(allows('admin','tournament.manage',null,hostile),true);assert.equal(allows('admin','admin.manage','karate',hostile),true);assert.equal(allows('guest','chat.write',null,hostile),false);
  assert.equal(allows('editor','tournament.create',null,m),false);assert.equal(allows('editor','tournament.create','karate',m),true,'karate has its own set');
  assert.equal(allows('editor','tournament.create','judo',m),false,'judo inherits the global set');
  assert.equal(allows('club','athletes.manage','karate',m),true,'a global permission ignores the discipline');
  assert.equal(allows('athlete','entries.self','karate',m),false);assert.equal(allows('athlete','entries.self','judo',m),true);
+});
+
+test('column "Paid account": defaults are the rule before the panel; Access::compute decides by account type, an individual decision wins',{skip},()=>{
+ // Defaults: staff free, every kind of member account paying, the Administrator and guests fixed free.
+ for(const [type,want] of Object.entries({admin:false,editor:false,club:false,organizer:true,athlete:true,guardian:true,member:true,guest:false}))assert.equal(allows(type,'billing.required',null,null),want,type);
+ assert.equal(defaults().global.editor['billing.required'],false);assert.equal(defaults().global.member['billing.required'],true);
+ const m=off({editor:{'billing.required':true},organizer:{'billing.required':false},member:{'billing.required':false}});
+ const hostile={...m,global:{...m.global,admin:{'billing.required':true}}};
+ const lists=[['admin'],['editor'],['club'],['organizer'],['athlete'],['organizer','athlete'],['member'],['guest']];
+ for(const matrix of [null,m,hostile])assert.deepEqual(perm({job:'paid',matrix,cases:lists}),lists.map(l=>paid(l,matrix)),'paid() PHP = JS');
+ assert.deepEqual(lists.map(l=>paid(l,m)),[false,true,false,false,true,true,false,false]);
+ const now=1_800_000_000,cfg={billing_enforce:true,billing_mode:'test',billing_grace_days:7},M={...cfg,permissions:m};
+ const pm=off({member:{'billing.required':false}});pm.sports.bjj={};pm.sports.karate={};
+ for(const type of Object.keys(EDITABLE))for(const p of EDITABLE[type])if(PERMS[p]==='sport'){(pm.sports.bjj[type]??={})[p]=pm.global[type][p];(pm.sports.karate[type]??={})[p]=pm.global[type][p];}
+ pm.sports.bjj.athlete['billing.required']=false;pm.sports.bjj.editor['billing.required']=true;pm.sports.karate.member['billing.required']=true;
+ const P={...cfg,permissions:pm};
+ const user=(role,typesList)=>({id:'u1',role,...(typesList?{types:typesList}:{})});
+ const checkout={billing_exempt:0,exempt_by:null,exempt_until:null,livemode:0,sub_status:'none'};
+ const cases=[
+  ['no matrix: editor without a row is free',null,user('editor'),cfg,'free'],
+  ['no matrix: club without a row is free',null,user('club'),cfg,'free'],
+  ['no matrix: a plain member pays',null,user('member',['member']),cfg,'none'],
+  ['no matrix: an organizer pays even with types loaded',null,user('member',['organizer']),cfg,'none'],
+  ['matrix: editor marked paid needs a subscription',null,user('editor'),M,'none'],
+  ['matrix: club keeps its default (free)',null,user('club'),M,'free'],
+  ['matrix: plain member marked free',null,user('member',['member']),M,'free'],
+  ['matrix: organizer free with a checkout row',checkout,user('member',['organizer']),M,'free'],
+  ['matrix: organizer who is also an athlete pays (athlete paid)',null,user('member',['organizer','athlete']),M,'none'],
+  ['matrix: kinds not loaded = pays, as before',null,user('member'),M,'none'],
+  ['matrix: "Wymagaj płatności" for this person wins',{...checkout,exempt_by:'u_admin'},user('member',['member']),M,'none'],
+  ['matrix: a running subscription still shows as active',{...checkout,sub_status:'active',current_period_end:now+86400,cancel_at_period_end:0},user('member',['member']),M,'active'],
+  ['matrix: an expired individual exemption is a decision for this person',{...checkout,billing_exempt:1,exempt_by:'u_admin',exempt_until:now-30*86400},user('member',['member']),M,'none'],
+  ['matrix: payments off in Ustawienia, nobody pays',null,user('editor'),{...M,billing_enforce:false},'open'],
+  ['hostile matrix: the Administrator never pays',null,user('admin'),{...cfg,permissions:hostile},'staff'],
+  // Per discipline: athletes pay in general but not in BJJ; plain members are free in general but pay in karate.
+  ['per discipline: athlete in BJJ is free',null,user('member',['athlete']),P,'free','bjj'],
+  ['per discipline: athlete in karate pays',null,user('member',['athlete']),P,'none','karate'],
+  ['per discipline: athlete outside any discipline has partial (full) access',null,user('member',['athlete']),P,'partial'],
+  ['per discipline: plain member in karate pays',null,user('member',['member']),P,'none','karate'],
+  ['per discipline: plain member in judo (inherits the free global set)',null,user('member',['member']),P,'free','judo'],
+  ['per discipline: organizer pays everywhere (no own set frees him)',null,user('member',['organizer']),P,'none'],
+  ['per discipline: athlete with a subscription is active in karate',{...checkout,sub_status:'active',current_period_end:now+86400,cancel_at_period_end:0},user('member',['athlete']),P,'active','karate'],
+  ['per discipline: editor without a row free in judo, pays in BJJ',null,user('editor'),P,'none','bjj'],
+  ['per discipline: editor outside disciplines is partial',null,user('editor'),P,'partial'],
+ ];
+ const out=perm({job:'access',cases:cases.map(([,row,u,c,,sport])=>({row,user:u,cfg:c,now,sport:sport??null}))});
+ cases.forEach(([name,,,,state],i)=>{assert.equal(out[i].state,state,name);assert.equal(out[i].full,!['none','ended','processing'].includes(state),name);});
+ assert.deepEqual(perm({job:'varies',cases:[cfg,M,P,{...P,billing_enforce:false}]}),[false,false,true,false]);
 });
 
 test('normalize, account types of a member and the history note agree in PHP and JS',{skip},()=>{

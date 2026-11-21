@@ -3,6 +3,9 @@
  * Tabs: "Wszystkie dyscypliny" (the global set) and one tab per discipline (sports.js); a discipline uses the global set until the
  * Administrator gives it its own set; then only the permissions that may differ per discipline are edited there.
  * Fixed cells (the Administrator's own abilities, abilities the code was not built for) are drawn locked and are never sent.
+ * The last column "Paid account" (billing.required) is not an ability: who needs a subscription while payments are required in
+ * Ustawienia (Access::compute); per discipline like the others (one subscription per account, required for actions in a
+ * discipline where the account type pays), the Administrator is fixed free.
  * Routes: GET admin-permissions {version, global, sports, updatedAt, updatedBy, sportsList}; POST admin-permissions-save
  * {version, global, sports} → the same view (409 code stale: reloaded). Every API value reaches the DOM through h`…`.
  * The plain functions up to "Page" are pure and tested in tests/permissions.test.mjs. */
@@ -19,13 +22,15 @@ const TYPE_TEXT={admin:[()=>T('Administrator'),()=>T('Pełny dostęp. Nie można
  member:[()=>T('Członek'),()=>T('Konto bez roli organizatora i bez profilu zawodnika')],guest:[()=>T('Gość'),()=>T('Osoba niezalogowana')]};
 const PERM_TEXT={'tournament.create':()=>T('Tworzy turnieje'),'tournament.manage':()=>T('Prowadzi turnieje'),'athletes.manage':()=>T('Dodaje i edytuje zawodników'),
  'entries.submit':()=>T('Zgłasza zawodników do turniejów'),'entries.self':()=>T('Zgłasza siebie lub dziecko'),'chat.write':()=>T('Pisze na czacie'),
- 'chat.moderate':()=>T('Moderuje czat'),'admin.manage':()=>T('Konta, kluby, ustawienia i uprawnienia')};
-const PERM_HINT={'tournament.manage':()=>T('edycja, kontrola startowa, losowania, wyniki')};
+ 'chat.moderate':()=>T('Moderuje czat'),'admin.manage':()=>T('Konta, kluby, ustawienia i uprawnienia'),'billing.required':()=>T('Płatne konto')};
+const PERM_HINT={'tournament.manage':()=>T('edycja, kontrola startowa, losowania, wyniki'),'billing.required':()=>T('wymaga subskrypcji, gdy płatności są włączone')};
 /** The scope of an allowed cell, under its checkbox (what "allowed" means for this account type). */
 const CELL_HINT={'admin|tournament.manage':()=>T('wszystkie'),'admin|athletes.manage':()=>T('wszyscy'),'admin|entries.submit':()=>T('wszystkie'),
  'editor|tournament.manage':()=>T('własne'),'editor|athletes.manage':()=>T('własni'),'club|athletes.manage':()=>T('swój klub'),'club|entries.submit':()=>T('swój klub'),
  'organizer|tournament.create':()=>T('limit 3 na dobę'),'organizer|tournament.manage':()=>T('własne'),'organizer|athletes.manage':()=>T('własni'),'organizer|entries.submit':()=>T('własni'),
  'athlete|entries.self':()=>T('siebie'),'guardian|entries.self':()=>T('dziecko')};
+/** The column drawn apart from the abilities (not an ability: who pays). */
+const BILLING='billing.required';
 export const typeName=type=>(TYPE_TEXT[type]||[()=>type])[0]();
 export const permName=perm=>(PERM_TEXT[perm]||(()=>perm))();
 const sportName=slug=>T(SPORTS.find(s=>s.id===slug)?.label??slug);
@@ -38,7 +43,7 @@ export function draftOf(view){return normalize({global:view?.global??{},sports:v
 export function cellValue(draft,type,perm,sport='all'){
  if(!editable(type,perm))return fixedValue(type,perm);
  if(sport!=='all'&&PERMS[perm]==='sport'&&draft.sports?.[sport])return draft.sports[sport][type]?.[perm]!==false;
- return draft.global?.[type]?.[perm]!==false;
+ return (draft.global?.[type]?.[perm]??fixedValue(type,perm))===true;
 }
 /** Whether the cell can be switched in tab $sport: editable, and in a discipline tab only sport-scoped cells of a discipline with its own set. */
 export function cellOpen(draft,type,perm,sport='all'){
@@ -101,14 +106,17 @@ function cellView(draft,type,perm,sport){
  const on=cellValue(draft,type,perm,sport),open=cellOpen(draft,type,perm,sport),fixed=!editable(type,perm),hint=on?CELL_HINT[type+'|'+perm]:null;
  const label=T('{type}: {perm}',{type:typeName(type),perm:permName(perm)});
  const why=fixed?T('Stałe, nie można zmienić'):!open?(PERMS[perm]==='global'?T('Wspólne dla wszystkich dyscyplin. Zmień w zakładce „Wszystkie dyscypliny”.'):T('Wybierz „Własny zestaw”, aby zmienić w tej dyscyplinie.')):'';
- return h`<td class="prm-cell${fixed?' is-fixed':''}${!open&&!fixed?' is-inherited':''}"><label class="prm-check" title="${why}"><input type="checkbox" data-prm-act="cell" data-prm-type="${type}" data-prm-perm="${perm}" aria-label="${label}" ${on?'checked':''} ${open?'':'disabled'}>${fixed?h`<span class="prm-lock" aria-hidden="true">🔒</span>`:''}</label>${hint?h`<small class="prm-hint">${hint()}</small>`:''}</td>`;
+ return h`<td class="prm-cell${perm===BILLING?' prm-billing':''}${fixed?' is-fixed':''}${!open&&!fixed?' is-inherited':''}"><label class="prm-check" title="${why}"><input type="checkbox" data-prm-act="cell" data-prm-type="${type}" data-prm-perm="${perm}" aria-label="${label}" ${on?'checked':''} ${open?'':'disabled'}>${fixed?h`<span class="prm-lock" aria-hidden="true">🔒</span>`:''}</label>${hint?h`<small class="prm-hint">${hint()}</small>`:''}</td>`;
 }
 function tableView(draft,sport){
  const perms=Object.keys(PERMS);
- return h`<div class="prm-scroll" tabindex="0" role="region" aria-label="${T('Tabela uprawnień')}"><table class="prm-table"><thead><tr><th scope="col" class="prm-corner">${T('Rodzaj konta')}</th>${perms.map(p=>h`<th scope="col"><span>${permName(p)}</span>${PERM_HINT[p]?h`<small>${PERM_HINT[p]()}</small>`:''}${PERMS[p]==='global'?h`<small class="prm-global">${T('wspólne dla dyscyplin')}</small>`:''}</th>`)}</tr></thead>
+ return h`<div class="prm-scroll" tabindex="0" role="region" aria-label="${T('Tabela uprawnień')}"><table class="prm-table"><thead><tr><th scope="col" class="prm-corner">${T('Rodzaj konta')}</th>${perms.map(p=>h`<th scope="col"${p===BILLING?h` class="prm-billing"`:''}><span>${permName(p)}</span>${PERM_HINT[p]?h`<small>${PERM_HINT[p]()}</small>`:''}${PERMS[p]==='global'?h`<small class="prm-global">${T('wspólne dla dyscyplin')}</small>`:''}</th>`)}</tr></thead>
   <tbody>${TYPES.map(type=>h`<tr><th scope="row"><strong>${typeName(type)}</strong><small>${(TYPE_TEXT[type]||[0,()=>''])[1]()}</small></th>${perms.map(p=>cellView(draft,type,p,sport))}</tr>`)}</tbody></table></div>`;
 }
-const NOTES=[()=>T('Pisanie na czacie wymaga też pełnego dostępu (subskrypcji) i uzupełnionego profilu.'),
+const NOTES=[()=>T('„Płatne konto” decyduje, kto musi mieć subskrypcję, ale tylko wtedy, gdy płatności są włączone w Ustawieniach (tryb rejestracji „Otwarta, płatna” albo „Wyłączona” z wymaganiem płatności). Przy płatnościach wyłączonych nikt nie płaci.'),
+ ()=>T('Subskrypcja jest jedna na całe konto. W dyscyplinie, w której rodzaj konta jest darmowy, wszystko działa bez niej; w płatnej dyscyplinie (zgłoszenia, turnieje, czat turnieju) serwer poprosi o subskrypcję. Profil i czat ogólny działają bez subskrypcji, jeśli konto jest darmowe choć w jednej dyscyplinie.'),
+ ()=>T('Darmowe konto albo „Wymagaj płatności” ustawione konkretnej osobie w panelu Członkowie zawsze wygrywa z ustawieniem jej rodzaju konta. Osoba z kilkoma rodzajami kont płaci, jeśli choć jeden z nich jest płatny. Kto już ma subskrypcję, płaci dalej, dopóki jej nie zatrzymasz.'),
+ ()=>T('Pisanie na czacie wymaga też pełnego dostępu (subskrypcji) i uzupełnionego profilu.'),
  ()=>T('Osoba, która ma kilka ról (np. organizator i rodzic), ma sumę ich uprawnień.'),
  ()=>T('Wyłączenie „Prowadzi turnieje” zabiera też narzędzia w turniejach już utworzonych (kontrola startowa, losowania, wyniki), dopóki nie włączysz go z powrotem.'),
  ()=>T('Wycofanie i poprawka zgłoszenia już złożonego oraz usunięcie własnych danych działają zawsze.'),

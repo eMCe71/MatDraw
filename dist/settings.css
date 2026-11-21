@@ -131,6 +131,8 @@
 .prm-cell.is-fixed .prm-check,.prm-cell.is-inherited .prm-check{cursor:not-allowed}
 .prm-cell.is-fixed{background:#fafbfc}
 .prm-cell.is-inherited input{opacity:.55}
+.prm-table .prm-billing{border-left:2px solid #c9d6e3;background:#fbf8ef}
+.prm-table thead th.prm-billing{background:#f6efdc}
 .prm-lock{font-size:10px;opacity:.6}
 .prm-hint{display:block;font-size:10.5px;color:#5c708a;margin-top:1px}
 .prm-actions{margin-top:2px}

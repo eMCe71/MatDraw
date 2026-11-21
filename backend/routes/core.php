@@ -21,7 +21,7 @@
 // features.materials (me, PLAN-MATERIALY §2.2): {poster, rules}, the largest upload of each kind in bytes (Materials::limits:
 // poster 0 without GD or a writable uploads directory, rules 0 without the directory).
 declare(strict_types=1);
-use MatDraw\{Access,Accounts,Actors,Billing,BillingSync,Capabilities,Chat,ChatModeration,Jobs,Materials,Members,RouteContext,Routes,Settings};
+use MatDraw\{Access,Accounts,Actors,Billing,BillingSync,Capabilities,Chat,ChatModeration,Jobs,Materials,Members,Permissions,RouteContext,Routes,Settings};
 
 /** Avatar mode of this server: 'off' while avatars are disabled or the avatar code is not installed. */
 $avatarMode=static function(array $c):string{
@@ -35,7 +35,7 @@ $noCaps=['organizer'=>false,'organizerBlocked'=>false,'organizerTrusted'=>false,
 return [
  'me'=>['method'=>'GET','auth'=>'peek','user'=>'required','handler'=>function(RouteContext $ctx)use($avatarMode,$signupMode,$noCaps):array{
   $c=$ctx->config;$pdo=$ctx->pdo();$u=$ctx->user();$now=time();
-  $p=Accounts::profile($pdo,$u['id']);$row=Access::row($pdo,$u['id']);$access=Access::compute($row,$u,$c,$now);
+  $p=Accounts::profile($pdo,$u['id']);$row=Access::row($pdo,$u['id']);$access=Access::compute($row,Access::withTypes($pdo,$u,$c),$c,$now);
   $complete=Accounts::profileComplete($p);$mustChange=$p['pw_reset_at']!==null;
   $chat=!Routes::chatOff($c)&&class_exists(Chat::class);$chatOn=$chat;
   if($chat){$data=json_decode((string)$pdo->query('SELECT data FROM chat_settings WHERE id=1')->fetchColumn(),true);$chatOn=!is_array($data)||($data['on']??true)!==false;}
@@ -47,7 +47,7 @@ return [
   // temporary password, mute), then the chat being off (§4.3 order), so the hint names the error the server answers.
   // The forced redirect of §3.10 follows profile.mustChangePassword, which stays true whatever block says.
   $block=!$access['full']?'payment':(!$complete?'profile':($mustChange?'password':($muted?'muted':(!$chatOn?'off':null))));
-  $exempt=$u['role']==='admin'||($row?!empty($row['billing_exempt'])&&($row['exempt_until']===null||(int)$row['exempt_until']>$now):in_array($u['role'],['editor','club'],true));
+  $exempt=$u['role']==='admin'||($row?!empty($row['billing_exempt'])&&($row['exempt_until']===null||(int)$row['exempt_until']>$now):in_array($u['role'],['editor','club'],true)&&!Permissions::paid([$u['role']],$c['permissions']??null));
   $live=$c['billing_mode']==='live';$sameMode=$row&&((int)$row['livemode']===1)===$live;
   $billing=empty($c['billing_enabled'])?['enabled'=>false]:['enabled'=>true,'enforce'=>!empty($c['billing_enforce']),'mode'=>$c['billing_mode'],
    // Billing::currencyFor adds the ongoing subscription and the Admin's currency override (billing-backend); without it, the country rule.
