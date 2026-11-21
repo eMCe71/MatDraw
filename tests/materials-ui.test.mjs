@@ -19,6 +19,9 @@ import {readFile} from 'node:fs/promises';
 import {createRequire} from 'node:module';
 import {extname,join,normalize} from 'node:path';
 import {fileURLToPath} from 'node:url';
+// The static demo's seed (dist/workspace.js) has fixed tournament dates written on 2026-11-10; the browser's clock starts
+// on that day so the demo tournaments stay upcoming whatever day CI runs (time still moves, timers are real).
+const DEMO_NOW=new Date('2026-11-10T12:00:00+01:00');
 
 class MemoryStorage{#m=new Map();get length(){return this.#m.size;}key(i){return [...this.#m.keys()][i]??null;}getItem(k){return this.#m.has(k)?this.#m.get(k):null;}setItem(k,v){this.#m.set(k,String(v));}removeItem(k){this.#m.delete(k);}clear(){this.#m.clear();}}
 globalThis.localStorage??=new MemoryStorage();globalThis.sessionStorage??=new MemoryStorage();
@@ -228,7 +231,7 @@ const PHONE={viewport:{width:393,height:852},deviceScaleFactor:3,isMobile:true,h
 const sleep=ms=>new Promise(r=>setTimeout(r,ms));
 const overflow=page=>page.evaluate(()=>document.documentElement.scrollWidth-document.documentElement.clientWidth);
 async function open(browser,url,options={}){
- const ctx=await browser.newContext({viewport:{width:1440,height:900},locale:'pl-PL',serviceWorkers:'block',...options});
+ const ctx=await browser.newContext({viewport:{width:1440,height:900},locale:'pl-PL',serviceWorkers:'block',...options});await ctx.clock.setSystemTime(DEMO_NOW);
  await ctx.addInitScript(()=>{try{localStorage.setItem('matdraw.language','pl');}catch{}});
  const page=await ctx.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));page.on('console',m=>{if(m.type()==='error')errors.push(m.text());});
  page.on('dialog',d=>{errors.push('dialog '+d.message());d.dismiss();});

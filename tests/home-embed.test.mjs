@@ -9,6 +9,9 @@ import {readFile} from 'node:fs/promises';
 import {createRequire} from 'node:module';
 import {extname,join,normalize} from 'node:path';
 import {fileURLToPath} from 'node:url';
+// The static demo's seed (dist/workspace.js) has fixed tournament dates written on 2026-11-10; the browser's clock starts
+// on that day so the demo tournaments stay upcoming whatever day CI runs (time still moves, timers are real).
+const DEMO_NOW=new Date('2026-11-10T12:00:00+01:00');
 
 const root=fileURLToPath(new URL('../dist/',import.meta.url));
 const app=readFileSync(root+'app.js','utf8'),css=readFileSync(root+'workspace.css','utf8');
@@ -59,7 +62,7 @@ const serve=()=>new Promise(resolve=>{
 test('home page in a browser: sport chooser and switcher, layout, skip links, phone sign-in button, known device, preview tabs, member preview',{skip:!chromium&&'Playwright is not installed',timeout:180000},async()=>{
  // The server is closed also when Chromium cannot start, so no open handle keeps the test process alive.
  const {server,url}=await serve(),browser=await chromium.launch().catch(e=>{server.close();throw e;}),errors=[];
- const open=async(width,height,init,hash='#home?s=taekwondo')=>{const ctx=await browser.newContext({viewport:{width,height},locale:'pl-PL'});if(init)await ctx.addInitScript(init);const page=await ctx.newPage();page.on('pageerror',e=>errors.push(e.message));page.on('console',m=>{if(m.type()==='error')errors.push(m.text());});await page.goto(url+hash);await page.waitForSelector('.home');return {ctx,page};};
+ const open=async(width,height,init,hash='#home?s=taekwondo')=>{const ctx=await browser.newContext({viewport:{width,height},locale:'pl-PL'});await ctx.clock.setSystemTime(DEMO_NOW);if(init)await ctx.addInitScript(init);const page=await ctx.newPage();page.on('pageerror',e=>errors.push(e.message));page.on('console',m=>{if(m.type()==='error')errors.push(m.text());});await page.goto(url+hash);await page.waitForSelector('.home');return {ctx,page};};
  try{
   // First visit without a sport: the chooser of the eight martial arts; a tile opens the sport and the choice is remembered.
   {const {ctx,page}=await open(1440,900,null,'');
@@ -139,7 +142,7 @@ test('home page in a browser: sport chooser and switcher, layout, skip links, ph
    await ctx.close();
   }
   // the module event after the list is (re)painted: the placeholders exist when it fires
-  {const ctx=await browser.newContext({viewport:{width:1440,height:900},locale:'pl-PL'});
+  {const ctx=await browser.newContext({viewport:{width:1440,height:900},locale:'pl-PL'});await ctx.clock.setSystemTime(DEMO_NOW);
    await ctx.route('**/registry.js',async route=>{const res=await route.fetch(),body=await res.text();await route.fulfill({response:res,body:body+"\n;globalThis.__up=[];on('upcoming-painted',d=>globalThis.__up.push([document.querySelectorAll('.upcoming-item [data-chat-count]').length,d.tournaments.length]));"});});
    const page=await ctx.newPage();page.on('pageerror',e=>errors.push(e.message));await page.goto(url+'#home?s=taekwondo');await page.waitForSelector('.upcoming-item');
    const seen=await page.evaluate(()=>globalThis.__up);assert.ok(seen.length>=1&&seen.every(([spans,n])=>n>=1&&spans===n),'upcoming-painted '+JSON.stringify(seen));await ctx.close();}
@@ -185,7 +188,7 @@ test('home chat card at tablet widths: readable join prompt, a usable message li
  const {server,url}=await serve(),browser=await chromium.launch().catch(e=>{server.close();throw e;}),errors=[];
  try{
   for(const sport of ['taekwondo','karate'])for(const lang of ['pl','en'])for(const w of [651,700,768,820,900,1000,1001,1024,1100,1200,1280,1440,1650]){
-   const ctx=await browser.newContext({viewport:{width:w,height:1024},locale:lang==='pl'?'pl-PL':'en-GB'});
+   const ctx=await browser.newContext({viewport:{width:w,height:1024},locale:lang==='pl'?'pl-PL':'en-GB'});await ctx.clock.setSystemTime(DEMO_NOW);
    await ctx.addInitScript(l=>{try{localStorage.setItem('matdraw.language',l);}catch{}},lang);
    const page=await ctx.newPage();page.on('pageerror',e=>errors.push(e.message));
    await page.goto(url+'#home?s='+sport);await page.waitForSelector('.chat-card .chat-tab');
